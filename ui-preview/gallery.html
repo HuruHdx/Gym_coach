@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Gym Coach · UI Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root, [data-skin="court"] {
+      --bg: #F2F3EE;
+      --bg-elevated: #FFFFFF;
+      --ink: #12140F;
+      --ink-muted: #6B7164;
+      --line: #D8DBD0;
+      --accent: #C8F000;
+      --accent-ink: #1A2200;
+      --danger: #E23D2D;
+      --ok: #2F6B3A;
+      --hero-a: #E8ECD8;
+      --hero-b: #F2F3EE;
+      --stripe: rgba(200, 240, 0, 0.22);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --shadow: 0 16px 48px rgba(18, 20, 15, 0.14);
+      --font-display: "Syne", system-ui, sans-serif;
+      --font-body: "Public Sans", system-ui, sans-serif;
+    }
+    [data-skin="cobalt"] {
+      --bg: #EEF1F6;
+      --bg-elevated: #FFFFFF;
+      --ink: #0F1724;
+      --ink-muted: #5B6578;
+      --line: #D2D8E4;
+      --accent: #2F6BFF;
+      --accent-ink: #F4F7FF;
+      --danger: #E23D2D;
+      --ok: #1F7A4C;
+      --hero-a: #DCE6FF;
+      --hero-b: #EEF1F6;
+      --stripe: rgba(47, 107, 255, 0.16);
+    }
+    [data-skin="ember"] {
+      --bg: #F3F0EC;
+      --bg-elevated: #FFFCFA;
+      --ink: #1A1410;
+      --ink-muted: #7A6E64;
+      --line: #E0D6CC;
+      --accent: #FF5A1F;
+      --accent-ink: #FFF8F4;
+      --danger: #C62828;
+      --ok: #2F6B3A;
+      --hero-a: #FFE0D0;
+      --hero-b: #F3F0EC;
+      --stripe: rgba(255, 90, 31, 0.14);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-body);
+      background: #12140f;
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 20px 12px 40px;
+    }
+
+    .gallery-head {
+      max-width: 1100px;
+      margin: 0 auto 18px;
+      color: #c8cbbf;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .gallery-head h1 {
+      font-family: var(--font-display);
+      font-size: 22px;
+      color: #f2f3ee;
+      font-weight: 800;
+    }
+    .gallery-head p { font-size: 13px; opacity: .8; margin-top: 4px; }
+    .skin-switch { display: flex; gap: 6px; flex-wrap: wrap; }
+    .skin-btn {
+      border: 1px solid #3a3d35;
+      background: #1c1e19;
+      color: #d8dbd0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .skin-btn.active { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+    .phones {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 22px;
+      justify-items: center;
+    }
+
+    .phone-wrap { width: min(360px, 100%); }
+    .phone-label {
+      color: #9aa094;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      padding-left: 8px;
+    }
+
+    .stage {
+      width: 100%;
+      height: 720px;
+      background: var(--bg);
+      border-radius: 28px;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 28px 70px rgba(0,0,0,.45);
+      display: flex;
+      flex-direction: column;
+      isolation: isolate;
+      transition: background .25s ease, color .25s ease;
+    }
+    .stage::before {
+      content: "";
+      position: absolute; inset: 0;
+      pointer-events: none;
+      opacity: .045;
+      z-index: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    .screen { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+    .status {
+      display: flex; justify-content: space-between;
+      padding: 12px 20px 2px; font-size: 12px; font-weight: 600;
+    }
+    .topbar { padding: 6px 18px 10px; }
+    .brand {
+      font-family: var(--font-display);
+      font-weight: 800; font-size: 12px;
+      letter-spacing: .08em; text-transform: uppercase;
+      color: var(--ink-muted);
+    }
+    .date-line {
+      font-family: var(--font-display);
+      font-weight: 700; font-size: 26px; letter-spacing: -.02em;
+    }
+    .date-line em {
+      font-style: normal; color: var(--ink-muted);
+      font-size: 15px; font-weight: 600; margin-left: 8px;
+    }
+
+    .scroll {
+      flex: 1; overflow-y: auto; padding: 0 14px 110px;
+      scrollbar-width: none;
+    }
+    .scroll::-webkit-scrollbar { display: none; }
+
+    .section-label {
+      font-size: 11px; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--ink-muted);
+      margin: 6px 0 10px;
+    }
+
+    /* —— hero band (flashier) —— */
+    .hero-band {
+      margin: 0 -14px 14px;
+      padding: 18px 18px 20px;
+      background:
+        linear-gradient(135deg, var(--hero-a), var(--hero-b) 55%, transparent),
+        repeating-linear-gradient(
+          -18deg,
+          transparent,
+          transparent 10px,
+          var(--stripe) 10px,
+          var(--stripe) 11px
+        );
+      border-bottom: 1px solid var(--line);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-band::after {
+      content: "";
+      position: absolute;
+      right: -20px; top: -30px;
+      width: 140px; height: 140px;
+      border: 18px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .hero-kicker {
+      font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--ink-muted); margin-bottom: 6px;
+    }
+    .hero-title {
+      font-family: var(--font-display);
+      font-weight: 800; font-size: 28px; line-height: 1.05;
+      letter-spacing: -.03em; max-width: 12ch;
+    }
+    .hero-sub { margin-top: 8px; font-size: 13px; color: var(--ink-muted); line-height: 1.4; }
+
+    /* —— split ticker —— */
+    .ticker {
+      display: grid; grid-template-columns: 1fr 1px 1fr 1px 1fr;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .ticker .cell { padding: 12px 10px; text-align: center; }
+    .ticker .sep { background: var(--line); }
+    .ticker .n {
+      font-family: var(--font-display);
+      font-weight: 800; font-size: 20px; letter-spacing: -.03em;
+    }
+    .ticker .l { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); margin-top: 2px; }
+
+    /* plan rows with accent rail */
+    .plan-list { display: flex; flex-direction: column; gap: 8px; }
+    .plan-row {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 13px 13px 13px 12px;
+      display: grid;
+      grid-template-columns: 4px 1fr auto;
+      gap: 0 12px;
+      align-items: center;
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease;
+      animation: rise .24s ease-out both;
+    }
+    .plan-row:nth-child(1) { animation-delay: .04s; }
+    .plan-row:nth-child(2) { animation-delay: .08s; }
+    .plan-row:nth-child(3) { animation-delay: .12s; }
+    .plan-row:active { transform: scale(.985); }
+    .rail {
+      width: 4px; height: 78%;
+      background: var(--accent);
+      border-radius: 2px;
+      align-self: center;
+    }
+    .plan-row.done .rail { background: var(--line); }
+    .plan-row.done { opacity: .55; }
+    .plan-name { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+    .plan-meta { font-size: 12px; color: var(--ink-muted); margin-top: 3px; }
+    .plan-weight {
+      font-family: var(--font-display); font-weight: 800;
+      font-size: 22px; letter-spacing: -.03em;
+    }
+    .plan-weight small { font-size: 11px; font-weight: 600; color: var(--ink-muted); }
+
+    .progress-block {
+      margin-top: 16px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .progress-block::before {
+      content: "";
+      position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+      background: var(--accent);
+    }
+    .progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+    .progress-head strong { font-family: var(--font-display); font-size: 15px; }
+    .progress-nums { font-family: var(--font-display); font-weight: 800; font-size: 18px; }
+    .progress-nums span { color: var(--ink-muted); font-weight: 600; font-size: 12px; }
+    .bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 58%; background: var(--accent); border-radius: 3px; animation: fillBar .6s ease-out .15s both; transform-origin: left; }
+
+    .chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 4px; }
+    .chip {
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated));
+      color: var(--ink);
+      font-size: 11px; font-weight: 700;
+      padding: 6px 10px; border-radius: 999px;
+      letter-spacing: .02em;
+    }
+    .chip.ghost { background: var(--bg-elevated); color: var(--ink-muted); }
+
+    .dock {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+      background: linear-gradient(to top, var(--bg) 72%, transparent);
+      padding: 8px 10px 10px;
+    }
+    .compose {
+      display: flex; gap: 8px; align-items: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 5px 5px 5px 12px;
+      margin-bottom: 8px;
+    }
+    .compose span { flex: 1; font-size: 13px; color: var(--ink-muted); }
+    .compose button, .btn-accent {
+      border: none; background: var(--accent); color: var(--accent-ink);
+      font-family: var(--font-display); font-weight: 700; font-size: 12px;
+      padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .tabs {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .tab {
+      border: none; background: transparent;
+      padding: 11px 2px 9px;
+      font-size: 11px; font-weight: 700; color: var(--ink-muted);
+      cursor: pointer; position: relative;
+    }
+    .tab.active { color: var(--ink); }
+    .tab.active::before {
+      content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 22px; height: 2px; background: var(--accent);
+    }
+
+    /* calendar history */
+    .week-strip {
+      display: grid; grid-template-columns: repeat(7, 1fr);
+      gap: 4px; margin-bottom: 14px;
+    }
+    .day {
+      aspect-ratio: 1;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: var(--bg-elevated);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 600; color: var(--ink-muted);
+      gap: 2px;
+    }
+    .day strong { font-family: var(--font-display); font-size: 13px; color: var(--ink); font-weight: 800; }
+    .day.done { background: color-mix(in srgb, var(--accent) 35%, white); border-color: transparent; }
+    .day.today { outline: 2px solid var(--ink); outline-offset: 1px; }
+    .day.off { opacity: .45; }
+
+    .hist-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      margin-bottom: 8px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 10px;
+    }
+    .hist-card .t { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+    .hist-card .m { font-size: 12px; color: var(--ink-muted); }
+    .badge {
+      font-size: 10px; font-weight: 800; letter-spacing: .04em;
+      text-transform: uppercase;
+      padding: 5px 8px; border-radius: 4px;
+      background: var(--accent); color: var(--accent-ink);
+      align-self: start;
+    }
+    .badge.muted { background: var(--line); color: var(--ink-muted); }
+
+    /* diet */
+    .ring-wrap {
+      display: grid; grid-template-columns: 110px 1fr;
+      gap: 14px; align-items: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .ring {
+      width: 100px; height: 100px; border-radius: 50%;
+      background: conic-gradient(var(--accent) 0 62%, var(--line) 62% 100%);
+      display: grid; place-items: center;
+      position: relative;
+    }
+    .ring::before {
+      content: "";
+      width: 72px; height: 72px; border-radius: 50%;
+      background: var(--bg-elevated);
+      position: absolute;
+    }
+    .ring-val {
+      position: relative; z-index: 1; text-align: center;
+      font-family: var(--font-display); font-weight: 800; font-size: 18px; line-height: 1;
+    }
+    .ring-val small { display: block; font-size: 10px; font-weight: 600; color: var(--ink-muted); margin-top: 4px; letter-spacing: .04em; }
+    .macro-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+    .macro-row b { font-family: var(--font-display); }
+    .meal {
+      display: flex; gap: 12px; align-items: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      margin-bottom: 8px;
+    }
+    .meal-dot {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: color-mix(in srgb, var(--accent) 40%, white);
+      display: grid; place-items: center;
+      font-family: var(--font-display); font-weight: 800; font-size: 12px;
+    }
+    .meal-body { flex: 1; }
+    .meal-body .n { font-weight: 700; font-size: 14px; }
+    .meal-body .m { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+    .meal-kcal { font-family: var(--font-display); font-weight: 800; font-size: 14px; }
+
+    /* profile + report */
+    .avatar-row {
+      display: flex; gap: 14px; align-items: center;
+      margin-bottom: 16px;
+    }
+    .avatar {
+      width: 56px; height: 56px; border-radius: 14px;
+      background: var(--ink); color: var(--accent);
+      display: grid; place-items: center;
+      font-family: var(--font-display); font-weight: 800; font-size: 20px;
+    }
+    .who .name { font-family: var(--font-display); font-weight: 800; font-size: 20px; }
+    .who .tag { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+
+    .field-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; margin-bottom: 14px;
+    }
+    .field {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px;
+    }
+    .field .k { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+    .field .v { font-family: var(--font-display); font-weight: 700; font-size: 16px; margin-top: 4px; }
+
+    .report {
+      background: var(--ink);
+      color: #f2f3ee;
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .report::before {
+      content: "";
+      position: absolute; right: -30px; bottom: -40px;
+      width: 160px; height: 160px;
+      background: var(--accent);
+      opacity: .85;
+      clip-path: polygon(30% 0, 100% 0, 100% 100%, 0 70%);
+    }
+    .report .wk { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; opacity: .65; }
+    .report h3 { font-family: var(--font-display); font-size: 24px; font-weight: 800; margin: 6px 0 12px; position: relative; }
+    .report-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; position: relative; }
+    .report-stats .s .n { font-family: var(--font-display); font-weight: 800; font-size: 22px; color: var(--accent); }
+    .report-stats .s .l { font-size: 10px; opacity: .65; margin-top: 2px; }
+    .report p { position: relative; margin-top: 14px; font-size: 13px; line-height: 1.45; opacity: .85; max-width: 28ch; }
+
+    /* onboarding full */
+    .onboard {
+      flex: 1; display: flex; flex-direction: column;
+      padding: 20px 18px 24px;
+      background:
+        radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--accent) 40%, transparent), transparent 55%),
+        var(--bg);
+    }
+    .onboard .logo {
+      font-family: var(--font-display); font-weight: 800;
+      font-size: 42px; letter-spacing: -.04em; line-height: .95;
+      margin-top: 48px;
+    }
+    .onboard .logo span { color: var(--accent); }
+    .onboard .lead {
+      margin-top: 14px; font-size: 15px; color: var(--ink-muted); line-height: 1.5; max-width: 22ch;
+    }
+    .choice-grid { margin-top: 36px; display: flex; flex-direction: column; gap: 8px; }
+    .choice {
+      text-align: left;
+      border: 1px solid var(--line);
+      background: var(--bg-elevated);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      font-family: var(--font-display);
+      font-weight: 700; font-size: 16px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .choice.on {
+      border-color: var(--ink);
+      background: color-mix(in srgb, var(--accent) 28%, white);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .choice small { display: block; font-family: var(--font-body); font-weight: 500; font-size: 12px; color: var(--ink-muted); margin-top: 4px; }
+    .onboard .footer { margin-top: auto; }
+    .primary {
+      width: 100%; border: none; background: var(--accent); color: var(--accent-ink);
+      font-family: var(--font-display); font-weight: 800; font-size: 16px;
+      padding: 16px; border-radius: var(--radius-md); cursor: pointer;
+    }
+
+    /* poster */
+    .poster {
+      flex: 1;
+      margin: 16px;
+      border-radius: 18px;
+      background: var(--ink);
+      color: #f2f3ee;
+      padding: 22px 20px;
+      display: flex; flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .poster::before {
+      content: "";
+      position: absolute; inset: 0;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 46px, rgba(200,240,0,.08) 46px 47px),
+        repeating-linear-gradient(0deg, transparent 0 46px, rgba(200,240,0,.08) 46px 47px);
+      opacity: .7;
+      pointer-events: none;
+    }
+    [data-skin="cobalt"] .poster::before {
+      background:
+        repeating-linear-gradient(90deg, transparent 0 46px, rgba(47,107,255,.12) 46px 47px),
+        repeating-linear-gradient(0deg, transparent 0 46px, rgba(47,107,255,.12) 46px 47px);
+    }
+    [data-skin="ember"] .poster::before {
+      background:
+        repeating-linear-gradient(90deg, transparent 0 46px, rgba(255,90,31,.12) 46px 47px),
+        repeating-linear-gradient(0deg, transparent 0 46px, rgba(255,90,31,.12) 46px 47px);
+    }
+    .poster-mark {
+      font-family: var(--font-display); font-weight: 800;
+      font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+      color: var(--accent); position: relative;
+    }
+    .poster h2 {
+      font-family: var(--font-display); font-weight: 800;
+      font-size: 40px; line-height: .95; letter-spacing: -.04em;
+      margin: 18px 0 8px; position: relative; max-width: 8ch;
+    }
+    .poster .sub { position: relative; font-size: 13px; opacity: .7; margin-bottom: auto; }
+    .poster-grid {
+      position: relative;
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 10px; margin-top: 24px;
+    }
+    .poster-grid .box {
+      border: 1px solid rgba(242,243,238,.2);
+      border-radius: 10px; padding: 12px;
+      background: rgba(255,255,255,.04);
+    }
+    .poster-grid .n { font-family: var(--font-display); font-weight: 800; font-size: 28px; color: var(--accent); }
+    .poster-grid .l { font-size: 11px; opacity: .65; margin-top: 2px; }
+    .poster-quote {
+      position: relative; margin-top: 18px;
+      font-size: 14px; line-height: 1.45; opacity: .9;
+      border-left: 3px solid var(--accent); padding-left: 12px;
+    }
+
+    /* draft sheet mini */
+    .mini-sheet {
+      margin: 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .cand {
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 0;
+    }
+    .cand:last-of-type { border-bottom: none; }
+    .check {
+      width: 20px; height: 20px; border: 1.5px solid var(--ink);
+      border-radius: 4px; flex-shrink: 0;
+      display: grid; place-items: center;
+    }
+    .check.on { background: var(--accent); border-color: var(--accent-ink); }
+    .check.on::after {
+      content: ""; width: 9px; height: 5px;
+      border-left: 2px solid var(--accent-ink);
+      border-bottom: 2px solid var(--accent-ink);
+      transform: rotate(-45deg) translateY(-1px);
+    }
+
+    .spark {
+      display: inline-block;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+      margin-right: 6px;
+      vertical-align: middle;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fillBar {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+      50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 10%, transparent); }
+    }
+
+    @media (max-width: 700px) {
+      .stage { height: min(740px, 88vh); }
+    }
+  </style>
+</head>
+<body data-skin="court">
+  <div class="gallery-head">
+    <div>
+      <h1>Gym Coach · UI Gallery</h1>
+      <p>多页面预览 + 三种配色皮肤。点右上角切换皮肤，看整体气质变化。</p>
+    </div>
+    <div class="skin-switch">
+      <button class="skin-btn active" data-skin="court">Court 酸柠</button>
+      <button class="skin-btn" data-skin="cobalt">Cobalt 钴蓝</button>
+      <button class="skin-btn" data-skin="ember">Ember 安全橙</button>
+    </div>
+  </div>
+
+  <div class="phones">
+
+    <!-- 1 Today -->
+    <div class="phone-wrap">
+      <div class="phone-label">01 · 今日（花哨版）</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="status"><span>9:41</span><span>5G</span></div>
+          <div class="topbar">
+            <div class="brand">Gym Coach</div>
+            <div class="date-line">周三<em>胸 · 推</em></div>
+          </div>
+          <div class="scroll">
+            <div class="hero-band">
+              <div class="hero-kicker"><span class="spark"></span>进行中 · 2/3 动作</div>
+              <div class="hero-title">今天把卧推稳住</div>
+              <div class="hero-sub">建议重量贴着上次来，肩部动作已避开。</div>
+            </div>
+            <div class="ticker">
+              <div class="cell"><div class="n">3</div><div class="l">动作</div></div>
+              <div class="sep"></div>
+              <div class="cell"><div class="n">10</div><div class="l">组</div></div>
+              <div class="sep"></div>
+              <div class="cell"><div class="n">42</div><div class="l">分钟估</div></div>
+            </div>
+            <div class="section-label">今日训练</div>
+            <div class="plan-list">
+              <div class="plan-row done">
+                <div class="rail"></div>
+                <div>
+                  <div class="plan-name">哑铃卧推</div>
+                  <div class="plan-meta">4 × 8–10 · 已完成</div>
+                </div>
+                <div class="plan-weight">30<small>kg</small></div>
+              </div>
+              <div class="plan-row">
+                <div class="rail"></div>
+                <div>
+                  <div class="plan-name">器械夹胸</div>
+                  <div class="plan-meta">3 × 12 · 1/3 组</div>
+                </div>
+                <div class="plan-weight">40<small>kg</small></div>
+              </div>
+              <div class="plan-row">
+                <div class="rail"></div>
+                <div>
+                  <div class="plan-name">绳索飞鸟</div>
+                  <div class="plan-meta">3 × 12 · 待开始</div>
+                </div>
+                <div class="plan-weight">12.5<small>kg</small></div>
+              </div>
+            </div>
+            <div class="chip-row">
+              <span class="chip">上次卧推 ↑2.5kg</span>
+              <span class="chip ghost">伤痛：膝 已避开</span>
+            </div>
+            <div class="progress-block">
+              <div class="progress-head">
+                <strong>蛋白</strong>
+                <div class="progress-nums">92<span> / 160 g</span></div>
+              </div>
+              <div class="bar"><i></i></div>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="compose"><span>说一句…</span><button>发送</button></div>
+            <div class="tabs">
+              <button class="tab active">今日</button>
+              <button class="tab">训练</button>
+              <button class="tab">饮食</button>
+              <button class="tab">我的</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 Training history -->
+    <div class="phone-wrap">
+      <div class="phone-label">02 · 训练回看</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="status"><span>9:41</span><span>5G</span></div>
+          <div class="topbar">
+            <div class="brand">Gym Coach</div>
+            <div class="date-line">训练<em>本周</em></div>
+          </div>
+          <div class="scroll">
+            <div class="week-strip">
+              <div class="day done"><strong>23</strong>一</div>
+              <div class="day done"><strong>24</strong>二</div>
+              <div class="day off"><strong>25</strong>三</div>
+              <div class="day done"><strong>26</strong>四</div>
+              <div class="day done"><strong>27</strong>五</div>
+              <div class="day off"><strong>28</strong>六</div>
+              <div class="day today"><strong>29</strong>日</div>
+            </div>
+            <div class="section-label">最近记录</div>
+            <div class="hist-card">
+              <div>
+                <div class="t">周五 · 拉</div>
+                <div class="m">引体 · 划船 · 面拉 · 4 动作 · 11 组</div>
+              </div>
+              <span class="badge">完成</span>
+            </div>
+            <div class="hist-card">
+              <div>
+                <div class="t">周四 · 腿</div>
+                <div class="m">深蹲 80kg ×5 · 备注：左膝微紧</div>
+              </div>
+              <span class="badge">完成</span>
+            </div>
+            <div class="hist-card">
+              <div>
+                <div class="t">周二 · 推</div>
+                <div class="m">卧推 30kg↑ · 夹胸持平</div>
+              </div>
+              <span class="badge muted">跳过飞鸟</span>
+            </div>
+            <div class="hist-card">
+              <div>
+                <div class="t">周一 · 肩臂</div>
+                <div class="m">侧平举 · 推举 · 弯举</div>
+              </div>
+              <span class="badge">完成</span>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="compose"><span>问：上周卧推趋势？</span><button>发送</button></div>
+            <div class="tabs">
+              <button class="tab">今日</button>
+              <button class="tab active">训练</button>
+              <button class="tab">饮食</button>
+              <button class="tab">我的</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 Diet -->
+    <div class="phone-wrap">
+      <div class="phone-label">03 · 饮食</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="status"><span>9:41</span><span>5G</span></div>
+          <div class="topbar">
+            <div class="brand">Gym Coach</div>
+            <div class="date-line">饮食<em>增肌日</em></div>
+          </div>
+          <div class="scroll">
+            <div class="ring-wrap">
+              <div class="ring">
+                <div class="ring-val">62%<small>热量</small></div>
+              </div>
+              <div>
+                <div class="macro-row"><span>热量</span><b>1680 / 2700</b></div>
+                <div class="macro-row"><span>蛋白</span><b>92 / 160g</b></div>
+                <div class="macro-row"><span>碳水</span><b>180 / 280g</b></div>
+                <div class="bar" style="margin-top:6px"><i style="width:57%"></i></div>
+              </div>
+            </div>
+            <div class="section-label">今天已记</div>
+            <div class="meal">
+              <div class="meal-dot">早</div>
+              <div class="meal-body">
+                <div class="n">燕麦 + 鸡蛋 + 牛奶</div>
+                <div class="m">蛋白 32g · 已确认</div>
+              </div>
+              <div class="meal-kcal">520</div>
+            </div>
+            <div class="meal">
+              <div class="meal-dot">午</div>
+              <div class="meal-body">
+                <div class="n">鸡胸饭 + 西兰花</div>
+                <div class="m">蛋白 48g · 已确认</div>
+              </div>
+              <div class="meal-kcal">680</div>
+            </div>
+            <div class="meal">
+              <div class="meal-dot">加</div>
+              <div class="meal-body">
+                <div class="n">蛋白奶昔</div>
+                <div class="m">草稿 · 待确认份量</div>
+              </div>
+              <div class="meal-kcal">~180</div>
+            </div>
+            <div class="chip-row">
+              <span class="chip">还差蛋白 68g</span>
+              <span class="chip ghost">晚餐可补瘦肉</span>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="compose"><span>鸡胸饭加一杯牛奶</span><button>记入</button></div>
+            <div class="tabs">
+              <button class="tab">今日</button>
+              <button class="tab">训练</button>
+              <button class="tab active">饮食</button>
+              <button class="tab">我的</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 Me + weekly -->
+    <div class="phone-wrap">
+      <div class="phone-label">04 · 我的 / 周报</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="status"><span>9:41</span><span>5G</span></div>
+          <div class="topbar">
+            <div class="brand">Gym Coach</div>
+            <div class="date-line">我的</div>
+          </div>
+          <div class="scroll">
+            <div class="avatar-row">
+              <div class="avatar">H</div>
+              <div class="who">
+                <div class="name">Huru</div>
+                <div class="tag">增肌 · 进阶 · 每周 4 练</div>
+              </div>
+            </div>
+            <div class="field-grid">
+              <div class="field"><div class="k">体重</div><div class="v">72.4 kg</div></div>
+              <div class="field"><div class="k">身份</div><div class="v">进阶</div></div>
+              <div class="field"><div class="k">伤痛</div><div class="v">左膝</div></div>
+              <div class="field"><div class="k">蛋白</div><div class="v">160 g</div></div>
+            </div>
+            <div class="section-label">本周周报</div>
+            <div class="report">
+              <div class="wk">Week 39</div>
+              <h3>强度偏稳<br/>卧推在涨</h3>
+              <div class="report-stats">
+                <div class="s"><div class="n">4</div><div class="l">训练日</div></div>
+                <div class="s"><div class="n">38</div><div class="l">总组数</div></div>
+                <div class="s"><div class="n">↑</div><div class="l">主项</div></div>
+              </div>
+              <p>下周可保持容量，推日试探 32.5kg；蛋白达标天数 5/7。</p>
+            </div>
+            <button class="primary">生成海报</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 Onboarding -->
+    <div class="phone-wrap">
+      <div class="phone-label">05 · 引导 / 建画像</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="onboard">
+            <div class="logo">Gym<br/>Coach<span>.</span></div>
+            <p class="lead">跟着你的记录，越练越准。先选一个目标。</p>
+            <div class="choice-grid">
+              <button class="choice on">增肌<small>吃够蛋白，力量慢慢涨</small></button>
+              <button class="choice">减脂<small>练着掉脂，保住肌肉</small></button>
+              <button class="choice">力量<small>主项重量优先</small></button>
+              <button class="choice">塑形<small>容量均衡，兼顾体态</small></button>
+            </div>
+            <div class="footer" style="margin-top:24px">
+              <button class="primary">下一步 · 经验与伤痛</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6 Poster -->
+    <div class="phone-wrap">
+      <div class="phone-label">06 · 周报海报</div>
+      <div class="stage">
+        <div class="screen" style="background:var(--bg)">
+          <div class="poster">
+            <div class="poster-mark">Gym Coach · Week 39</div>
+            <h2>四天稳练卧推上涨</h2>
+            <div class="sub">2026.09.23 — 09.29</div>
+            <div class="poster-grid">
+              <div class="box"><div class="n">4</div><div class="l">训练日</div></div>
+              <div class="box"><div class="n">38</div><div class="l">完成组</div></div>
+              <div class="box"><div class="n">30→32</div><div class="l">卧推 kg</div></div>
+              <div class="box"><div class="n">5/7</div><div class="l">蛋白达标</div></div>
+            </div>
+            <div class="poster-quote">下周保持容量，推日试探 32.5。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7 Draft workbench -->
+    <div class="phone-wrap">
+      <div class="phone-label">07 · 草稿工作台</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="status"><span>9:41</span><span>5G</span></div>
+          <div class="topbar">
+            <div class="brand">Gym Coach</div>
+            <div class="date-line">草稿<em>胸</em></div>
+          </div>
+          <div class="scroll" style="padding-bottom:24px">
+            <div class="hero-band" style="margin-bottom:12px">
+              <div class="hero-kicker">模型建议 · 可改可组</div>
+              <div class="hero-title">挑你想练的</div>
+              <div class="hero-sub">勾选进「我的计划」，组次重量都能改。</div>
+            </div>
+            <div class="mini-sheet">
+              <div class="section-label" style="margin-top:0">建议候选</div>
+              <div class="cand"><div class="check on"></div><div style="flex:1"><div class="plan-name" style="font-size:14px">哑铃卧推</div><div class="plan-meta">4×8 · 30kg · 上次 28×12</div></div></div>
+              <div class="cand"><div class="check on"></div><div style="flex:1"><div class="plan-name" style="font-size:14px">器械夹胸</div><div class="plan-meta">3×12 · 40kg</div></div></div>
+              <div class="cand"><div class="check"></div><div style="flex:1"><div class="plan-name" style="font-size:14px">上斜哑铃推</div><div class="plan-meta">3×10 · 20kg</div></div></div>
+              <div class="cand"><div class="check"></div><div style="flex:1"><div class="plan-name" style="font-size:14px">双杠臂屈伸</div><div class="plan-meta">3×力竭</div></div></div>
+              <button class="primary" style="margin-top:14px">采纳 · 开始执行</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8 Empty / chat moment -->
+    <div class="phone-wrap">
+      <div class="phone-label">08 · 空状态 + 快捷意图</div>
+      <div class="stage">
+        <div class="screen">
+          <div class="status"><span>9:41</span><span>5G</span></div>
+          <div class="topbar">
+            <div class="brand">Gym Coach</div>
+            <div class="date-line">今天<em>还没计划</em></div>
+          </div>
+          <div class="scroll">
+            <div class="hero-band">
+              <div class="hero-kicker">准备好了就开练</div>
+              <div class="hero-title">想练什么？</div>
+              <div class="hero-sub">说一句，或点下面的快捷意图。</div>
+            </div>
+            <div class="choice-grid" style="margin-top:8px">
+              <button class="choice on">练胸<small>安排几个推类动作</small></button>
+              <button class="choice">随便来一套<small>避开昨天练过的</small></button>
+              <button class="choice">上半身<small>胸背肩各来一点</small></button>
+              <button class="choice">自己组<small>从我的动作里挑</small></button>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="compose"><span>今天练胸，安排几个动作</span><button>发送</button></div>
+            <div class="tabs">
+              <button class="tab active">今日</button>
+              <button class="tab">训练</button>
+              <button class="tab">饮食</button>
+              <button class="tab">我的</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const body = document.body;
+    document.querySelectorAll(".skin-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".skin-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        body.setAttribute("data-skin", btn.dataset.skin);
+        document.querySelectorAll(".stage").forEach(s => {
+          /* force token inheritance refresh via reflow */
+          s.style.display = "none";
+          s.offsetHeight;
+          s.style.display = "";
+        });
+      });
+    });
+
+    document.querySelectorAll(".choice").forEach(c => {
+      c.addEventListener("click", () => {
+        const parent = c.parentElement;
+        parent.querySelectorAll(".choice").forEach(x => x.classList.remove("on"));
+        c.classList.add("on");
+      });
+    });
+  </script>
+</body>
+</html>

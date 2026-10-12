@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-skin="court"] {
+  --bg: #f2f3ee;
+  --bg-elevated: #ffffff;
+  --ink: #12140f;
+  --ink-muted: #6b7164;
+  --line: #d8dbd0;
+  --accent: #c8f000;
+  --accent-ink: #1a2200;
+  --danger: #e23d2d;
+  --ok: #2f6b3a;
+  --hero-a: #e8ecd8;
+  --hero-b: #f2f3ee;
+}
+
+[data-skin="cobalt"] {
+  --bg: #eef1f6;
+  --bg-elevated: #ffffff;
+  --ink: #0f1724;
+  --ink-muted: #5b6578;
+  --line: #d2d8e4;
+  --accent: #2f6bff;
+  --accent-ink: #f4f7ff;
+  --danger: #e23d2d;
+  --ok: #1f7a4c;
+  --hero-a: #dce6ff;
+  --hero-b: #eef1f6;
+}
+
+[data-skin="ember"] {
+  --bg: #f3f0ec;
+  --bg-elevated: #fffcfa;
+  --ink: #1a1410;
+  --ink-muted: #7a6e64;
+  --line: #e0d6cc;
+  --accent: #ff5a1f;
+  --accent-ink: #fff8f4;
+  --danger: #c62828;
+  --ok: #2f6b3a;
+  --hero-a: #ffe0d0;
+  --hero-b: #f3f0ec;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+}
+
+body {
+  margin: 0;
+  font-family: "Source Sans 3", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: "Manrope", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* 重量等数字：等宽、易读，避免展示字体变形 */
+.font-num {
+  font-family: "Source Sans 3", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.noise::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 点击 / 按压缩放 */
+.pressable {
+  transition: transform 0.14s ease, opacity 0.14s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.pressable:active {
+  transform: scale(0.96);
+}
+
+button,
+a,
+.tap {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 页面内容入场 */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise-in {
+  animation: rise-in 0.28s ease-out both;
+}
+.rise-in-delay-1 {
+  animation-delay: 0.05s;
+}
+.rise-in-delay-2 {
+  animation-delay: 0.1s;
+}
+.rise-in-delay-3 {
+  animation-delay: 0.15s;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.92);
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.pop-in {
+  animation: pop 0.28s ease-out both;
+}
+
+/* 结算海报：深色氛围，参考训练完成海报模板 */
+.recap-poster {
+  background:
+    radial-gradient(ellipse 80% 50% at 85% 18%, rgba(56, 189, 248, 0.22), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 10% 85%, rgba(214, 255, 58, 0.12), transparent 50%),
+    linear-gradient(165deg, #0b1220 0%, #101826 42%, #0a0f18 100%);
+  color: #fff;
+}
+.recap-orbit {
+  border: 1px solid rgba(103, 232, 249, 0.35);
+  box-shadow:
+    0 0 60px rgba(34, 211, 238, 0.2),
+    inset 0 0 40px rgba(34, 211, 238, 0.08);
+}
+.recap-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent 85%);
+}
+.recap-panel {
+  box-shadow: 0 0 0 1px rgba(214, 255, 58, 0.08), 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+

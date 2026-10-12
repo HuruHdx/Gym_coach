@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Gym Coach · UI Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #F2F3EE;
+      --bg-elevated: #FFFFFF;
+      --ink: #12140F;
+      --ink-muted: #6B7164;
+      --line: #D8DBD0;
+      --accent: #C8F000;
+      --accent-ink: #1A2200;
+      --danger: #E23D2D;
+      --ok: #2F6B3A;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow: 0 12px 40px rgba(18, 20, 15, 0.12);
+      --font-display: "Syne", system-ui, sans-serif;
+      --font-body: "Public Sans", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font-body);
+      background: #1a1c18;
+      color: var(--ink);
+      display: grid;
+      place-items: center;
+      min-height: 100%;
+      padding: 24px 12px;
+    }
+
+    .stage {
+      width: min(390px, 100%);
+      height: min(844px, 92vh);
+      background: var(--bg);
+      border-radius: 28px;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 30px 80px rgba(0,0,0,.45);
+      display: flex;
+      flex-direction: column;
+      isolation: isolate;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      z-index: 0;
+    }
+
+    .screen { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+    /* status bar fake */
+    .status {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 20px 4px;
+      font-size: 12px; font-weight: 600; color: var(--ink);
+    }
+
+    .topbar {
+      padding: 8px 20px 12px;
+      display: flex; align-items: baseline; justify-content: space-between;
+    }
+    .brand {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+    }
+    .date-line {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 26px;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    .date-line span { color: var(--ink-muted); font-weight: 600; font-size: 16px; margin-left: 8px; }
+
+    .scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 16px 120px;
+      scrollbar-width: none;
+    }
+    .scroll::-webkit-scrollbar { display: none; }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin: 8px 0 10px;
+    }
+
+    /* plan list */
+    .plan-list { display: flex; flex-direction: column; gap: 8px; }
+    .plan-row {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 14px 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 12px;
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease;
+      animation: rise .22s ease-out both;
+    }
+    .plan-row:nth-child(1) { animation-delay: .04s; }
+    .plan-row:nth-child(2) { animation-delay: .08s; }
+    .plan-row:nth-child(3) { animation-delay: .12s; }
+    .plan-row:nth-child(4) { animation-delay: .16s; }
+    .plan-row:active { transform: scale(0.985); }
+    .plan-row.done { opacity: 0.55; }
+    .plan-name {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .plan-meta { font-size: 12px; color: var(--ink-muted); grid-column: 1; }
+    .plan-weight {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+      align-self: center;
+      grid-row: 1 / span 2;
+    }
+    .plan-weight small { font-size: 12px; font-weight: 600; color: var(--ink-muted); margin-left: 2px; }
+
+    .progress-block {
+      margin-top: 20px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 14px;
+    }
+    .progress-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 10px;
+    }
+    .progress-head strong {
+      font-family: var(--font-display);
+      font-size: 15px;
+    }
+    .progress-nums {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 18px;
+    }
+    .progress-nums span { color: var(--ink-muted); font-weight: 600; font-size: 13px; }
+    .bar {
+      height: 4px;
+      background: var(--line);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      width: 58%;
+      background: var(--accent);
+      border-radius: 2px;
+      transform-origin: left;
+      animation: fillBar .6s ease-out .2s both;
+    }
+
+    .hint {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--ink-muted);
+      line-height: 1.5;
+    }
+
+    /* bottom compose + tabs */
+    .dock {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      z-index: 5;
+      background: linear-gradient(to top, var(--bg) 70%, transparent);
+      padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+    }
+    .compose {
+      display: flex; gap: 8px; align-items: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 6px 6px 6px 14px;
+      margin-bottom: 8px;
+      cursor: text;
+    }
+    .compose span { flex: 1; font-size: 14px; color: var(--ink-muted); }
+    .compose button {
+      border: none;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 13px;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .tab {
+      border: none;
+      background: transparent;
+      padding: 12px 4px 10px;
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-muted);
+      cursor: pointer;
+      position: relative;
+    }
+    .tab.active { color: var(--ink); }
+    .tab.active::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 28px; height: 2px;
+      background: var(--accent);
+    }
+
+    /* sheets */
+    .overlay {
+      position: absolute; inset: 0;
+      background: rgba(18,20,15,.35);
+      z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease;
+    }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+
+    .sheet {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      z-index: 11;
+      background: var(--bg);
+      border-radius: 18px 18px 0 0;
+      box-shadow: var(--shadow);
+      max-height: 88%;
+      transform: translateY(105%);
+      transition: transform .28s cubic-bezier(.2,.8,.2,1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sheet.show { transform: translateY(0); }
+    .sheet-handle {
+      width: 36px; height: 4px;
+      background: var(--line);
+      border-radius: 2px;
+      margin: 10px auto 4px;
+      flex-shrink: 0;
+    }
+    .sheet-head {
+      padding: 8px 20px 12px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .sheet-head h2 {
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .sheet-head .close {
+      border: 1px solid var(--line);
+      background: var(--bg-elevated);
+      width: 32px; height: 32px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--ink);
+    }
+    .sheet-body {
+      padding: 0 16px 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .zone {
+      margin-bottom: 18px;
+    }
+    .zone-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 8px;
+    }
+
+    .cand {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      margin-bottom: 6px;
+      animation: rise .22s ease-out both;
+    }
+    .check {
+      width: 22px; height: 22px;
+      border: 1.5px solid var(--ink);
+      border-radius: 4px;
+      flex-shrink: 0;
+      display: grid; place-items: center;
+      cursor: pointer;
+      transition: transform .12s ease, background .12s ease, border-color .12s ease;
+      background: transparent;
+    }
+    .check.on {
+      background: var(--accent);
+      border-color: var(--accent-ink);
+      transform: scale(1);
+    }
+    .check.on::after {
+      content: "";
+      width: 10px; height: 6px;
+      border-left: 2px solid var(--accent-ink);
+      border-bottom: 2px solid var(--accent-ink);
+      transform: rotate(-45deg) translateY(-1px);
+    }
+    .cand-body { flex: 1; min-width: 0; }
+    .cand-name { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+    .cand-meta { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+    .swap {
+      border: 1px solid var(--line);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
+      color: var(--ink-muted);
+      cursor: pointer;
+    }
+
+    .mine-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .mine-row:last-child { border-bottom: none; }
+    .mine-idx {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 14px;
+      width: 20px;
+      color: var(--ink-muted);
+    }
+    .mine-name { flex: 1; font-weight: 600; font-size: 14px; }
+    .mine-edit {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--ink);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    .mine-x {
+      border: none; background: transparent;
+      color: var(--danger); font-size: 16px; cursor: pointer; padding: 4px;
+    }
+
+    .primary {
+      width: 100%;
+      border: none;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 16px;
+      padding: 16px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .primary:active { transform: scale(0.98); }
+
+    .ghost-add {
+      width: 100%;
+      border: 1px dashed var(--line);
+      background: transparent;
+      color: var(--ink-muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      margin-top: 6px;
+    }
+
+    /* execute sheet sets */
+    .set-row {
+      display: grid;
+      grid-template-columns: 40px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .set-row:last-child { border-bottom: none; }
+    .set-no { font-family: var(--font-display); font-weight: 700; color: var(--ink-muted); }
+    .set-info { font-size: 14px; font-weight: 600; }
+    .set-info small { display: block; font-weight: 500; color: var(--ink-muted); font-size: 12px; margin-top: 2px; }
+
+    .chat-bubble {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+      max-width: 92%;
+    }
+    .chat-bubble.me {
+      margin-left: auto;
+      background: var(--ink);
+      color: var(--bg);
+      border-color: var(--ink);
+    }
+    .chat-input-row {
+      display: flex; gap: 8px;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--line);
+      background: var(--bg-elevated);
+    }
+    .chat-input-row input {
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      font-family: var(--font-body);
+      font-size: 14px;
+      outline: none;
+      background: var(--bg);
+    }
+    .chat-input-row button {
+      border: none;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-family: var(--font-display);
+      font-weight: 700;
+      padding: 0 16px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+    }
+    .empty-state h3 {
+      font-family: var(--font-display);
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+    .empty-state p { color: var(--ink-muted); font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+
+    .pill-demo {
+      display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+    }
+    .demo-btn {
+      border: 1px solid var(--line);
+      background: var(--bg-elevated);
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--ink);
+    }
+
+    .toast {
+      position: absolute;
+      left: 50%; top: 56px;
+      transform: translateX(-50%) translateY(-12px);
+      background: var(--ink);
+      color: var(--bg);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s, transform .2s;
+      z-index: 20;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fillBar {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+
+    .outside-note {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #9aa094;
+      font-size: 12px;
+      font-family: var(--font-body);
+      text-align: center;
+      max-width: 90vw;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage" id="app">
+    <div class="toast" id="toast">已采纳 · 开始执行</div>
+    <div class="screen">
+      <div class="status"><span>9:41</span><span>●●●</span></div>
+      <div class="topbar">
+        <div>
+          <div class="brand">Gym Coach</div>
+          <div class="date-line">周三<span>胸 · 推</span></div>
+        </div>
+      </div>
+
+      <div class="scroll" id="mainScroll">
+        <!-- state: empty / draft / active -->
+        <div id="viewEmpty" class="empty-state" hidden>
+          <h3>今天还没有计划</h3>
+          <p>说一句想练什么，或让我按你的画像安排。</p>
+          <div class="pill-demo">
+            <button class="demo-btn" data-ask="今天练胸，安排几个动作">练胸</button>
+            <button class="demo-btn" data-ask="随便来一套，别和昨天重复">随便来一套</button>
+          </div>
+        </div>
+
+        <div id="viewActive">
+          <div class="section-label">今日训练</div>
+          <div class="plan-list" id="planList">
+            <div class="plan-row" data-ex="0">
+              <div class="plan-name">哑铃卧推</div>
+              <div class="plan-weight">30<small>kg</small></div>
+              <div class="plan-meta">4 × 8–10 · 0/4 组</div>
+            </div>
+            <div class="plan-row" data-ex="1">
+              <div class="plan-name">器械夹胸</div>
+              <div class="plan-weight">40<small>kg</small></div>
+              <div class="plan-meta">3 × 12 · 0/3 组</div>
+            </div>
+            <div class="plan-row" data-ex="2">
+              <div class="plan-name">绳索飞鸟</div>
+              <div class="plan-weight">12.5<small>kg</small></div>
+              <div class="plan-meta">3 × 12 · 0/3 组</div>
+            </div>
+          </div>
+
+          <div class="progress-block">
+            <div class="progress-head">
+              <strong>蛋白</strong>
+              <div class="progress-nums">92<span> / 160 g</span></div>
+            </div>
+            <div class="bar"><i></i></div>
+            <p class="hint" style="margin-top:10px;margin-bottom:0">饮食上线后这里显示当日进度，点进饮食 Tab。</p>
+          </div>
+
+          <p class="hint">点动作进入勾选 · 底部说一句可改计划 · 点「生成草稿」看组合台。</p>
+          <button class="ghost-add" id="btnOpenDraft" style="margin-top:12px">打开草稿工作台（演示）</button>
+        </div>
+      </div>
+
+      <div class="dock">
+        <div class="compose" id="openChat">
+          <span>说一句… 例如「换成飞鸟」</span>
+          <button type="button">发送</button>
+        </div>
+        <div class="tabs">
+          <button class="tab active">今日</button>
+          <button class="tab">训练</button>
+          <button class="tab">我的</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="overlay"></div>
+
+    <!-- Draft workbench -->
+    <div class="sheet" id="sheetDraft">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2>今日草稿 · 胸</h2>
+        <button class="close" data-close>×</button>
+      </div>
+      <div class="sheet-body">
+        <div class="zone">
+          <div class="zone-title">建议候选 · 点选加入</div>
+          <div class="cand" style="animation-delay:.04s">
+            <button class="check on" data-cand="0" aria-label="选中"></button>
+            <div class="cand-body">
+              <div class="cand-name">哑铃卧推</div>
+              <div class="cand-meta">4 × 8 · 建议 30kg · 上次 28kg×12</div>
+            </div>
+            <button class="swap">换</button>
+          </div>
+          <div class="cand" style="animation-delay:.08s">
+            <button class="check on" data-cand="1" aria-label="选中"></button>
+            <div class="cand-body">
+              <div class="cand-name">器械夹胸</div>
+              <div class="cand-meta">3 × 12 · 建议 40kg · 上次 40kg×12</div>
+            </div>
+            <button class="swap">换</button>
+          </div>
+          <div class="cand" style="animation-delay:.12s">
+            <button class="check" data-cand="2" aria-label="选中"></button>
+            <div class="cand-body">
+              <div class="cand-name">上斜哑铃推</div>
+              <div class="cand-meta">3 × 10 · 建议 20kg</div>
+            </div>
+            <button class="swap">换</button>
+          </div>
+          <div class="cand" style="animation-delay:.16s">
+            <button class="check" data-cand="3" aria-label="选中"></button>
+            <div class="cand-body">
+              <div class="cand-name">双杠臂屈伸</div>
+              <div class="cand-meta">3 × 力竭 · 自重</div>
+            </div>
+            <button class="swap">换</button>
+          </div>
+          <button class="ghost-add">＋ 自己加一个动作</button>
+        </div>
+
+        <div class="zone">
+          <div class="zone-title">我的计划</div>
+          <div class="mine-row">
+            <span class="mine-idx">1</span>
+            <span class="mine-name">哑铃卧推</span>
+            <button class="mine-edit">4×8 · 30kg</button>
+            <button class="mine-x">×</button>
+          </div>
+          <div class="mine-row">
+            <span class="mine-idx">2</span>
+            <span class="mine-name">器械夹胸</span>
+            <button class="mine-edit">3×12 · 40kg</button>
+            <button class="mine-x">×</button>
+          </div>
+        </div>
+
+        <button class="primary" id="btnAdopt">采纳 · 开始执行</button>
+      </div>
+    </div>
+
+    <!-- Execute sets -->
+    <div class="sheet" id="sheetSets">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2 id="setTitle">哑铃卧推</h2>
+        <button class="close" data-close>×</button>
+      </div>
+      <div class="sheet-body">
+        <p style="font-size:13px;color:var(--ink-muted);margin-bottom:8px">按组勾选 · 可改实际重量</p>
+        <div id="setList"></div>
+        <button class="ghost-add" style="margin-top:12px">写备注…</button>
+      </div>
+    </div>
+
+    <!-- Chat -->
+    <div class="sheet" id="sheetChat" style="height:70%">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2>说一句</h2>
+        <button class="close" data-close>×</button>
+      </div>
+      <div class="sheet-body" id="chatBody" style="padding-bottom:8px">
+        <div class="chat-bubble">想练什么、改计划、记一餐，直接说。结果会落到今日卡片上确认。</div>
+      </div>
+      <div class="chat-input-row">
+        <input id="chatInput" type="text" placeholder="今天练胸，安排几个动作" />
+        <button type="button" id="chatSend">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="outside-note">Court 视觉预览 · 手机打开或 Chrome 设备模式 375 宽 · 详见 设计系统.md</p>
+
+  <script>
+    const overlay = document.getElementById("overlay");
+    const sheets = {
+      draft: document.getElementById("sheetDraft"),
+      sets: document.getElementById("sheetSets"),
+      chat: document.getElementById("sheetChat"),
+    };
+
+    function openSheet(name) {
+      overlay.classList.add("show");
+      Object.values(sheets).forEach(s => s.classList.remove("show"));
+      sheets[name].classList.add("show");
+    }
+    function closeSheets() {
+      overlay.classList.remove("show");
+      Object.values(sheets).forEach(s => s.classList.remove("show"));
+    }
+    overlay.addEventListener("click", closeSheets);
+    document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeSheets));
+
+    document.getElementById("btnOpenDraft").addEventListener("click", () => openSheet("draft"));
+    document.getElementById("openChat").addEventListener("click", () => openSheet("chat"));
+    document.querySelector("#openChat button").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openSheet("chat");
+    });
+
+    document.querySelectorAll(".check[data-cand]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        btn.classList.toggle("on");
+        btn.animate([{ transform: "scale(0.92)" }, { transform: "scale(1)" }], { duration: 120 });
+      });
+    });
+
+    const exercises = [
+      { name: "哑铃卧推", sets: 4, weight: "30kg" },
+      { name: "器械夹胸", sets: 3, weight: "40kg" },
+      { name: "绳索飞鸟", sets: 3, weight: "12.5kg" },
+    ];
+
+    document.querySelectorAll(".plan-row").forEach(row => {
+      row.addEventListener("click", () => {
+        const i = Number(row.dataset.ex);
+        const ex = exercises[i];
+        document.getElementById("setTitle").textContent = ex.name;
+        const list = document.getElementById("setList");
+        list.innerHTML = "";
+        for (let s = 1; s <= ex.sets; s++) {
+          const div = document.createElement("div");
+          div.className = "set-row";
+          div.innerHTML = `
+            <span class="set-no">#${s}</span>
+            <div class="set-info">${ex.weight}<small>目标次数 8–10</small></div>
+            <button class="check" aria-label="完成本组"></button>
+          `;
+          const check = div.querySelector(".check");
+          check.addEventListener("click", () => {
+            check.classList.toggle("on");
+            check.animate([{ transform: "scale(0.92)" }, { transform: "scale(1)" }], { duration: 120 });
+          });
+          list.appendChild(div);
+        }
+        openSheet("sets");
+      });
+    });
+
+    document.getElementById("btnAdopt").addEventListener("click", () => {
+      closeSheets();
+      const t = document.getElementById("toast");
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 1600);
+    });
+
+    function sendChat(text) {
+      if (!text.trim()) return;
+      const body = document.getElementById("chatBody");
+      const me = document.createElement("div");
+      me.className = "chat-bubble me";
+      me.textContent = text;
+      body.appendChild(me);
+      setTimeout(() => {
+        const bot = document.createElement("div");
+        bot.className = "chat-bubble";
+        bot.textContent = "已按「" + text + "」生成草稿，点下方打开组合台挑选动作。";
+        body.appendChild(bot);
+        body.scrollTop = body.scrollHeight;
+        const open = document.createElement("button");
+        open.className = "primary";
+        open.style.marginTop = "8px";
+        open.textContent = "打开草稿工作台";
+        open.onclick = () => openSheet("draft");
+        body.appendChild(open);
+      }, 380);
+      document.getElementById("chatInput").value = "";
+    }
+
+    document.getElementById("chatSend").addEventListener("click", () => {
+      sendChat(document.getElementById("chatInput").value);
+    });
+    document.getElementById("chatInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendChat(e.target.value);
+    });
+    document.querySelectorAll("[data-ask]").forEach(b => {
+      b.addEventListener("click", () => {
+        openSheet("chat");
+        setTimeout(() => sendChat(b.dataset.ask), 200);
+      });
+    });
+  </script>
+</body>
+</html>
