@@ -31,6 +31,10 @@ def _out(p: Profile) -> ProfileOut:
         p.preferences = []
     if p.injuries is None:
         p.injuries = []
+    if p.avoid_exercises is None:
+        p.avoid_exercises = []
+    if p.avoid_foods is None:
+        p.avoid_foods = []
     return ProfileOut.model_validate(p, from_attributes=True)
 
 
@@ -59,7 +63,8 @@ def _merge_list(current: list[str], add: list[str], remove: list[str]) -> list[s
 
 @router.get("", response_model=ProfileOut | None)
 def get_profile(session: Session = Depends(get_session), _: str = Depends(require_token)):
-    return session.exec(select(Profile).limit(1)).first()
+    p = session.exec(select(Profile).limit(1)).first()
+    return _out(p) if p else None
 
 
 @router.post("", response_model=ProfileOut)

@@ -15,6 +15,14 @@ class LLMClient(ABC):
     async def complete_json(self, system: str, user: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def chat_turn(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """One chat completion turn. Returns {content, tool_calls:[{id,name,arguments}]}."""
+        raise NotImplementedError(f"{type(self).__name__} does not support chat_turn")
+
 
 def _extract_json(content: str) -> dict[str, Any]:
     content = content.strip()
@@ -39,18 +47,56 @@ class MockLLM(LLMClient):
         if "【SESSION_SUMMARY】" in system:
             return {"text": "按你写下的备注和这次的重量来看，下次同一动作先用这次的最高重量。"}
 
+        if "不要输出 card" in system or "不要新开训练计划" in system:
+            return {"text": "按你的情况，先把动作做稳，别急着加重量。"}
+
+        if "【CLARIFY】" in system:
+            said = user
+            for marker in ("用户本句：", "用户说："):
+                if marker in user:
+                    said = user.split(marker, 1)[1].split("\n", 1)[0].strip()
+                    break
+            return {
+                "text": f"你说「{said}」，我还不知道今天具体练什么。想练哪个部位，还是有氧、全身？",
+                "suggestions": [
+                    {"label": "练胸", "prompt": "今天练胸"},
+                    {"label": "练背", "prompt": "今天练背"},
+                    {"label": "做有氧", "prompt": "今天做有氧"},
+                    {"label": "全身循环", "prompt": "全身循环30分钟"},
+                ],
+            }
+
         if "【INTENT_REWRITE】" in system:
             from app.brain.memory import parse_intent
 
-            i = parse_intent(user)
+            text = user
+            for marker in ("用户本句：", "用户说："):
+                if marker in user:
+                    text = user.split(marker, 1)[1].split("\n", 1)[0].strip()
+                    break
+            i = parse_intent(text)
+            agent = i.params.get("agent") or (
+                "coach_plan"
+                if i.expert == "training"
+                else "nutrition"
+                if i.expert == "nutrition"
+                else "coach_chat"
+            )
+            from app.brain.intent_rewrite import has_focus_detail
+
             return {
-                "expert": i.expert,
+                "agent": agent,
+                "goal": i.params.get("goal"),
+                "modality": i.params.get("modality"),
                 "muscles": i.muscles,
                 "split": i.params.get("split"),
+                "session_style": i.params.get("session_style"),
                 "equipment": i.params.get("equipment"),
                 "fatigue": bool(i.params.get("fatigue")),
-                "flexible": bool(i.params.get("flexible")),
-                "rewrite": user.strip()[:80],
+                "minutes": i.params.get("session_minutes"),
+                "intensity": i.params.get("intensity"),
+                "has_focus_detail": has_focus_detail(text),
+                "rewrite": text.strip()[:80],
             }
 
         from app.exercises_catalog import EXERCISE_BY_NAME, is_banned_for_injuries, roles_of
@@ -60,11 +106,12 @@ class MockLLM(LLMClient):
         if "用户说：" in user:
             text = user.split("用户说：", 1)[1].split("\n", 1)[0].strip()
 
-        # 从结构化意图行解析部位 / 器械 / 疲劳 / 时长（pipeline 写入）
+        # 从结构化意图行解析部位 / 课型 / 器械 / 疲劳 / 时长（pipeline 写入）
         intent_muscles: list[str] = []
         equipment_allow: list[str] | None = None
         fatigued = False
         session_minutes: int | None = None
+        modalities: list[str] = []
         if "结构化意图：" in user:
             intent_line = user.split("结构化意图：", 1)[1].split("\n", 1)[0]
             if "部位=" in intent_line:
@@ -73,6 +120,9 @@ class MockLLM(LLMClient):
             if "用户点名部位=" in intent_line:
                 frag = intent_line.split("用户点名部位=", 1)[1].split("；", 1)[0]
                 intent_muscles = [x for x in frag.split("+") if x]
+            if "课型=" in intent_line:
+                frag = intent_line.split("课型=", 1)[1].split("；", 1)[0]
+                modalities = [x for x in frag.split("+") if x]
             if "器械限制=" in intent_line:
                 frag = intent_line.split("器械限制=", 1)[1].split("（", 1)[0].split("；", 1)[0]
                 equipment_allow = [x for x in frag.split(",") if x]
@@ -84,6 +134,10 @@ class MockLLM(LLMClient):
                     session_minutes = None
             if "疲劳" in intent_line or "降阶" in intent_line:
                 fatigued = True
+        if "课型=有氧" in user or ("有氧" in modalities and "抗阻" not in modalities):
+            modalities = modalities or ["有氧"]
+        if "HIIT" in modalities and "抗阻" not in modalities:
+            modalities = modalities or ["HIIT"]
 
         focus: list[str] = []
         exclusive = False
@@ -106,6 +160,7 @@ class MockLLM(LLMClient):
             label = "全身"
 
         fatigued = fatigued or any(k in text for k in ("累", "疲劳", "没劲", "没力气"))
+        non_strength = bool(modalities) and "抗阻" not in modalities and not focus
 
         # Parse last weights and feelings from memory block
         last_w: dict[str, float] = {}
@@ -158,54 +213,74 @@ class MockLLM(LLMClient):
             sub = f"{sets}×{reps}" + (f" · 建议 {w}kg" if w is not None else "")
             return {"id": eid, "title": title, "subtitle": sub, "meta": meta, "selected": selected}
 
-        pools: dict[str, list[dict[str, Any]]] = {
-            "胸": [
-                item("c1", "哑铃卧推", 4, "8-10", 30, muscle_tag="胸"),
-                item("c2", "器械夹胸", 3, "12", 40, muscle_tag="胸"),
-                item("c3", "绳索飞鸟", 3, "12", 12.5, muscle_tag="胸"),
-                item("c4", "上斜哑铃推", 3, "10", 20, muscle_tag="胸"),
-                item("c5", "俯卧撑", 3, "12", None, muscle_tag="胸"),
-            ],
-            "背": [
-                item("b1", "引体向上", 4, "AMRAP", None, muscle_tag="背"),
-                item("b2", "坐姿划船", 4, "10", 45, muscle_tag="背"),
-                item("b3", "面拉", 3, "15", None, muscle_tag="背"),
-                item("b4", "单臂哑铃划船", 3, "10", 22.5, muscle_tag="背"),
-            ],
-            "肩": [
-                item("s1", "哑铃侧平举", 3, "12", 8, muscle_tag="肩"),
-                item("s2", "绳索面拉", 3, "15", None, muscle_tag="肩"),
-            ],
-            "腿": [
-                item("l1", "腿举", 4, "10", 80, muscle_tag="腿"),
-                item("l2", "腿屈伸", 3, "12", 35, muscle_tag="腿"),
-                item("l3", "罗马尼亚硬拉", 3, "8", 60, muscle_tag="腿"),
-                item("l4", "臀桥", 3, "12", 40, muscle_tag="腿"),
-            ],
-            "臂": [
-                item("a1", "哑铃弯举", 3, "12", 12, muscle_tag="臂"),
-                item("a2", "绳索下压", 3, "12", 20, muscle_tag="臂"),
-            ],
-            "核心": [
-                item("k1", "平板支撑", 3, "40s", None, muscle_tag="核心"),
-                item("k2", "死虫", 3, "12", None, muscle_tag="核心"),
-            ],
-        }
+        # 非抗阻主课：从检索候选出草稿
+        if non_strength:
+            from app.exercises_catalog import retrieve_candidates
+
+            primary = "有氧" if "有氧" in modalities else ("HIIT" if "HIIT" in modalities else "灵活性")
+            mins = session_minutes or 20
+            pool_mod = retrieve_candidates(
+                modalities=[primary],
+                equipment=equipment_allow,
+                injuries=injuries,
+                limit=12,
+            )
+            take = 1 if primary == "有氧" else (3 if primary == "HIIT" else 4)
+            chosen = pool_mod[:take] or pool_mod[:1]
+            candidates = []
+            for i, it in enumerate(chosen):
+                if primary == "有氧":
+                    reps = f"{mins}分钟"
+                    sets = 1
+                elif primary == "HIIT":
+                    reps = "40s/20s×8"
+                    sets = 1
+                else:
+                    reps = "30s/侧"
+                    sets = 2
+                candidates.append(
+                    item(f"m{i+1}", it["name"], sets, reps, None, True, it["muscle"])
+                )
+            plan_title = {"有氧": "有氧", "HIIT": "HIIT", "灵活性": "拉伸"}.get(primary, primary)
+            return {
+                "text": f"按「{text[:40]}」排好了「{plan_title}」。不需要的动作取消勾选后再采纳。",
+                "card": {
+                    "card_type": "training_draft",
+                    "title": plan_title,
+                    "items": candidates,
+                },
+            }
+
+        from app.exercises_catalog import retrieve_candidates
 
         targets = intent_muscles or ([muscle] if muscle != "全身" else ["胸", "背", "腿"])
         pool: list[dict[str, Any]] = []
         for mi, mname in enumerate(targets):
-            chunk = pools.get(mname, [])
-            # 多部位时每部位先取 1~2 个，拼成复合课
-            take = 2 if len(targets) > 1 else len(chunk)
-            for c in chunk[:take]:
-                c = {**c, "id": f"{c['id']}_{mi}"}
-                pool.append(c)
+            rich = retrieve_candidates(
+                muscles=[mname],
+                modalities=["抗阻"],
+                equipment=equipment_allow,
+                injuries=injuries,
+                limit=6,
+            )
+            take = 2 if len(targets) > 1 else min(4, len(rich))
+            for j, it in enumerate(rich[:take]):
+                weight = None if it["category"] == "自重" else (30.0 if mname == "胸" else 40.0)
+                pool.append(
+                    item(
+                        f"{mname}{j+1}_{mi}",
+                        it["name"],
+                        4 if j == 0 else 3,
+                        "8-10",
+                        weight,
+                        True,
+                        mname,
+                    )
+                )
         if not pool:
-            pool = [
-                item("g1", "深蹲", 4, "8", 60),
-                item("g2", "硬拉", 3, "5", 80),
-            ]
+            rich = retrieve_candidates(modalities=["抗阻"], injuries=injuries, limit=2)
+            for j, it in enumerate(rich[:2] or []):
+                pool.append(item(f"g{j+1}", it["name"], 4, "8", 60))
 
         def allowed_equipment(title: str) -> bool:
             if not equipment_allow:
@@ -244,7 +319,7 @@ class MockLLM(LLMClient):
             pass
         elif not candidates:
             # 器械受限时兜底自重
-            fallback_title = "俯卧撑" if "胸" in targets or muscle == "胸" else "平板支撑"
+            fallback_title = "俯卧撑" if "胸" in targets or muscle == "胸" else "侧平板支撑"
             candidates = [item("safe1", fallback_title, 3, "12", None)]
 
         # 疲劳 / 短课时：少排动作（全部仍默认勾选）
@@ -285,11 +360,13 @@ class MockLLM(LLMClient):
 
 
 class OpenAICompatibleLLM(LLMClient):
-    async def complete_json(self, system: str, user: str) -> dict[str, Any]:
-        headers = {
+    def _headers(self) -> dict[str, str]:
+        return {
             "Authorization": f"Bearer {settings.llm_api_key}",
             "Content-Type": "application/json",
         }
+
+    async def complete_json(self, system: str, user: str) -> dict[str, Any]:
         # DeepSeek Flash: disable thinking for faster structured JSON
         body: dict[str, Any] = {
             "model": settings.llm_model,
@@ -302,16 +379,56 @@ class OpenAICompatibleLLM(LLMClient):
             "thinking": {"type": "disabled"},
         }
         async with httpx.AsyncClient(base_url=settings.llm_base_url, timeout=90) as client:
-            resp = await client.post("/chat/completions", headers=headers, json=body)
+            resp = await client.post("/chat/completions", headers=self._headers(), json=body)
             if resp.status_code >= 400:
                 # Retry without thinking / response_format for stricter gateways
                 body.pop("thinking", None)
                 body.pop("response_format", None)
-                resp = await client.post("/chat/completions", headers=headers, json=body)
+                resp = await client.post("/chat/completions", headers=self._headers(), json=body)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"] or ""
             return _extract_json(content)
+
+    async def chat_turn(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "model": settings.llm_model,
+            "temperature": 0.4,
+            "messages": messages,
+            "thinking": {"type": "disabled"},
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        async with httpx.AsyncClient(base_url=settings.llm_base_url, timeout=90) as client:
+            resp = await client.post("/chat/completions", headers=self._headers(), json=body)
+            if resp.status_code >= 400:
+                body.pop("thinking", None)
+                resp = await client.post("/chat/completions", headers=self._headers(), json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            msg = data["choices"][0]["message"] or {}
+            content = msg.get("content") or ""
+            tool_calls_out: list[dict[str, Any]] = []
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                raw_args = fn.get("arguments") or "{}"
+                try:
+                    arguments = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+                except json.JSONDecodeError:
+                    arguments = {}
+                tool_calls_out.append(
+                    {
+                        "id": tc.get("id") or "",
+                        "name": fn.get("name") or "",
+                        "arguments": arguments,
+                    }
+                )
+            return {"content": content, "tool_calls": tool_calls_out}
 
 
 def get_llm() -> LLMClient:

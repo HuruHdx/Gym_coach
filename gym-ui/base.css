@@ -1,0 +1,66 @@
+/* ============================================================
+   base.css — 移动端基线
+   这几行决定"像 App"还是"像嵌在浏览器里的网页"。
+   在入口文件里紧跟 tokens.css 引入。
+   ============================================================ */
+
+html {
+  -webkit-tap-highlight-color: transparent;  /* 去掉点击灰闪 */
+  -webkit-text-size-adjust: 100%;            /* 横屏不放大字 */
+  overscroll-behavior: none;                 /* 不劫持下拉刷新 */
+}
+
+/* 低于 16px，iOS Safari 聚焦时会强制缩放页面且不缩回 */
+input, textarea, select {
+  font-size: 16px;
+  font-family: inherit;
+}
+
+/* 触控元素：去掉 300ms 点击延迟、长按不弹复制菜单 */
+button, a, [role="button"], .tap {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 正文保持可选中，不要给 body 加 user-select: none */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+}
+
+h1, h2, h3, p { margin: 0; }
+
+/* 数字统一等宽对齐，金额/重量/次数都用 */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* 安全区：只有配合 viewport-fit=cover 才有值 */
+.safe-b { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-t { padding-top: env(safe-area-inset-top, 0px); }
+
+/* 滚动容器：滚到底不带着整页弹 */
+.scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-y::-webkit-scrollbar { width: 0; }
+
+/* 无障碍：尊重系统减弱动效 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}

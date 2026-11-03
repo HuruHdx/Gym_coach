@@ -11,8 +11,8 @@ export default defineConfig({
       manifest: {
         name: "Gym Coach",
         short_name: "GymCoach",
-        theme_color: "#F2F3EE",
-        background_color: "#F2F3EE",
+        theme_color: "#f5f4fa",
+        background_color: "#f5f4fa",
         display: "standalone",
         start_url: "/",
       },
@@ -22,6 +22,7 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "src") },
   },
   server: {
+    fs: { allow: [".."] },
     host: true,
     port: 5173,
     proxy: {

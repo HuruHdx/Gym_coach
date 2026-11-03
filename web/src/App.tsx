@@ -9,9 +9,11 @@ import { Onboarding } from "./pages/Onboarding";
 import { TodayPage } from "./pages/TodayPage";
 import { CoachPage } from "./pages/CoachPage";
 import { TrainingPage } from "./pages/TrainingPage";
+import { TrainingRecordsPage } from "./pages/TrainingRecordsPage";
+import { TrainingLiftsPage } from "./pages/TrainingLiftsPage";
 import { ExerciseTrendPage } from "./pages/ExerciseTrendPage";
 import { MePage } from "./pages/MePage";
-import { ProfileSettingsPage } from "./pages/ProfileSettingsPage";
+import { ProfileEditPage } from "./pages/ProfileEditPage";
 import { RecapPage } from "./pages/RecapPage";
 import { DebugPage } from "./pages/DebugPage";
 
@@ -85,6 +87,8 @@ export default function App() {
         <Route path="/" element={<TodayPage />} />
         <Route path="/coach" element={<CoachPage profile={data} />} />
         <Route path="/training" element={<TrainingPage />} />
+        <Route path="/training/records" element={<TrainingRecordsPage />} />
+        <Route path="/training/lifts" element={<TrainingLiftsPage />} />
         <Route path="/training/exercise/:name" element={<ExerciseTrendPage />} />
         <Route path="/recap" element={<RecapPage />} />
         <Route
@@ -101,15 +105,10 @@ export default function App() {
           }
         />
         <Route
-          path="/me/settings"
-          element={
-            <ProfileSettingsPage
-              profile={data}
-              onUpdated={() => refetch()}
-              onResetOnboarding={() => refetch()}
-            />
-          }
+          path="/me/edit"
+          element={<ProfileEditPage profile={data} onUpdated={() => refetch()} />}
         />
+        <Route path="/me/settings" element={<Navigate to="/me/edit" replace />} />
         <Route path="/debug" element={<DebugPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

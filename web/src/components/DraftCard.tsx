@@ -189,47 +189,81 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
             const sets = Number(it.meta.sets ?? 3);
             const reps = String(it.meta.reps ?? "10");
             const weight = it.meta.weight != null ? Number(it.meta.weight) : null;
+            const modality = String(it.meta.modality || "");
+            const noLoad =
+              Boolean(it.meta.no_load) ||
+              modality === "有氧" ||
+              modality === "HIIT" ||
+              modality === "灵活性" ||
+              /分钟|RPE|rpe|秒/.test(reps);
+            const minuteMatch = reps.match(/(\d+)\s*分钟/);
+            const minutes = minuteMatch ? Number(minuteMatch[1]) : null;
             const open = editingId === it.id;
             return (
               <ReorderItem key={it.id} id={it.id} className="py-3">
-                <div className="flex items-start gap-3">
-                  <button
-                    type="button"
-                    aria-label="选入计划"
-                    className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-[4px] border-[1.5px] transition-colors ${
-                      it.selected ? "border-accent-ink bg-accent text-accent-ink font-bold text-xs" : "border-line bg-bg"
-                    }`}
-                    onClick={() => updateItem(it.id, { selected: !it.selected })}
-                  >
-                    {it.selected ? "✓" : ""}
-                  </button>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-display text-sm font-bold text-ink">{it.title}</span>
-                      <span className="rounded bg-bg px-1.5 py-0.5 text-[10px] text-muted">
-                        {String(it.meta.muscle || "常用")}
-                      </span>
-                    </div>
-
+                <div className="min-w-0">
+                  <div className="flex items-start gap-2.5">
                     <button
                       type="button"
-                      className="mt-1 flex items-center gap-1 text-left text-xs font-semibold text-muted hover:text-ink"
-                      onClick={() => setEditingId(open ? null : it.id)}
+                      aria-label="选入计划"
+                      className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-[4px] border-[1.5px] transition-colors ${
+                        it.selected ? "border-accent-ink bg-accent text-accent-ink font-bold text-xs" : "border-line bg-bg"
+                      }`}
+                      onClick={() => updateItem(it.id, { selected: !it.selected })}
                     >
-                      <span>{it.subtitle || rebuildSubtitle(it.meta)}</span>
-                      <span className="text-[10px] text-accent-ink/70">
-                        {open ? "▲ 收起" : "▼ 调重量/组数"}
-                      </span>
+                      {it.selected ? "✓" : ""}
                     </button>
 
-                    {/* 展开的微调控制区：无键盘交互，极佳手机操作体验 */}
-                    {open && (
-                      <div className="mt-2.5 rounded-lg border border-line bg-bg/70 p-2.5 space-y-2">
-                        {/* 重量滑动选择与步进 */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-muted">目标重量:</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-display text-sm font-bold text-ink">{it.title}</span>
+                        <span className="shrink-0 rounded bg-bg px-1.5 py-0.5 text-[10px] text-muted">
+                          {String(it.meta.muscle || "常用")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1 pt-0.5">
+                      <button
+                        type="button"
+                        title="在动作库中挑选替换"
+                        className="pressable flex items-center gap-0.5 rounded-md border border-line bg-bg px-2 py-1 text-xs font-bold text-ink hover:bg-elevated"
+                        onClick={() => handleSwap(it)}
+                      >
+                        <span>⟳</span>
+                        <span className="text-[10px]">换</span>
+                      </button>
+                      <button
+                        type="button"
+                        title="移除此动作"
+                        className="pressable rounded-md border border-line bg-bg px-2 py-1 text-xs font-bold text-muted hover:text-danger"
+                        onClick={() => removeItem(it.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="mt-1 flex w-full min-w-0 items-start gap-1 pl-[30px] text-left text-xs font-semibold text-muted hover:text-ink"
+                    onClick={() => setEditingId(open ? null : it.id)}
+                  >
+                    <span className="min-w-0 flex-1 leading-relaxed">
+                      {it.subtitle || rebuildSubtitle(it.meta)}
+                    </span>
+                    <span className="shrink-0 whitespace-nowrap text-[10px] text-accent-ink/70">
+                      {open ? "▲ 收起" : minutes != null ? "▼ 调时长" : noLoad ? "▼ 调轮数" : "▼ 调重量/组数"}
+                    </span>
+                  </button>
+
+                  {open && (
+                    <div className="mt-2.5 space-y-3 rounded-xl border border-line bg-bg p-3">
+                      {!noLoad && (
+                        <div>
+                          <div className="mb-1.5 text-[11px] font-bold text-muted">目标重量</div>
                           <WeightStepper
+                            wide
                             value={weight}
                             step={2.5}
                             label={`${it.title} 目标重量`}
@@ -241,51 +275,69 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
                             }}
                           />
                         </div>
+                      )}
 
-                        {/* 组数步进 */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-muted">计划组数:</span>
-                          <div className="inline-flex items-center rounded-lg border border-line bg-elevated p-0.5">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateItem(it.id, {
-                                  meta: { ...it.meta, sets: Math.max(1, sets - 1) },
-                                })
-                              }
-                              className="pressable grid h-6 w-6 place-items-center rounded-md text-xs font-bold text-muted hover:text-ink"
-                            >
-                              -
-                            </button>
-                            <span className="min-w-[40px] text-center font-display text-xs font-bold">
-                              {sets} 组
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateItem(it.id, {
-                                  meta: { ...it.meta, sets: Math.min(10, sets + 1) },
-                                })
-                              }
-                              className="pressable grid h-6 w-6 place-items-center rounded-md text-xs font-bold text-muted hover:text-ink"
-                            >
-                              +
-                            </button>
-                          </div>
+                      <div>
+                        <div className="mb-1.5 text-[11px] font-bold text-muted">
+                          {minutes != null ? "时长" : noLoad ? "轮数" : "计划组数"}
                         </div>
+                        <div className="flex items-center rounded-lg border border-line bg-elevated p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (minutes != null) {
+                                const next = Math.max(5, minutes - 5);
+                                updateItem(it.id, {
+                                  meta: { ...it.meta, reps: reps.replace(/(\d+)(\s*分钟)/, `${next}$2`) },
+                                });
+                                return;
+                              }
+                              updateItem(it.id, {
+                                meta: { ...it.meta, sets: Math.max(1, sets - 1) },
+                              });
+                            }}
+                            className="pressable grid h-9 w-9 shrink-0 place-items-center rounded-md text-base font-black text-ink"
+                            aria-label="减少"
+                          >
+                            −
+                          </button>
+                          <span className="min-w-0 flex-1 text-center font-display text-sm font-bold">
+                            {minutes != null ? `${minutes} 分钟` : noLoad ? `${sets} 轮` : `${sets} 组`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (minutes != null) {
+                                const next = Math.min(90, minutes + 5);
+                                updateItem(it.id, {
+                                  meta: { ...it.meta, reps: reps.replace(/(\d+)(\s*分钟)/, `${next}$2`) },
+                                });
+                                return;
+                              }
+                              updateItem(it.id, {
+                                meta: { ...it.meta, sets: Math.min(10, sets + 1) },
+                              });
+                            }}
+                            className="pressable grid h-9 w-9 shrink-0 place-items-center rounded-md text-base font-black text-ink"
+                            aria-label="增加"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
 
-                        {/* 次数快捷选择 */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-muted">每组次数:</span>
-                          <div className="flex gap-1">
+                      {!noLoad && (
+                        <div>
+                          <div className="mb-1.5 text-[11px] font-bold text-muted">每组次数</div>
+                          <div className="flex flex-wrap gap-1.5">
                             {["6-8", "8-10", "10-12", "12-15", "力竭"].map((r) => (
                               <button
                                 key={r}
                                 type="button"
-                                className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                className={`pressable min-h-9 min-w-[30%] flex-1 rounded-lg px-2 py-2 text-center text-xs font-bold ${
                                   reps === r
                                     ? "bg-accent font-extrabold text-accent-ink"
-                                    : "border border-line bg-elevated text-muted"
+                                    : "border border-line bg-elevated text-ink"
                                 }`}
                                 onClick={() =>
                                   updateItem(it.id, {
@@ -298,29 +350,9 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
                             ))}
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-1 pt-0.5">
-                    <button
-                      type="button"
-                      title="在动作库中挑选替换"
-                      className="pressable flex items-center gap-0.5 rounded-md border border-line bg-bg px-2 py-1 text-xs font-bold text-ink hover:bg-elevated"
-                      onClick={() => handleSwap(it)}
-                    >
-                      <span>⟳</span>
-                      <span className="text-[10px]">换</span>
-                    </button>
-                    <button
-                      type="button"
-                      title="移除此动作"
-                      className="pressable rounded-md border border-line bg-bg px-2 py-1 text-xs font-bold text-muted hover:text-danger"
-                      onClick={() => removeItem(it.id)}
-                    >
-                      ✕
-                    </button>
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </ReorderItem>
             );

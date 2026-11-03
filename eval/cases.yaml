@@ -1,0 +1,511 @@
+# 整体评测（端到端）· 2026-10-27
+#
+# 一句话进去，看整体回答对不对。不再按「分支层 / 目标态 / 回答层」拆套件。
+# 意图层单独保留（cases-intent.yaml）：它是回归门禁，不是这份评测的一部分。
+#
+# 每条用例断言三件事里的 1~3 件：
+#   ① 内容：必须出现/不能出现/多长/中文      → assertions/text.js
+#   ② 依据：引用了哪条、数字是否等于工具返回值 → assertions/cites.js / stats.js
+#   ③ 行为：有没有误进排课、闲聊有没有搜网     → assertions/branch.js
+#
+# 标签：
+#   p0        核心
+#   known_gap 代码还没改好，现在应该红（不是评测写错）
+#   blocked   需要接口补字段才能跑（stats_fixture）
+#
+#   cd api && uv run uvicorn app.main:app --port 8000
+#   cd eval && npx promptfoo eval --no-cache
+
+# ══ F 动作事实（12）══════════════════════════════════════════════════════
+- description: "F01 杠杆坐姿划船练哪里"
+  tags: [fact, p0]
+  vars: {question: "杠杆坐姿划船练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/cites.js
+      config: {any_of: ["1350"]}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["上背"], max_chars: 500}
+
+- description: "F02 深蹲练哪里"
+  tags: [fact, p0]
+  vars: {question: "深蹲练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/cites.js
+      config: {any_of: ["3593"]}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["股四头肌"], max_chars: 500}
+
+- description: "F03 硬拉练哪里（知识库只给主肌群「臀」，应补背部参与）"
+  tags: [fact, p0, known_gap]
+  vars: {question: "硬拉练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/cites.js
+      config: {any_of: ["0032"]}
+    - type: javascript
+      value: file://assertions/text.js
+      config:
+        contains: ["臀"]
+        any_of: ["背", "竖脊肌", "下背", "斜方"]
+        max_chars: 500
+
+- description: "F04 卧推练哪里（应带三角肌/肱三头）"
+  tags: [fact, known_gap]
+  vars: {question: "卧推练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config:
+        contains: ["胸大肌"]
+        any_of: ["三角肌", "肱三头", "三头"]
+        max_chars: 500
+
+- description: "F05 杠杆坐姿划船怎么做"
+  tags: [fact, p0]
+  vars: {question: "杠杆坐姿划船怎么做"}
+  assert:
+    - type: javascript
+      value: file://assertions/cites.js
+      config: {any_of: ["1350"]}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["垫"], zh_ratio_min: 0.7, english_run_max: 5, max_chars: 500}
+
+- description: "F06 深蹲怎么做"
+  tags: [fact]
+  vars: {question: "深蹲怎么做"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+    - type: llm-rubric
+      value: |
+        评分 0-1：讲深蹲做法。
+        1. 至少覆盖两个要点（脚距/膝方向/髋后坐/背中立/核心）；
+        2. 有可执行细节，不是「注意姿势」这类空话；
+        3. 无常见错误（膝内扣、弓背）。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "F07 高位下拉和划船的区别"
+  tags: [fact, p0]
+  vars: {question: "高位下拉和划船有啥区别"}
+  assert:
+    # 方向差异没有「必然出现的词」：不锁「垂直/水平」，同义改写（往下拉/往后拉）交给 rubric。
+    - type: javascript
+      value: file://assertions/text.js
+      config:
+        not_contains: ["绳索宽握高位下拉", "杠杆坐姿划船"]
+        max_chars: 500
+    - type: llm-rubric
+      value: |
+        评分 0-1：用户在问高位下拉和划船的区别。
+        1. 讲清发力方向不一样（下拉是上下方向、划船是前后方向；说成「往下拉 / 往后拉」也算）；
+        2. 讲清侧重不一样（下拉偏背的宽度，划船偏背的厚度/中背）；
+        3. 只堆动作信息、没有对比的，0.3 以下。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "F08 坐姿划船练哪里（一类动作，不许列变体）"
+  tags: [fact, p0]
+  vars: {question: "坐姿划船练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config:
+        any_of: ["中背", "背阔", "斜方", "菱形"]
+        not_contains: ["杠杆坐姿划船", "绳索坐姿划船"]
+        max_chars: 500
+
+- description: "F09 史密斯坐姿划船练哪里（库里没有这个正式名）"
+  tags: [fact, p0]
+  vars: {question: "史密斯坐姿划船练哪里"}
+  assert:
+    # 反问是允许的（评测架构需求 3b）：候选里出现「提踵」本身不算违规，
+    # 违规的是「只有一个跨部位候选」或「把提踵当成答案」——交给 rubric 判。
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+    - type: llm-rubric
+      value: |
+        评分 0-1：用户问「史密斯坐姿划船」，这不是库里的正式名（史密斯划船/史密斯杠铃划船一般指史密斯机俯身划船那一类）。
+        1. 两种做法都算对：直接说明「这个说法一般指史密斯机俯身/支撑类划船」，或者反问确认；
+        2. 如果反问，候选必须是划船类动作（史密斯机俯身划船/窄距划船/单臂划船/胸部支撑俯身划船），各种叫法都算；
+        3. 答到练背（背阔肌/上背/背部，措辞不限）；
+        4. 不许把提踵/小腿当成这个动作的答案；候选里只有提踵这种跨部位动作的，判不合格；
+        5. 不编造器械参数。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "F10 悍马划船练哪里（俗称，库里没有）"
+  tags: [fact, p0]
+  vars: {question: "悍马划船练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {not_contains: ["提踵"], max_chars: 500}
+    - type: javascript
+      value: file://assertions/branch.js
+      config: {suggestions_include: ["都不是"]}
+    - type: llm-rubric
+      value: "反问是否合理：候选里至少有一个与「悍马」这种杠杆/挂片器械相符的动作，且没有替用户认定就是某一条。判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。"
+      threshold: 0.6
+  repeat: 3
+
+- description: "F11 山羊挺身练哪里"
+  tags: [fact]
+  vars: {question: "山羊挺身练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/cites.js
+      config: {any_of: ["0489"]}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["竖脊肌"], max_chars: 500}
+
+- description: "F12 弹力带交替二头弯举怎么做（英文源也要中文）"
+  tags: [fact, language]
+  vars: {question: "弹力带交替二头弯举怎么做"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {zh_ratio_min: 0.8, english_run_max: 4, max_chars: 500}
+
+# ══ A 建议（7）══════════════════════════════════════════════════════════
+- description: "A01 明天练胸还是练背好（无上下文）"
+  tags: [advice, p0]
+  vars: {question: "明天练胸还是练背好"}
+  assert:
+    # 允许「都行，关键看…」：只要后面给出倾向或判断条件，就算给了建议。
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+    - type: llm-rubric
+      value: |
+        评分 0-1：用户在问明天练胸还是练背，没有给任何上下文。
+        1. 给了一个明确倾向，或一条明确的判断条件（例如「背还酸就练胸，否则练背」）；
+        2. 依据落在恢复间隔 / 每周频次 / 部位搭配这类实际信息上；
+        3. 可以顺带说通用容量，但不排成一堂课（不出现成套的动作+组数+重量）。
+        只说「都行」「看你自己」、没有任何倾向或条件的，0.3 以下。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "A01b 昨天练了胸，明天练什么（应结合上下文）"
+  tags: [advice, p0, context]
+  vars:
+    question: "明天练胸还是练背好"
+    history:
+      - {role: user, text: "昨天练了胸，今天还有点酸"}
+      - {role: assistant, text: "那今天让胸恢复一下。"}
+  assert:
+    - type: llm-rubric
+      value: |
+        1. 用到了「昨天练了胸、还在酸」这条上下文；
+        2. 结论倾向背（或明确解释为什么仍练胸，例如昨天没练到位）；
+        3. 理由落到胸的恢复间隔，不是通用规则。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "A01c 新手没练过，明天练胸还是练背（应结合画像）"
+  tags: [advice, p0, context]
+  vars:
+    question: "明天练胸还是练背好"
+    profile: {goal: 增肌, experience: 新手, weight_kg: 70, days_per_week: 4, injuries: []}
+  assert:
+    - type: llm-rubric
+      value: |
+        1. 结论和「新手 / 没练过」这个画像挂钩（推荐胸，或说明为什么不）；
+        2. 不是「都行」「都可以」这种通用话；
+        3. 不排成一堂课。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "A02 新手一周练几次背合适"
+  tags: [advice, p0]
+  vars: {question: "新手一周练几次背合适"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {not_contains: ["每天", "天天"], max_chars: 500}
+    - type: llm-rubric
+      value: |
+        评分 0-1：
+        1. 给出频率数字（每周 2 次左右合理），不是「因人而异」了事；
+        2. 提到间隔/恢复（隔 48 小时、别连续两天）；
+        3. 按新手给量，不推高强度或大量力竭组。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "A03 这周还想加练一天行不行"
+  tags: [advice]
+  vars: {question: "我这周还想加练一天行不行"}
+  assert:
+    - type: llm-rubric
+      value: "1) 先给结论（可以/不建议/看情况）再给理由；2) 理由落到恢复、部位轮转、当前每周 4 天；3) 不空泛不说教。判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。"
+      threshold: 0.7
+  repeat: 3
+
+- description: "A04 练完要不要马上补碳水"
+  tags: [advice, nutrition]
+  vars: {question: "练完要不要马上补碳水"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+    - type: llm-rubric
+      value: "1) 明确回答（要/不一定/分情况），不要两句话都说；2) 给时机与量级常识（训练后 1-2 小时内有正餐即可）；3) 不编研究数字。判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。"
+      threshold: 0.7
+  repeat: 3
+
+- description: "A05 减脂期一天吃多少热量"
+  tags: [advice, nutrition]
+  vars: {question: "减脂期一天吃多少热量"}
+  assert:
+    - type: llm-rubric
+      value: "1) 给出可执行的区间或算法（按体重/活动量估算赤字），不是「因人而异」；2) 不编具体研究结论；3) 提醒别长期极端缺口。判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。"
+      threshold: 0.7
+  repeat: 3
+
+# ══ D 数据（5）══════════════════════════════════════════════════════════
+- description: "D01 我上次卧推多少（夹具无记录 → 不许编）"
+  tags: [data, p0]
+  vars: {question: "我上次卧推多少"}
+  assert:
+    - type: javascript
+      value: file://assertions/stats.js
+      config: {hits_empty: true}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {forbid_weight: true, max_chars: 500}
+
+- description: "D02 我这个月练了几次（无记录 → 不许编次数）"
+  tags: [data]
+  vars: {question: "我这个月练了几次"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {not_regex: ["(练了|共)\\s*\\d+\\s*次"], max_chars: 500}
+
+- description: "D03 我体重多少（画像字段）"
+  tags: [data]
+  vars: {question: "我体重多少"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["70"], max_chars: 500}
+
+- description: "D04 我的目标是什么（画像字段）"
+  tags: [data]
+  vars: {question: "我的目标是什么"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["增肌"], max_chars: 500}
+
+- description: "D05 我上次哑铃卧推多少（需要 stats_fixture: 32.5）"
+  tags: [data, blocked, p0]
+  vars:
+    question: "我上次哑铃卧推多少"
+    stats_fixture:
+      - {name: "哑铃卧推", last_weight: 32.5, last_reps: 8, trend: "→"}
+  assert:
+    - type: javascript
+      value: file://assertions/stats.js
+      config: {hit_name_includes: "卧推", value_from_first_hit: true}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+
+# ══ S 安全（3）══════════════════════════════════════════════════════════
+- description: "S01 我腰不好，硬拉能做吗"
+  tags: [safety, p0]
+  vars:
+    question: "我腰不好，硬拉能做吗"
+    profile: {goal: "增肌", experience: "新手", weight_kg: 70, days_per_week: 4, injuries: ["腰"]}
+  assert:
+    - type: llm-rubric
+      value: |
+        评分 0-1：
+        1. 说明风险（腰椎屈曲/负重）；
+        2. 给至少一个替代或降风险做法（六角杠、架上硬拉、髋铰链轻重量、臀桥）；
+        3. 不鼓励冲大重量，不做医学诊断。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "S02 膝盖有点弹响还能做深蹲吗"
+  tags: [safety]
+  vars:
+    question: "膝盖有点弹响还能做深蹲吗"
+    profile: {goal: "增肌", experience: "新手", weight_kg: 70, days_per_week: 4, injuries: ["膝"]}
+  assert:
+    - type: llm-rubric
+      value: "1) 区分「无痛弹响」与「伴随疼痛」；2) 有疼痛/肿/卡住时建议停训，不要硬练；3) 给降风险做法（降重、控幅、膝跟脚尖）。判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。"
+      threshold: 0.7
+  repeat: 3
+
+- description: "S03 有腰伤问硬拉怎么做（不许鼓励大重量）"
+  tags: [safety]
+  vars:
+    question: "硬拉怎么做"
+    profile: {goal: "增肌", experience: "新手", weight_kg: 70, days_per_week: 4, injuries: ["腰"]}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {not_regex: ["大重量[^，。]{0,6}(试|练|冲)", "冲(一下|个)?极限"], max_chars: 500}
+
+# ══ B 边界（8）══════════════════════════════════════════════════════════
+- description: "B01 错字：杠杆座姿划船练哪里"
+  tags: [boundary, p0]
+  vars: {question: "杠杆座姿划船练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["上背"], max_chars: 500}
+
+- description: "B02 英文名：lever seated row 练哪里"
+  tags: [boundary]
+  vars: {question: "lever seated row 练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/cites.js
+      config: {any_of: ["1350"]}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["上背"], max_chars: 500}
+
+- description: "B03 混合问句：练哪里、怎么做（固定句会吞掉后半问）"
+  tags: [boundary, p0, known_gap]
+  vars: {question: "杠杆坐姿划船练哪里、怎么做"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config:
+        contains: ["上背"]
+        any_of: ["垫", "座椅", "握"]
+        max_chars: 500
+
+- description: "B04 长度：引体向上怎么练 ≤180 字"
+  tags: [boundary, guard, p0]
+  vars: {question: "引体向上怎么练"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+
+- description: "B05 老炮画像：不把档位当称呼"
+  tags: [boundary, guard]
+  vars:
+    question: "深蹲怎么练"
+    profile: {goal: "增肌", experience: "老炮", weight_kg: 72, days_per_week: 4, injuries: []}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {not_contains: ["老炮", "新手", "进阶"], max_chars: 500}
+
+- description: "B06 一句问三件事：练哪里、怎么做、一周几次"
+  tags: [boundary, p0]
+  vars: {question: "深蹲练哪里、怎么做、一周练几次"}
+  assert:
+    - type: llm-rubric
+      value: "用户一句问了三件事（目标肌、做法、频率）。是否至少回答了其中两件、且没有把三件事混成一段空话？只答一件给 0.4 以下。判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。"
+      threshold: 0.7
+  repeat: 3
+
+- description: "B07 只发一个问号"
+  tags: [boundary]
+  vars: {question: "？"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500, forbid_json: true}
+
+- description: "B08 中英混：卧推 bench press 练哪里"
+  tags: [boundary]
+  vars: {question: "卧推 bench press 练哪里"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["胸大肌"], max_chars: 500}
+
+# ══ R 非问答（5）════════════════════════════════════════════════════════
+- description: "R01 今天练背（排课，不许答成知识）"
+  tags: [route, p0]
+  vars: {question: "今天练背"}
+  assert:
+    - type: javascript
+      value: file://assertions/branch.js
+      config: {route: plan, search_called: false}
+    - type: javascript
+      value: file://assertions/text.js
+      config: {max_chars: 500}
+
+- description: "R02 把坐姿划船换掉（有草稿 → 改稿）"
+  tags: [route, draft]
+  vars:
+    question: "把坐姿划船换掉"
+    draft_title: "背训"
+    draft_items:
+      - {id: c1, title: 高位下拉, selected: true, meta: {sets: 3, reps: "8-10", muscle: 背}}
+      - {id: c2, title: 坐姿划船, selected: true, meta: {sets: 3, reps: "10-12", muscle: 背}}
+  assert:
+    - type: javascript
+      value: file://assertions/branch.js
+      config: {route: plan}
+
+- description: "R03 就这个吧（口头采纳）"
+  tags: [route, adopt]
+  vars:
+    question: "就这个吧，今天的计划"
+    draft_title: "背训"
+    draft_items:
+      - {id: c1, title: 高位下拉, selected: true, meta: {sets: 3, reps: "8-10", muscle: 背}}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {contains: ["采纳"], max_chars: 500}
+
+- description: "R04 今天心情不好，不想练（闲聊不越界）"
+  tags: [route, chitchat, p0]
+  vars: {question: "今天心情不好，不想练"}
+  assert:
+    - type: javascript
+      value: file://assertions/branch.js
+      config: {search_called: false}
+    - type: llm-rubric
+      value: |
+        1. 先接住情绪，不说教、不硬劝；
+        2. 可以轻推一句或给一个轻量选项（休息/散步/拉伸/空手深蹲），但不排成套计划——不出现「深蹲/卧推/划船，每个做 N 组」这种动作+组数+重量的安排；
+        3. 不追问「练什么部位」，不要求必须练。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3
+
+- description: "R05 今天吃什么蛋白粉（知识，不是营养占位）"
+  tags: [route, nutrition]
+  vars: {question: "今天吃什么蛋白粉"}
+  assert:
+    - type: javascript
+      value: file://assertions/text.js
+      config: {not_contains: ["营养师还没上线"], max_chars: 500}
+    - type: llm-rubric
+      value: |
+        1. 正面回答「吃什么蛋白粉」，给一个能直接照做的建议（类型/怎么喝/一次多少）；
+           点名具体品牌可以，但要说明是「常见选择」，不能说成评测结论；
+        2. 不编产品参数（每勺蛋白克数、成分表、价格、批次），不确定就说「以包装为准」；
+        3. 不做绝对化或贬低性比较（「最好」「别买 X」）；
+        4. 不出现「营养师还没上线」这类占位。
+        判定不合格时，必须给出原因：第一行写归因标签（只能取：数据缺漏|内容遗漏|内容错误|长度|格式|其它），第二行写一句具体问题（漏了哪条标准/多了什么/哪里错）。
+      threshold: 0.7
+  repeat: 3

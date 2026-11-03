@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import {
   DEFAULT_EQUIPMENT,
@@ -54,17 +53,9 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
 
   return (
     <div className="flex min-h-full flex-col px-4 pb-8 pt-3">
-      <div className="flex items-center justify-between gap-3">
-        <Link
-          to="/me"
-          className="pressable rounded-md border border-line bg-elevated px-3 py-2 text-xs font-bold"
-        >
-          ← 返回
-        </Link>
-        {toast && <span className="text-xs font-bold text-[color:var(--ok)] rise-in">{toast}</span>}
-      </div>
+      {toast && <p className="text-xs font-bold text-[color:var(--ok)] rise-in">{toast}</p>}
 
-      <p className="font-display mt-4 text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
+      <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
         设置
       </p>
       <h1 className="font-display text-[26px] font-bold tracking-tight">训练资料</h1>
@@ -99,7 +90,7 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
           ))}
         </div>
         <p className="mt-2 text-xs text-muted">
-          新手：系统练不满 1 年 · 进阶：动作稳定知道重量 · 老炮：多年规律训
+          新手：0~6个月 · 进阶：半年~2年 · 老炮：3年以上（仅选择时作参考）
         </p>
       </section>
 

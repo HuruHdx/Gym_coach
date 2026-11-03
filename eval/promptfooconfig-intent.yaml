@@ -1,0 +1,21 @@
+# 意图评测（topic 层）· 2026-10-26
+#
+# 只测一件事：这句话的 topic 判对没。不测检索、不测回答质量、不跑工具循环。
+# 契约见 ../意图分类与路由契约.md。
+# 只跑意图：provider 带 mode=intent，不生成回答。
+#
+#   cd api && uv run uvicorn app.main:app --port 8000
+#   cd eval && npx promptfoo eval -c promptfooconfig-intent.yaml
+
+description: "gym-coach · 意图评测（topic）v1"
+
+prompts:
+  - "{{question}}"
+
+providers:
+  - id: file://provider.js
+    config:
+      mode: intent
+
+# 不做 defaultTest 形状检查：这套只关心 topic，保持信号干净、跑得快
+tests: file://cases-intent.yaml

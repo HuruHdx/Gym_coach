@@ -8,6 +8,8 @@ type Props = {
   step?: number;
   label?: string;
   className?: string;
+  /** 铺满父级宽度，数值区拉伸 */
+  wide?: boolean;
 };
 
 function normalize(v: number | null | undefined): number | null {
@@ -23,6 +25,7 @@ export function WeightStepper({
   step = 2.5,
   label = "选择重量",
   className = "",
+  wide = false,
 }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
   // 本地乐观状态：点 +/- 立刻变，不等父组件/接口回写
@@ -52,7 +55,7 @@ export function WeightStepper({
   return (
     <>
       <div
-        className={`inline-flex items-center rounded-lg border border-line bg-elevated p-0.5 shadow-sm ${className}`}
+        className={`${wide ? "flex w-full" : "inline-flex"} items-center rounded-lg border border-line bg-elevated p-0.5 shadow-sm ${className}`}
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
@@ -78,7 +81,7 @@ export function WeightStepper({
             e.stopPropagation();
             setModalOpen(true);
           }}
-          className="pressable min-w-[64px] px-1.5 py-1 text-center text-sm font-semibold text-ink disabled:opacity-50"
+          className={`pressable px-1.5 py-1 text-center text-sm font-semibold text-ink disabled:opacity-50 ${wide ? "min-w-0 flex-1" : "min-w-[64px]"}`}
           title="点击打开滑动选重"
         >
           <span className="font-num">{displayText}</span>

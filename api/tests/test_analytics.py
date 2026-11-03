@@ -16,7 +16,7 @@ def _set(
     name: str,
     *,
     muscle: str = "胸",
-    weight: float = 30,
+    weight: float | None = 30,
     reps: int = 8,
     completed: bool = True,
     idx: int = 1,
@@ -101,10 +101,45 @@ def test_session_compare_weight_and_reps_delta():
     assert cmp_["muscle"] == "胸"
     assert cmp_["prev_date"] == prev.session_date.isoformat()
     by_name = {x["exercise_name"]: x for x in cmp_["lifts"]}
+    # 30×8 → 38kg，32.5×8 → 41.2kg，约 +8%
     assert by_name["上斜哑铃卧推"]["delta_kind"] == "up"
-    assert by_name["上斜哑铃卧推"]["delta_label"] == "+2.5kg"
+    assert by_name["上斜哑铃卧推"]["delta_label"] == "+8%"
+    # 20×12 → 28kg，20×14 → 29.3kg，约 +5%
     assert by_name["绳索夹胸"]["delta_kind"] == "up"
-    assert by_name["绳索夹胸"]["delta_label"] == "+2次"
+    assert by_name["绳索夹胸"]["delta_label"] == "+5%"
+
+
+def test_session_compare_uses_epley_not_reps():
+    """次数降、重量升，估算 1RM 仍涨，不能判成退步。"""
+    today = date(2026, 10, 10)
+    prev = _sess(1, today - timedelta(days=4), [_set("卧推", weight=30, reps=12)])
+    curr = _sess(2, today, [_set("卧推", weight=35, reps=8)])
+    cmp_ = build_session_compare([curr, prev])
+    lift = cmp_["lifts"][0]
+    assert lift["delta_kind"] == "up"
+    assert lift["delta_label"] == "+6%"
+
+
+def test_session_compare_within_band_is_flat():
+    today = date(2026, 10, 10)
+    prev = _sess(1, today - timedelta(days=4), [_set("卧推", weight=30, reps=8)])
+    curr = _sess(2, today, [_set("卧推", weight=30.5, reps=8)])
+    lift = build_session_compare([curr, prev])["lifts"][0]
+    assert lift["delta_kind"] == "flat"
+    assert lift["delta_label"] == "持平"
+
+
+def test_bodyweight_reps_drop_is_one_rm_drop():
+    today = date(2026, 10, 10)
+    prev = _sess(1, today - timedelta(days=3), [_set("俯卧撑", weight=None, reps=15)])
+    curr = _sess(2, today, [_set("俯卧撑", weight=None, reps=10)])
+    cmp_ = build_session_compare([curr, prev], body_weight=70)
+    lift = cmp_["lifts"][0]
+    assert lift["delta_kind"] == "down"
+    headline = build_headline({"trained_days": 1, "target_days": 4}, [], cmp_, [])
+    assert "回落" in headline
+    assert "偏沉" not in headline
+    assert "俯卧撑" in headline
 
 
 def test_muscle_pulse_marks_overdue_legs():
@@ -141,4 +176,31 @@ def test_key_lifts_and_headline():
     pulse = build_muscle_pulse([old, new], today)
     cmp_ = build_session_compare([new, old])
     headline = build_headline(week, pulse, cmp_, lifts)
-    assert "上斜哑铃卧推" in headline or "胸" in headline
+    assert "进步" in headline
+    assert "上斜哑铃卧推" in headline
+    assert "偏沉" not in headline
+    assert lifts[0]["history"] == [28.0, 32.5]
+
+
+def test_week_volume_compares_with_previous_week():
+    today = date(2026, 10, 11)  # Sunday; week starts 10-05
+    sessions = [
+        _sess(1, date(2026, 10, 1), [_set("卧推", weight=20, reps=10)]),  # 200
+        _sess(2, date(2026, 10, 8), [_set("卧推", weight=30, reps=10)]),  # 300
+    ]
+    week = build_week_rhythm(sessions, target_days=4, today=today)
+    assert week["period"] == "week"
+    assert week["compare_label"] == "上周"
+    assert week["volume_kg"] == 300
+    assert week["volume_delta_pct"] == 50
+    assert len(week["days"]) == 7
+
+
+def test_month_rhythm_spans_calendar_month():
+    today = date(2026, 10, 11)
+    month = build_week_rhythm([], target_days=4, today=today, period="month")
+    assert month["period"] == "month"
+    assert month["compare_label"] == "上月"
+    assert len(month["days"]) == 31
+    assert month["days"][0]["date"] == "2026-10-01"
+    assert month["volume_delta_pct"] is None

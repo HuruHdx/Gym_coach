@@ -8,9 +8,9 @@ export const GOALS = [
 ];
 
 export const EXPERIENCES = [
-  { value: "新手" as const, sub: "刚开始系统练，动作还在学" },
-  { value: "进阶" as const, sub: "有基础，能稳定推进" },
-  { value: "老炮" as const, sub: "经验足，计划要更细" },
+  { value: "新手" as const, sub: "0~6个月 · 刚开始系统练，动作还在学，安全第一" },
+  { value: "进阶" as const, sub: "半年~2年 · 动作熟练有基础，追求渐进超负荷" },
+  { value: "老炮" as const, sub: "3年以上 · 多年规律深耕，计划要精细定制" },
 ];
 
 /** 器械偏好 → 动作库 category */

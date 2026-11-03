@@ -1,0 +1,26 @@
+---
+description: Gym UI 规范入口——任何涉及颜色、字号、间距、动效的改动都必须遵守
+alwaysApply: true
+---
+
+# 样式铁律
+
+改任何样式前先读 `gym-ui/DESIGN.md`。所有颜色/圆角/字号/动效只能引用
+`gym-ui/tokens.css` 的变量，禁止写死。
+
+必须满足（违反任一条即为不合格）：
+
+- 不出现裸色值：`#xxx`、`rgb()`、`hsl()`、`oklch()` 一律用 `var(--*)`
+- 文字与背景对比度 ≥ 4.5；亮色品牌色只能当填充，当文字时必须用 `--accent-text`
+- 只动画 `transform` 和 `opacity`，不得动画 `width`/`height`/`top`/`left`
+- 所有 `:hover` 必须包在 `@media (hover: hover) and (pointer: fine)` 内
+- `input`、`textarea`、`select` 字号必须是 16px
+- 所有数字容器加 `class="num"`（tabular-nums）
+- 每屏只有一个主按钮（`--accent` 填充）
+- 必须有 `prefers-reduced-motion` 降级
+- 组件高度用 `100dvh`，不用 `100vh`
+
+复用 `gym-ui/components.css` 已定义的类，不要新造平行组件。
+新建页面前先看 `DESIGN.md` 第 7 节的标准页结构，按固定顺序排。
+
+不确定时提问，不要猜。

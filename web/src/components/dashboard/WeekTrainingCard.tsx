@@ -35,11 +35,8 @@ export function WeekTrainingCard({ week, onDayClick }: Props) {
         </Link>
       </div>
 
-      <div className="mt-3 h-1 overflow-hidden rounded-full bg-line">
-        <div
-          className="h-full rounded-full bg-accent transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
+      <div className="bar-track mt-3">
+        <i style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />
       </div>
 
       <div className="mt-4 grid grid-cols-7 gap-1.5">

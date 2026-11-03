@@ -40,11 +40,11 @@ export function WeightTrendChart({ points }: { points: TrendPoint[] }) {
     const inst = chart.current;
     if (!inst || points.length === 0) return;
 
-    const ink = cssVar("--ink", "#12140f");
-    const muted = cssVar("--ink-muted", "#6b7164");
-    const line = cssVar("--line", "#d8dbd0");
-    const accent = cssVar("--accent", "#c8f000");
-    const bg = cssVar("--bg-elevated", "#ffffff");
+    const ink = cssVar("--text-1", cssVar("--ink", "currentColor"));
+    const muted = cssVar("--text-2", cssVar("--ink-muted", "currentColor"));
+    const line = cssVar("--line", "currentColor");
+    const accent = cssVar("--accent", "currentColor");
+    const bg = cssVar("--surface", cssVar("--bg-elevated", "transparent"));
 
     const labels = points.map((p) => p.date.slice(5));
     const values = points.map((p) => p.weight);
@@ -123,10 +123,11 @@ export function WeightTrendChart({ points }: { points: TrendPoint[] }) {
 }
 
 function hexAlpha(color: string, alpha: number) {
-  const hex = color.replace("#", "");
-  if (hex.length !== 6) return `rgba(200,240,0,${alpha})`;
+  const hex = color.replace("#", "").trim();
+  if (hex.length !== 6) return "var(--accent-soft)";
   const r = parseInt(hex.slice(0, 2), 16);
   const g = parseInt(hex.slice(2, 4), 16);
   const b = parseInt(hex.slice(4, 6), 16);
+  if ([r, g, b].some((n) => Number.isNaN(n))) return "var(--accent-soft)";
   return `rgba(${r},${g},${b},${alpha})`;
 }

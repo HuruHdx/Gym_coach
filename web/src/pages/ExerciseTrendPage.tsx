@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { WeightTrendChart } from "../components/dashboard/WeightTrendChart";
@@ -8,7 +8,6 @@ import type { ExerciseStat, SetLog, TrainingSession } from "../types";
 export function ExerciseTrendPage() {
   const { name: raw = "" } = useParams();
   const name = decodeName(raw);
-  const navigate = useNavigate();
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ["training-sessions"],
@@ -32,15 +31,7 @@ export function ExerciseTrendPage() {
 
   return (
     <div className="flex min-h-full flex-col px-4 pb-8 pt-3">
-      <button
-        type="button"
-        onClick={() => navigate("/training")}
-        className="pressable w-fit text-sm font-bold text-muted"
-      >
-        ← 训练
-      </button>
-
-      <p className="mt-3 text-[11px] font-bold uppercase tracking-widest text-muted">
+      <p className="text-[11px] font-bold uppercase tracking-widest text-muted">
         {stat?.muscle || "动作"}
       </p>
       <h1 className="font-display mt-1 text-[26px] font-bold tracking-tight">{name}</h1>

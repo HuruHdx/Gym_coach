@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { SetLog, TrainingSession } from "../types";
 import { WeightStepper } from "../components/WeightStepper";
 import { RepsStepper } from "../components/RepsStepper";
+import { ReorderItem, ReorderList } from "../components/ReorderList";
 
 export function TodayPage() {
   const navigate = useNavigate();
@@ -21,11 +22,17 @@ export function TodayPage() {
   const [minuteDraft, setMinuteDraft] = useState("45");
   const [openName, setOpenName] = useState<string | null>(null);
   const [pickedOpen, setPickedOpen] = useState(false);
+  const [order, setOrder] = useState<string[]>([]);
+  const orderRef = useRef<string[]>([]);
+  orderRef.current = order;
   const [revising, setRevising] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
   useEffect(() => {
     setLocal(session ?? null);
   }, [session]);
+  useEffect(() => {
+    setOrder([]);
+  }, [session?.id]);
   useEffect(() => {
     // 新一场 / 仍在执行中：退出修正态
     if (session?.status !== "done") setRevising(false);
@@ -38,7 +45,8 @@ export function TodayPage() {
     return () => window.clearInterval(id);
   }, [running]);
 
-  const groups = useMemo(() => groupByExercise(local?.sets || []), [local]);
+  const baseGroups = useMemo(() => groupByExercise(local?.sets || []), [local]);
+  const groups = useMemo(() => sortGroups(baseGroups, order), [baseGroups, order]);
   useEffect(() => {
     if (pickedOpen) return;
     const firstOpen =
@@ -73,6 +81,16 @@ export function TodayPage() {
           };
         });
         const done = sets.filter((s) => s.completed).length;
+        if (body.completed === true) {
+          const name = prev.sets.find((s) => s.id === setId)?.exercise_name;
+          const groupDone =
+            Boolean(name) && sets.filter((s) => s.exercise_name === name).every((s) => s.completed);
+          if (groupDone && name) {
+            const ordered = sortGroups(groupByExercise(sets), orderRef.current);
+            const next = ordered.find((group) => group.sets.some((s) => !s.completed));
+            if (next) setOpenName(next.name);
+          }
+        }
         return { ...prev, sets, progress: { done, total: sets.length } };
       });
       try {
@@ -232,11 +250,8 @@ export function TodayPage() {
         </span>
       </div>
 
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line">
-        <div
-          className="h-full rounded-full bg-accent transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
+      <div className="bar-track mt-3">
+        <i style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />
       </div>
       <p className="mt-1.5 text-xs text-muted">
         {local.progress.done}/{local.progress.total} 组 · {pct}%
@@ -294,68 +309,45 @@ export function TodayPage() {
         )}
       </div>
 
-      <div className="mt-2 space-y-2.5">
-        {groups.map((g) => {
-          const doneCount = g.sets.filter((s) => s.completed).length;
-          const allDone = doneCount === g.sets.length && g.sets.length > 0;
-          const open = openName === g.name;
-          return (
-            <div
-              key={g.name}
-              className="overflow-hidden rounded-xl border border-line bg-elevated transition-colors"
-            >
-              <button
-                type="button"
-                onClick={() => {
+      {groups.length > 1 && !locked ? (
+        <ReorderList
+          ids={groups.map((g) => g.name)}
+          labelOf={(id) => id}
+          onReorder={setOrder}
+          className="mt-2 space-y-2.5"
+        >
+          {groups.map((g) => (
+            <ReorderItem key={g.name} id={g.name}>
+              <ExerciseCard
+                group={g}
+                open={openName === g.name}
+                locked={locked}
+                onToggle={() => {
                   setPickedOpen(true);
-                  setOpenName(open ? null : g.name);
+                  setOpenName(openName === g.name ? null : g.name);
                 }}
-                className="flex w-full items-center justify-between px-3.5 py-3 text-left transition-colors hover:bg-bg/40 active:bg-bg/60"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-display text-base font-bold text-ink">{g.name}</span>
-                  {g.muscle && (
-                    <span className="rounded bg-bg px-1.5 py-0.5 text-[10px] font-bold text-muted">
-                      {g.muscle}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                      allDone ? "bg-ok/15 text-ok" : "bg-bg text-muted"
-                    }`}
-                  >
-                    {doneCount}/{g.sets.length} 组
-                  </span>
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className={`text-muted transition-transform duration-200 ${
-                      open ? "rotate-180" : ""
-                    }`}
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </div>
-              </button>
-              {open && (
-                <ul className="space-y-2 border-t border-line px-3.5 pb-3.5 pt-2.5">
-                  {g.sets.map((s) => (
-                    <SetRow key={s.id} set={s} disabled={locked} onPatch={patchSet} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                onPatch={patchSet}
+              />
+            </ReorderItem>
+          ))}
+        </ReorderList>
+      ) : (
+        <div className="mt-2 space-y-2.5">
+          {groups.map((g) => (
+            <ExerciseCard
+              key={g.name}
+              group={g}
+              open={openName === g.name}
+              locked={locked}
+              onToggle={() => {
+                setPickedOpen(true);
+                setOpenName(openName === g.name ? null : g.name);
+              }}
+              onPatch={patchSet}
+            />
+          ))}
+        </div>
+      )}
 
       {!isDone && needMinutes && (
         <div className="mt-6 rounded-xl border border-line bg-elevated p-4">
@@ -428,12 +420,12 @@ export function TodayPage() {
         <>
           <Link
             to="/recap"
-            className="pressable mt-6 block overflow-hidden rounded-2xl bg-ink p-5 text-bg"
+            className="pressable mt-6 block overflow-hidden rounded-2xl bg-ink p-5 text-accent-ink"
           >
-            <p className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-accent">Done</p>
-            <h2 className="mt-2 font-display text-2xl font-extrabold">今日总结已生成</h2>
-            <p className="mt-2 text-sm text-bg/70">点开看教练对这场的判断。</p>
-            <p className="mt-4 text-sm font-bold text-accent">查看结算 →</p>
+            <p className="text-micro font-semibold uppercase tracking-[0.2em] text-accent-ink opacity-70">Done</p>
+            <h2 className="mt-2 font-display text-display font-semibold">今日总结已生成</h2>
+            <p className="mt-2 text-sm opacity-70">点开看教练对这场的判断。</p>
+            <p className="mt-4 text-sm font-semibold text-accent-ink">查看结算 →</p>
           </Link>
           <button
             type="button"
@@ -482,6 +474,70 @@ function parseDefaultReps(targetReps?: string | null): number {
   return 10;
 }
 
+function ExerciseCard({
+  group,
+  open,
+  locked,
+  onToggle,
+  onPatch,
+}: {
+  group: { name: string; muscle?: string | null; sets: SetLog[] };
+  open: boolean;
+  locked: boolean;
+  onToggle: () => void;
+  onPatch: (id: number, body: Record<string, unknown>) => Promise<void>;
+}) {
+  const doneCount = group.sets.filter((set) => set.completed).length;
+  const allDone = doneCount === group.sets.length && group.sets.length > 0;
+  return (
+    <div className="overflow-hidden rounded-xl border border-line bg-elevated transition-colors">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-3.5 py-3 text-left transition-colors hover:bg-bg/40 active:bg-bg/60"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-display text-base font-bold text-ink">{group.name}</span>
+          {group.muscle && (
+            <span className="shrink-0 rounded bg-bg px-1.5 py-0.5 text-[10px] font-bold text-muted">
+              {group.muscle}
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+              allDone ? "bg-ok/15 text-ok" : "bg-bg text-muted"
+            }`}
+          >
+            {doneCount}/{group.sets.length} 组
+          </span>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+      </button>
+      {open && (
+        <ul className="space-y-1.5 border-t border-line px-3.5 pb-3.5 pt-2.5">
+          {group.sets.map((set) => (
+            <SetRow key={set.id} set={set} disabled={locked} onPatch={onPatch} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SetRow({
   set,
   disabled,
@@ -491,6 +547,7 @@ function SetRow({
   disabled: boolean;
   onPatch: (id: number, body: Record<string, unknown>) => Promise<void>;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const defaultReps = useMemo(() => parseDefaultReps(set.target_reps), [set.target_reps]);
   const currentWeight = set.actual_weight ?? set.target_weight ?? null;
   const currentReps = set.actual_reps ?? defaultReps;
@@ -501,7 +558,6 @@ function SetRow({
     const patch: Record<string, unknown> = {
       completed: nextCompleted,
     };
-    // 首次打勾时，自动填入计划的目标重量和目标次数
     if (nextCompleted) {
       if (set.actual_reps == null) {
         patch.actual_reps = defaultReps;
@@ -512,6 +568,7 @@ function SetRow({
     }
     try {
       await onPatch(set.id, patch);
+      if (nextCompleted) setExpanded(false);
     } catch (e) {
       alert(String(e));
     }
@@ -553,103 +610,109 @@ function SetRow({
 
   const planWeight = set.target_weight != null ? `${set.target_weight}kg` : "自重";
   const planReps = set.target_reps || "8-10次";
+  const line = setLine(set, defaultReps);
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-line/60 bg-bg/80 px-2.5 py-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-semibold text-ink">第 {set.set_index} 组</div>
+    <li className={`rounded-lg border border-line/60 bg-bg/80 ${set.completed ? "opacity-80" : ""}`}>
+      <div className="flex items-center gap-2 py-1 pl-2.5 pr-1">
+        <button
+          type="button"
+          onClick={() => setExpanded((open) => !open)}
+          className="min-w-0 flex-1 py-1.5 text-left"
+        >
+          <span className="text-sm font-bold text-ink">第 {set.set_index} 组</span>
+          <span className="ml-2 font-num text-sm text-muted">{line}</span>
+        </button>
         <button
           type="button"
           disabled={disabled}
-          onClick={toggle}
-          className={`pressable inline-flex items-center gap-1.5 rounded-md border-[1.5px] px-2 py-1 text-[11px] font-bold ${
+          onClick={() => void toggle()}
+          className={`pressable h-10 shrink-0 rounded-full px-3.5 text-xs font-extrabold ${
             set.completed
-              ? "border-accent-ink bg-accent text-accent-ink"
-              : "border-line bg-elevated text-ink"
+              ? "border-2 border-accent-ink bg-accent text-accent-ink"
+              : "border-2 border-line bg-elevated text-ink"
           } disabled:opacity-50`}
+          aria-label={set.completed ? "取消完成本组" : "完成本组"}
         >
-          <span
-            className={`grid h-4 w-4 place-items-center rounded-sm border text-[10px] ${
-              set.completed ? "border-accent-ink" : "border-ink/40"
-            }`}
-          >
-            {set.completed ? "✓" : ""}
-          </span>
-          {set.completed ? "已完成本组" : "完成本组"}
+          {set.completed ? "✓" : "完成"}
         </button>
       </div>
 
-      <div className="grid grid-cols-[3rem_1fr] items-center gap-x-2 gap-y-2 text-xs">
-        <span className="text-[11px] font-bold text-muted">计划</span>
-        <span className="text-[12px] text-ink">
-          {planWeight} × {planReps}
-        </span>
-        <span className="text-[11px] font-bold text-muted">实际</span>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <WeightStepper
-            value={currentWeight}
-            step={2.5}
-            disabled={disabled}
-            label={`${set.exercise_name} 第${set.set_index}组重量`}
-            onChange={handleWeightChange}
-          />
-          <RepsStepper
-            value={currentReps}
-            defaultValue={defaultReps}
-            disabled={disabled}
-            label={`${set.exercise_name} 第${set.set_index}组次数`}
-            onChange={handleRepsChange}
-          />
-        </div>
-      </div>
-
-      <label className="block text-[11px] text-muted">
-        这组感受
-        <input
-          key={set.note ?? ""}
-          defaultValue={set.note ?? ""}
-          disabled={disabled}
-          placeholder="例如：很轻松，可以加重"
-          className="mt-1 w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-xs text-ink outline-none placeholder:text-muted"
-          onBlur={(e) => {
-            const next = e.target.value.trim();
-            if (next === (set.note ?? "")) return;
-            void handleNote(next);
-          }}
-        />
-      </label>
-
-      <div className="border-t border-line/40 pt-2">
-        <p className="text-[11px] text-muted">这组重量感觉，可选</p>
-        <div className="mt-1.5 grid grid-cols-3 gap-1.5">
-          {[
-            { id: "轻松", label: "轻松" },
-            { id: "合适", label: "合适" },
-            { id: "力竭", label: "力竭" },
-          ].map((f) => {
-            const active = set.feeling === f.id;
-            return (
-              <button
-                key={f.id}
-                type="button"
+      {expanded && (
+        <div className="space-y-2 border-t border-line/40 px-2.5 py-2.5">
+          <div className="grid grid-cols-[3rem_1fr] items-center gap-x-2 gap-y-2 text-xs">
+            <span className="text-[11px] font-bold text-muted">计划</span>
+            <span className="text-[12px] text-ink">
+              {planWeight} × {planReps}
+            </span>
+            <span className="text-[11px] font-bold text-muted">实际</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <WeightStepper
+                value={currentWeight}
+                step={2.5}
                 disabled={disabled}
-                onClick={() => handleFeeling(f.id)}
-                className={`pressable rounded-md border py-1.5 text-xs font-bold ${
-                  active
-                    ? f.id === "力竭"
-                      ? "border-rose-500 bg-rose-500 text-white"
-                      : f.id === "轻松"
-                        ? "border-emerald-600 bg-emerald-600 text-white"
-                        : "border-ink bg-ink text-bg"
-                    : "border-line bg-elevated text-ink"
-                } disabled:opacity-50`}
-              >
-                {f.label}
-              </button>
-            );
-          })}
+                label={`${set.exercise_name} 第${set.set_index}组重量`}
+                onChange={handleWeightChange}
+              />
+              <RepsStepper
+                value={currentReps}
+                defaultValue={defaultReps}
+                disabled={disabled}
+                label={`${set.exercise_name} 第${set.set_index}组次数`}
+                onChange={handleRepsChange}
+              />
+            </div>
+          </div>
+
+          <label className="block text-[11px] text-muted">
+            这组感受
+            <input
+              key={set.note ?? ""}
+              defaultValue={set.note ?? ""}
+              disabled={disabled}
+              placeholder="例如：很轻松，可以加重"
+              className="mt-1 w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-xs text-ink outline-none placeholder:text-muted"
+              onBlur={(e) => {
+                const next = e.target.value.trim();
+                if (next === (set.note ?? "")) return;
+                void handleNote(next);
+              }}
+            />
+          </label>
+
+          <div className="border-t border-line/40 pt-2">
+            <p className="text-[11px] text-muted">这组重量感觉，可选</p>
+            <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+              {[
+                { id: "轻松", label: "轻松" },
+                { id: "合适", label: "合适" },
+                { id: "力竭", label: "力竭" },
+              ].map((f) => {
+                const active = set.feeling === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => handleFeeling(f.id)}
+                    className={`pressable rounded-md border py-1.5 text-xs font-bold ${
+                      active
+                        ? f.id === "力竭"
+                          ? "border-rose-500 bg-rose-500 text-white"
+                          : f.id === "轻松"
+                            ? "border-emerald-600 bg-emerald-600 text-white"
+                            : "border-ink bg-ink text-bg"
+                        : "border-line bg-elevated text-ink"
+                    } disabled:opacity-50`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </li>
   );
 }
@@ -671,6 +734,28 @@ function formatClock(seconds: number): string {
   const mm = String(m).padStart(2, "0");
   const ss = String(s).padStart(2, "0");
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function setLine(set: SetLog, defaultReps: number): string {
+  const weight = set.completed ? (set.actual_weight ?? set.target_weight) : set.target_weight;
+  const reps = set.completed
+    ? set.actual_reps != null
+      ? String(set.actual_reps)
+      : set.target_reps || String(defaultReps)
+    : set.target_reps || String(defaultReps);
+  const weightText = weight != null && weight > 0 ? `${weight}kg` : "自重";
+  return `${weightText} × ${reps}`;
+}
+
+function sortGroups<T extends { name: string }>(groups: T[], order: string[]): T[] {
+  if (order.length === 0) return groups;
+  const map = new Map(groups.map((group) => [group.name, group]));
+  const picked = order.flatMap((name) => {
+    const group = map.get(name);
+    return group ? [group] : [];
+  });
+  const rest = groups.filter((group) => !order.includes(group.name));
+  return [...picked, ...rest];
 }
 
 function groupByExercise(sets: SetLog[]) {

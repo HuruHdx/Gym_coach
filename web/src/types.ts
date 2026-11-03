@@ -12,6 +12,8 @@ export type Profile = {
   session_minutes: number;
   injuries: string[];
   preferences: string[];
+  /** 聊天里确认后不再排的动作。旧数据可能没有这个字段。 */
+  avoid_exercises?: string[];
   avoid_foods: string[];
   protein_target_g: number | null;
   calorie_target: number | null;
@@ -48,6 +50,20 @@ export type AgentReply = {
   blocks: Block[];
   suggestions?: Suggestion[];
   trace_id?: number | null;
+};
+
+export type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  card?: CardBlock | null;
+  suggestions?: Suggestion[];
+  created_at?: string | null;
+};
+
+export type ConversationState = {
+  conversation_id: string;
+  messages: ConversationMessage[];
 };
 
 export type SetLog = {
@@ -91,6 +107,9 @@ export type ExerciseStat = {
   last_outcome?: string | null;
   best_weight?: number | null;
   trend: string;
+  estimate_1rm?: number | null;
+  best_estimate_1rm?: number | null;
+  history?: number[];
 };
 
 export type WeekDayCell = {
@@ -110,6 +129,10 @@ export type WeekRhythm = {
   trained_days: number;
   target_days: number;
   sessions: number;
+  period?: "week" | "month" | string;
+  compare_label?: string;
+  volume_kg?: number;
+  volume_delta_pct?: number | null;
 };
 
 export type MusclePulse = {
@@ -159,6 +182,7 @@ export type KeyLift = {
   trend: string;
   is_pr: boolean;
   last_date?: string | null;
+  history?: number[];
 };
 
 export type TrainingDashboard = {
@@ -188,9 +212,11 @@ export function rebuildSubtitle(meta: Record<string, unknown>): string {
   const sets = meta.sets;
   const reps = (meta.reps as string) || "-";
   const weight = meta.weight;
+  const timed = /分钟|秒/.test(reps) || meta.no_load === true;
   const parts: string[] = [];
-  if (sets != null) parts.push(`${sets}×${reps}`);
+  if (timed) parts.push(String(reps));
+  else if (sets != null) parts.push(`${sets}×${reps}`);
   else parts.push(String(reps));
-  if (weight != null) parts.push(`建议 ${weight}kg`);
+  if (weight != null && !timed) parts.push(`建议 ${weight}kg`);
   return parts.join(" · ");
 }

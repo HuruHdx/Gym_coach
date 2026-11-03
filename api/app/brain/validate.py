@@ -7,6 +7,7 @@ from app.schemas import CardBlock, CardItem, CardStatus, CardType, TextBlock
 from app.taxonomy import Muscle, canonicalize_exercise
 
 _ALLOWED_MUSCLES = {m.value for m in Muscle}
+_NO_WEIGHT_MODALITIES = frozenset({"有氧", "HIIT", "灵活性"})
 
 
 def _rebuild_subtitle(meta: dict[str, Any]) -> str:
@@ -47,9 +48,12 @@ def validate_and_build_blocks(raw: dict[str, Any], injuries: list[str]) -> list[
             dropped.append(title)
             continue
         detail = EXERCISE_BY_NAME.get(title)
-        if detail and detail.get("category") == "自重":
+        modality = (detail or {}).get("modality") or "抗阻"
+        meta["modality"] = modality
+        if detail and (detail.get("category") == "自重" or modality in _NO_WEIGHT_MODALITIES):
             meta.pop("weight", None)
             meta["bodyweight"] = True
+            meta["no_load"] = modality in _NO_WEIGHT_MODALITIES
         chosen = str(meta.get("muscle") or muscle).strip()
         allowed_roles = roles_of(title, detail)
         if chosen in _ALLOWED_MUSCLES and (not allowed_roles or chosen in allowed_roles or not detail):

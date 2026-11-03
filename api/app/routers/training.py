@@ -23,7 +23,7 @@ from app.schemas import (
     TrainingDashboardOut,
 )
 from app.services import session_service as svc
-from app.services.analytics_service import build_dashboard
+from app.services.analytics_service import build_dashboard, recent_top_weights
 
 log = logging.getLogger("gym.session")
 
@@ -224,11 +224,14 @@ async def _coach_note(facts: str) -> tuple[str | None, str | None, bool]:
 
 @router.get("/dashboard", response_model=TrainingDashboardOut)
 def training_dashboard(
+    period: str = "week",
     session: Session = Depends(get_session),
     _: str = Depends(require_token),
 ):
-    """Pure-code week / 30d / same-muscle compare — no LLM."""
-    return TrainingDashboardOut.model_validate(build_dashboard(session))
+    """Pure-code week or month rhythm, plus 30d / same-muscle compare — no LLM."""
+    if period not in ("week", "month"):
+        period = "week"
+    return TrainingDashboardOut.model_validate(build_dashboard(session, period=period))
 
 
 @router.get("/sessions", response_model=list[SessionOut])
@@ -287,6 +290,7 @@ def list_exercises(
 ):
     mine = {m.name: m for m in session.exec(select(MyExercise)).all()}
     stats = {s.exercise_name: s for s in session.exec(select(ExerciseStats)).all()}
+    histories = recent_top_weights(session)
     names = sorted(set(mine) | set(stats))
     out: list[ExerciseStatOut] = []
     for name in names:
@@ -302,6 +306,9 @@ def list_exercises(
                 last_outcome=s.last_outcome if s else None,
                 best_weight=s.best_weight if s else None,
                 trend=s.trend if s else "→",
+                estimate_1rm=s.estimate_1rm if s else None,
+                best_estimate_1rm=s.best_estimate_1rm if s else None,
+                history=histories.get(name, []),
             )
         )
     return out

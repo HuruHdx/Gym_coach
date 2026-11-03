@@ -2,47 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Gym UI 桥接层：旧 Tailwind 类名继续用，色值只来自 gym-ui/tokens.css。
+  不在这里发明新颜色；别名只做映射。
+*/
+
+/* 旧变量名 → Gym UI token（组件里大量 var(--ink) / bg-elevated） */
 :root,
-[data-skin="court"] {
-  --bg: #f2f3ee;
-  --bg-elevated: #ffffff;
-  --ink: #12140f;
-  --ink-muted: #6b7164;
-  --line: #d8dbd0;
-  --accent: #c8f000;
-  --accent-ink: #1a2200;
-  --danger: #e23d2d;
-  --ok: #2f6b3a;
-  --hero-a: #e8ecd8;
-  --hero-b: #f2f3ee;
-}
-
-[data-skin="cobalt"] {
-  --bg: #eef1f6;
-  --bg-elevated: #ffffff;
-  --ink: #0f1724;
-  --ink-muted: #5b6578;
-  --line: #d2d8e4;
-  --accent: #2f6bff;
-  --accent-ink: #f4f7ff;
-  --danger: #e23d2d;
-  --ok: #1f7a4c;
-  --hero-a: #dce6ff;
-  --hero-b: #eef1f6;
-}
-
-[data-skin="ember"] {
-  --bg: #f3f0ec;
-  --bg-elevated: #fffcfa;
-  --ink: #1a1410;
-  --ink-muted: #7a6e64;
-  --line: #e0d6cc;
-  --accent: #ff5a1f;
-  --accent-ink: #fff8f4;
-  --danger: #c62828;
-  --ok: #2f6b3a;
-  --hero-a: #ffe0d0;
-  --hero-b: #f3f0ec;
+[data-theme="lavender"],
+[data-theme="mint"],
+[data-theme="dark"],
+[data-skin="lavender"],
+[data-skin="mint"],
+[data-skin="dark"] {
+  --bg-elevated: var(--surface);
+  --ink: var(--text-1);
+  --ink-muted: var(--text-2);
+  --ok: var(--done-text);
+  --hero-a: var(--tint);
+  --hero-b: var(--bg);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
 }
 
 html,
@@ -52,24 +33,68 @@ body,
   height: 100dvh;
 }
 
-body {
-  margin: 0;
-  font-family: "Source Sans 3", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-}
-
+/* 旧展示字体类：跟系统字走，避免另套字重阶梯 */
 .font-display {
-  font-family: "Manrope", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  letter-spacing: -0.01em;
+  font-family: var(--font-sans);
+  letter-spacing: -0.02em;
 }
 
-/* 重量等数字：等宽、易读，避免展示字体变形 */
-.font-num {
-  font-family: "Source Sans 3", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+.court-profile {
+  font-family: var(--font-sans);
+}
+
+/* 数字：兼容旧 .font-num，对齐规范 .num */
+.font-num,
+.num {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
+  letter-spacing: 0;
+}
+
+/* 字重封顶 600（§2） */
+.font-bold,
+.font-semibold,
+.font-extrabold,
+.font-black {
+  font-weight: var(--fw-strong);
+}
+
+/* 亮色强调只当填充；文字走 --accent-text（§1） */
+.text-accent {
+  color: var(--accent-text);
+}
+.bg-accent {
+  background-color: var(--accent);
+}
+.text-accent-ink {
+  color: var(--accent-ink);
+}
+.bg-ok\/15 {
+  background-color: var(--done-bg);
+}
+.text-ok {
+  color: var(--done-text);
+}
+.text-danger {
+  color: var(--danger);
+}
+.bg-danger {
+  background-color: var(--danger);
+}
+
+/* 圆角对齐 token（§3） */
+.rounded-sm {
+  border-radius: var(--r-sm);
+}
+.rounded-md {
+  border-radius: var(--r-md);
+}
+.rounded-lg,
+.rounded-xl {
+  border-radius: var(--r-lg);
+}
+.rounded-2xl {
+  border-radius: var(--r-xl);
 }
 
 .noise::before {
@@ -77,32 +102,71 @@ body {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.04;
+  opacity: 0.035;
   z-index: 0;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* 点击 / 按压缩放 */
+/* 按压：只动 transform / opacity（§4） */
 .pressable {
-  transition: transform 0.14s ease, opacity 0.14s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  transition: transform var(--dur-press) var(--ease-out), opacity var(--dur-press) var(--ease-out);
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  touch-action: manipulation;
 }
 .pressable:active {
-  transform: scale(0.96);
+  transform: scale(0.98);
 }
 
 button,
 a,
 .tap {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
-/* 页面内容入场 */
+/* 进度条：用 scaleX，禁止动画 width（§4） */
+.bar-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+.bar-track > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-move) var(--ease-out);
+}
+
+/* Tab 底条：固定宽，用 scaleX */
+.tab-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  height: 2px;
+  width: 24px;
+  margin-left: -12px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform var(--dur-state) var(--ease-out), opacity var(--dur-state) var(--ease-out);
+}
+.tab-indicator.on {
+  transform: scaleX(1);
+  opacity: 1;
+}
+
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -110,56 +174,69 @@ a,
   }
 }
 .rise-in {
-  animation: rise-in 0.28s ease-out both;
+  animation: rise-in var(--dur-move) var(--ease-out) both;
 }
 .rise-in-delay-1 {
-  animation-delay: 0.05s;
+  animation-delay: 40ms;
 }
 .rise-in-delay-2 {
-  animation-delay: 0.1s;
+  animation-delay: 80ms;
 }
 .rise-in-delay-3 {
-  animation-delay: 0.15s;
+  animation-delay: 120ms;
 }
 
 @keyframes pop {
-  0% {
-    transform: scale(0.92);
+  from {
+    opacity: 0;
+    transform: scale(0.96);
   }
-  60% {
-    transform: scale(1.03);
-  }
-  100% {
+  to {
+    opacity: 1;
     transform: scale(1);
   }
 }
 .pop-in {
-  animation: pop 0.28s ease-out both;
+  animation: pop var(--dur-move) var(--ease-out) both;
 }
 
-/* 结算海报：深色氛围，参考训练完成海报模板 */
+/* 海报/结算：分享场合可用深色底；色值用 mask/深色主题变量，避免再写一套 Court 渐变 */
 .recap-poster {
-  background:
-    radial-gradient(ellipse 80% 50% at 85% 18%, rgba(56, 189, 248, 0.22), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 10% 85%, rgba(214, 255, 58, 0.12), transparent 50%),
-    linear-gradient(165deg, #0b1220 0%, #101826 42%, #0a0f18 100%);
-  color: #fff;
+  background: var(--bg);
+  color: var(--text-1);
 }
-.recap-orbit {
-  border: 1px solid rgba(103, 232, 249, 0.35);
-  box-shadow:
-    0 0 60px rgba(34, 211, 238, 0.2),
-    inset 0 0 40px rgba(34, 211, 238, 0.08);
-}
-.recap-grid {
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent 85%);
-}
-.recap-panel {
-  box-shadow: 0 0 0 1px rgba(214, 255, 58, 0.08), 0 12px 40px rgba(0, 0, 0, 0.35);
+[data-theme="dark"] .recap-poster,
+.recap-poster.is-poster {
+  background: var(--bg);
+  color: var(--text-1);
 }
 
+/* 触屏不粘 hover（§4）：只在 fine pointer 下响应常见 hover 类 */
+@media (hover: hover) and (pointer: fine) {
+  .hover\:bg-bg:hover {
+    background-color: var(--bg);
+  }
+  .hover\:bg-elevated:hover {
+    background-color: var(--surface);
+  }
+  .hover\:text-ink:hover {
+    color: var(--text-1);
+  }
+  .hover\:text-danger:hover {
+    color: var(--danger);
+  }
+  .hover\:border-ink:hover {
+    border-color: var(--line-strong);
+  }
+  .hover\:border-ink\/30:hover,
+  .hover\:border-ink\/40:hover {
+    border-color: var(--line-strong);
+  }
+}
 
+/* 压过 Tailwind text-xs/sm，保证 iOS 不缩放（§5.1） */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea,
+select {
+  font-size: 16px;
+}

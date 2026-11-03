@@ -57,6 +57,7 @@ class ProfileOut(BaseModel):
     session_minutes: int
     injuries: list[str]
     preferences: list[str]
+    avoid_exercises: list[str] = Field(default_factory=list)
     avoid_foods: list[str]
     protein_target_g: Optional[float]
     calorie_target: Optional[float]
@@ -134,10 +135,94 @@ class ChatDraftItem(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChatHistoryTurn(BaseModel):
+    """一轮对话摘要：给模型看的短上下文，不是前端全量气泡。"""
+
+    role: Literal["user", "assistant"]
+    text: str = Field(default="", max_length=800)
+    card_title: Optional[str] = None
+    card_items: list[str] = Field(default_factory=list)
+
+
+class EvalThresholds(BaseModel):
+    hit: float = 0.82
+    miss: float = 0.55
+    margin: float = 0.12
+
+
+class EvalProfileIn(BaseModel):
+    goal: str = "增肌"
+    experience: str = "新手"
+    weight_kg: float = 70
+    days_per_week: int = 4
+    injuries: list[str] = Field(default_factory=list)
+
+
+class SearchHitIn(BaseModel):
+    title: str = ""
+    url: str = ""
+    snippet: str = ""
+
+
+class StatsFixtureItem(BaseModel):
+    name: str = ""
+    last_weight: float = 0
+    last_reps: int = 0
+    trend: str = ""
+
+
+class EvalQaRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    history: list[ChatHistoryTurn] = Field(default_factory=list, max_length=24)
+    profile: Optional[EvalProfileIn] = None
+    draft_title: Optional[str] = None
+    draft_items: list[ChatDraftItem] = Field(default_factory=list)
+    thresholds: Optional[EvalThresholds] = None
+    search_mode: Literal["fixture", "live", "off"] = "fixture"
+    # intent：只跑意图，跳过检索和回答。full：原评测路径。
+    mode: Literal["full", "intent"] = "full"
+    search_fixture: list[SearchHitIn] = Field(default_factory=list)
+    stats_fixture: list[StatsFixtureItem] = Field(default_factory=list)
+
+
 class ChatRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     draft_title: Optional[str] = None
     draft_items: list[ChatDraftItem] = Field(default_factory=list)
+    # 当前句之前的近几轮；不含本句 text
+    history: list[ChatHistoryTurn] = Field(default_factory=list, max_length=24)
+
+
+FEEDBACK_TAGS = (
+    "wrong_topic",
+    "wrong_route",
+    "bad_answer",
+    "bad_plan",
+    "tone",
+    "other",
+)
+
+
+class FeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    note: str = Field(default="", max_length=500)
+    trace_id: Optional[int] = None
+    assistant_turn_id: Optional[int] = None
+
+
+class FeedbackOut(BaseModel):
+    id: int
+    rating: Literal["up", "down"]
+    tags: list[str] = Field(default_factory=list)
+    note: str = ""
+    conversation_id: str = ""
+    assistant_turn_id: Optional[int] = None
+    trace_id: Optional[int] = None
+    question: str = ""
+    answer: str = ""
+    export_status: str = "pending"
+    created_at: Optional[datetime] = None
 
 
 # ---------- Training (Phase 1) ----------
@@ -225,6 +310,9 @@ class ExerciseStatOut(BaseModel):
     last_outcome: Optional[str] = None
     best_weight: Optional[float] = None
     trend: str = "→"
+    estimate_1rm: Optional[float] = None  # 动态基准：最近5次反推平均
+    best_estimate_1rm: Optional[float] = None  # 进步锚点：历史最高反推值
+    history: list[float] = Field(default_factory=list)  # 最近几次最高组重量，旧→新
 
 
 class ExerciseOption(BaseModel):
@@ -261,6 +349,10 @@ class WeekRhythmOut(BaseModel):
     trained_days: int
     target_days: int
     sessions: int
+    period: str = "week"  # week | month
+    compare_label: str = "上周"
+    volume_kg: float = 0
+    volume_delta_pct: Optional[float] = None
 
 
 class MusclePulseOut(BaseModel):
@@ -310,6 +402,7 @@ class KeyLiftOut(BaseModel):
     trend: str = "→"
     is_pr: bool = False
     last_date: Optional[str] = None
+    history: list[float] = Field(default_factory=list)
 
 
 class TrainingDashboardOut(BaseModel):

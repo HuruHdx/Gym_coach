@@ -346,6 +346,34 @@ def recompute_stats_for_exercise(
         stats.last_feeling = latest.feeling
     stats.best_weight = best
     stats.trend = trend
+
+    # ── 1RM 估算（Epley 反推，自动算，不用用户填） ──
+    # 取最近5次有重量×次数的完成组，反推 1RM 后取平均
+    import json
+    recent_1rm: list[float] = []
+    for r in rows[:5]:
+        if r.actual_weight is None or r.actual_reps is None or r.actual_reps <= 0:
+            continue
+        # Epley 公式：1RM = weight × (1 + reps/30)
+        est = r.actual_weight * (1 + r.actual_reps / 30)
+        recent_1rm.append(round(est, 1))
+
+    if recent_1rm:
+        # 新反推值去重后保留最近5次，取平均作为动态基准
+        existing = []
+        if stats.recent_1rm_samples:
+            try:
+                existing = json.loads(stats.recent_1rm_samples)
+            except (json.JSONDecodeError, TypeError):
+                existing = []
+        # 合并新值（只保留最近5次）
+        merged = (existing + recent_1rm)[-5:]
+        stats.recent_1rm_samples = json.dumps(merged)
+        stats.estimate_1rm = round(sum(merged) / len(merged), 1)
+        # 进步锚点：只涨不跌
+        if stats.best_estimate_1rm is None or stats.estimate_1rm > stats.best_estimate_1rm:
+            stats.best_estimate_1rm = stats.estimate_1rm
+
     stats.updated_at = utcnow()
     session.add(stats)
 

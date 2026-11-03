@@ -2,11 +2,24 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 
+type GraphStep = {
+  node: string;
+  ms?: number;
+  route?: string;
+  intent?: string;
+  text?: string;
+  parse_ok?: boolean;
+  error?: string | null;
+  titles?: string[];
+};
+
 type Trace = {
   id: number;
   created_at: string;
   user_text: string;
-  payload: Record<string, unknown>;
+  payload: {
+    graph?: { route?: string; steps?: GraphStep[] };
+  } & Record<string, unknown>;
 };
 
 export function DebugPage() {
@@ -23,7 +36,7 @@ export function DebugPage() {
           返回
         </Link>
       </div>
-      <p className="mt-1 text-xs text-muted">意图 → 记忆包 → 模型 → 块。点刷新拉取最新。</p>
+      <p className="mt-1 text-xs text-muted">每次聊天走的节点。点开可看完整输入输出。</p>
       <button
         type="button"
         onClick={() => refetch()}
@@ -36,7 +49,21 @@ export function DebugPage() {
           <details key={t.id} className="rounded-md border border-line bg-elevated p-3">
             <summary className="cursor-pointer font-display text-sm font-bold">
               #{t.id} · {t.user_text}
+              {t.payload.graph?.route ? ` · ${t.payload.graph.route}` : ""}
             </summary>
+            {t.payload.graph?.steps && t.payload.graph.steps.length > 0 && (
+              <ol className="mt-3 space-y-1.5">
+                {t.payload.graph.steps.map((step, i) => (
+                  <li key={`${step.node}-${i}`} className="flex items-baseline justify-between gap-3 text-xs">
+                    <span className="font-bold">
+                      {i + 1}. {step.node}
+                      {step.route ? ` → ${step.route}` : ""}
+                    </span>
+                    <span className="shrink-0 font-num text-muted">{step.ms ?? 0} ms</span>
+                  </li>
+                ))}
+              </ol>
+            )}
             <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] text-muted">
               {JSON.stringify(t.payload, null, 2)}
             </pre>

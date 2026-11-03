@@ -1,9 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Apple,
+  BarChart3,
+  Dumbbell,
+  LayoutGrid,
+  PersonStanding,
+  RefreshCw,
+  Scale,
+  StretchHorizontal,
+  Zap,
+} from "lucide-react";
 import { api } from "../lib/api";
 import { DraftCard } from "../components/DraftCard";
-import type { AgentReply, Block, CardBlock, Profile, Suggestion, TrainingSession } from "../types";
+import { MessageFeedback } from "../components/MessageFeedback";
+import type {
+  AgentReply,
+  Block,
+  CardBlock,
+  ConversationMessage,
+  ConversationState,
+  Profile,
+  Suggestion,
+  TrainingSession,
+} from "../types";
 
 type ChatMessage =
   | {
@@ -30,38 +51,67 @@ type ChatMessage =
       createdAt?: number;
     };
 
-function startOfLocalDay(ts = Date.now()) {
-  const d = new Date(ts);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
+type CoachAction = {
+  id: string;
+  title: string;
+  sub: string;
+  icon: ReactNode;
+} & (
+  | { kind: "prompt"; prompt: string }
+  | { kind: "nav"; to: string }
+  | { kind: "soon" }
+);
+
+const iconCls = "h-4 w-4";
 
 function isDraftLocked(status: string | undefined) {
   return status === "confirmed" || status === "expired";
 }
 
-/** 跨自然日的未采纳草稿失效，避免昨天计划今天还能再点采纳 */
-function sanitizeChatHistory(messages: ChatMessage[]): ChatMessage[] {
-  const today0 = startOfLocalDay();
-  return messages.map((m) => {
-    if (m.role !== "assistant" || !m.card || m.card.card_type !== "training_draft") {
-      return m;
-    }
-    if (isDraftLocked(m.card.status)) return m;
-    const created = m.createdAt ?? 0;
-    // 无时间戳的旧缓存、或非今天生成的草稿 → 失效
-    if (!created || created < today0) {
+function createdAtMs(iso: string | null | undefined) {
+  if (!iso) return Date.now();
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : Date.now();
+}
+
+function asSuggestions(raw: ConversationMessage["suggestions"]): Suggestion[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items = raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const label = typeof item.label === "string" ? item.label.trim() : "";
+    const prompt = typeof item.prompt === "string" ? item.prompt.trim() : "";
+    if (!label && !prompt) return [];
+    return [{ label: label || prompt, prompt: prompt || label }];
+  });
+  return items.length ? items : undefined;
+}
+
+function asCard(raw: ConversationMessage["card"]): CardBlock | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  return { ...raw, status: raw.status || "draft" };
+}
+
+function fromApiMessages(rows: ConversationMessage[]): ChatMessage[] {
+  return rows.map((row) => {
+    if (row.role === "user") {
       return {
-        ...m,
-        card: {
-          ...m.card,
-          status: "expired",
-          actions: [],
-          meta: { ...m.card.meta, expired_reason: "stale_day" },
-        },
+        id: row.id,
+        role: "user" as const,
+        text: row.text,
+        createdAt: createdAtMs(row.created_at),
       };
     }
-    return m;
+    const card = asCard(row.card);
+    const suggestions = asSuggestions(row.suggestions);
+    return {
+      id: row.id,
+      role: "assistant" as const,
+      text: row.text,
+      card,
+      suggestions,
+      awaitingConfirm: Boolean(suggestions?.length) && !card,
+      createdAt: createdAtMs(row.created_at),
+    };
   });
 }
 
@@ -72,18 +122,67 @@ const THINKING_STEPS = [
   "正在生成专属组次、次数与负荷草稿...",
 ];
 
-const CHAT_STORAGE_KEY = "gym_coach_chat_history";
-
-function quickPrompts(injuries: string[]) {
+function buildActions(injuries: string[]): CoachAction[] {
   const knee = injuries.some((item) => item.includes("膝"));
   const lowerBack = injuries.some((item) => item.includes("腰"));
   const guards = [knee ? "膝盖" : "", lowerBack ? "腰" : ""].filter(Boolean);
   const legPrompt = guards.length ? `今天练腿，注意保护${guards.join("和")}` : "今天练腿";
+
   return [
-    { label: "定制胸训", prompt: "今天练胸，安排40分钟", icon: "⚡" },
-    { label: "定制背训", prompt: "今天练背，想强化背部宽度", icon: "🎯" },
-    { label: "练腿安排", prompt: legPrompt, icon: "🦵" },
-    { label: "全身快练", prompt: "随便来一套全身循环，30分钟", icon: "⏱️" },
+    {
+      id: "chest",
+      title: "生成胸训",
+      sub: "按画像排胸日草稿，可改再采纳",
+      icon: <Dumbbell className={iconCls} strokeWidth={1.75} />,
+      kind: "prompt",
+      prompt: "今天练胸，安排40分钟",
+    },
+    {
+      id: "back",
+      title: "生成背训",
+      sub: "强化背部宽度，带上次重量",
+      icon: <StretchHorizontal className={iconCls} strokeWidth={1.75} />,
+      kind: "prompt",
+      prompt: "今天练背，想强化背部宽度",
+    },
+    {
+      id: "legs",
+      title: "练腿安排",
+      sub: guards.length ? `已避开 ${guards.join("、")}` : "按恢复窗口排腿日",
+      icon: <PersonStanding className={iconCls} strokeWidth={1.75} />,
+      kind: "prompt",
+      prompt: legPrompt,
+    },
+    {
+      id: "full",
+      title: "全身快练",
+      sub: "约 30 分钟循环，赶时间也能练",
+      icon: <Zap className={iconCls} strokeWidth={1.75} />,
+      kind: "prompt",
+      prompt: "随便来一套全身循环，30分钟",
+    },
+    {
+      id: "weight",
+      title: "记体重",
+      sub: "跳到「我的」记一笔趋势",
+      icon: <Scale className={iconCls} strokeWidth={1.75} />,
+      kind: "nav",
+      to: "/me",
+    },
+    {
+      id: "food",
+      title: "记饮食",
+      sub: "即将上线",
+      icon: <Apple className={iconCls} strokeWidth={1.75} />,
+      kind: "soon",
+    },
+    {
+      id: "analyze",
+      title: "分析数据",
+      sub: "即将上线",
+      icon: <BarChart3 className={iconCls} strokeWidth={1.75} />,
+      kind: "soon",
+    },
   ];
 }
 
@@ -97,6 +196,10 @@ export function CoachPage({ profile }: Props) {
     queryKey: ["training-today"],
     queryFn: () => api<TrainingSession | null>("/api/training/today"),
   });
+  const { data: conversation, isLoading: conversationLoading } = useQuery({
+    queryKey: ["chat-conversation"],
+    queryFn: () => api<ConversationState>("/api/chat/conversation"),
+  });
   const todayStatus: "none" | "active" | "done" = !todaySession
     ? "none"
     : todaySession.status === "done"
@@ -105,65 +208,30 @@ export function CoachPage({ profile }: Props) {
         ? "active"
         : "none";
 
-  const prompts = quickPrompts(profile.injuries || []);
+  const actions = buildActions(profile.injuries || []);
+  const primaryActions = actions.filter((item) => item.kind === "prompt");
+  const secondaryActions = actions.filter((item) => item.kind !== "prompt");
+  const promptChips = primaryActions;
   const [inputVal, setInputVal] = useState("");
   const [busy, setBusy] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as ChatMessage[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return sanitizeChatHistory(parsed);
-        }
-      }
-    } catch {
-      // ignore
-    }
-    // 恢复上一次的草稿（仅限当天未过期）
-    const raw = sessionStorage.getItem("last_reply");
-    if (!raw) return [];
-    try {
-      const reply = JSON.parse(raw) as AgentReply;
-      const textBlock = reply.blocks.find(
-        (b): b is Extract<Block, { kind: "text" }> => b.kind === "text",
-      );
-      const cardBlock = reply.blocks.find(
-        (b): b is CardBlock => b.kind === "card",
-      );
-      return sanitizeChatHistory([
-        {
-          id: "init-assistant",
-          role: "assistant",
-          text: textBlock?.text || "这是为你生成的建议：",
-          card: cardBlock,
-          suggestions: reply.suggestions,
-          awaitingConfirm: Boolean(reply.suggestions?.length) && !cardBlock,
-          traceId: reply.trace_id,
-          createdAt: Date.now(),
-        },
-      ]);
-    } catch {
-      return [];
-    }
-  });
+  const [toast, setToast] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    // 剔除正在思考的气泡，持久化存储最近 50 条消息
-    const persistent = messages.filter((m) => m.role !== "thinking").slice(-50);
-    if (persistent.length > 0) {
-      try {
-        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(persistent));
-      } catch {
-        // ignore
-      }
-    }
-  }, [messages]);
+    if (!conversation || hydrated) return;
+    setMessages(fromApiMessages(conversation.messages || []));
+    setHydrated(true);
+  }, [conversation, hydrated]);
 
-  // 自动滚动到底部
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
+
+  function flash(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 1600);
+  }
 
   async function handleSend(textToSend?: string) {
     const text = (textToSend ?? inputVal).trim();
@@ -172,7 +240,6 @@ export function CoachPage({ profile }: Props) {
     const userMsgId = `user-${Date.now()}`;
     const thinkingId = `thinking-${Date.now()}`;
 
-    // 1. 立即上屏用户气泡 & 思考气泡
     setMessages((prev) => [
       ...prev,
       { id: userMsgId, role: "user", text, createdAt: Date.now() },
@@ -184,7 +251,6 @@ export function CoachPage({ profile }: Props) {
     const startTime = Date.now();
     let stepIdx = 0;
 
-    // 思考动态计时器
     const timer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       stepIdx = (stepIdx + 1) % THINKING_STEPS.length;
@@ -219,19 +285,15 @@ export function CoachPage({ profile }: Props) {
             })) ?? [],
         }),
       });
-      sessionStorage.setItem("last_reply", JSON.stringify(reply));
 
       const totalElapsed = Math.max(1, Math.round((Date.now() - startTime) / 1000));
       const textBlock = reply.blocks.find(
         (b): b is Extract<Block, { kind: "text" }> => b.kind === "text",
       );
-      const cardBlock = reply.blocks.find(
-        (b): b is CardBlock => b.kind === "card",
-      );
+      const cardBlock = reply.blocks.find((b): b is CardBlock => b.kind === "card");
 
       clearInterval(timer);
 
-      // 2. 将思考气泡替换为正式 AI 回复气泡
       setMessages((prev) =>
         prev.map((m) =>
           m.id === thinkingId
@@ -251,6 +313,7 @@ export function CoachPage({ profile }: Props) {
             : m,
         ),
       );
+      void qc.invalidateQueries({ queryKey: ["chat-conversation"] });
     } catch (e) {
       clearInterval(timer);
       setMessages((prev) =>
@@ -283,7 +346,6 @@ export function CoachPage({ profile }: Props) {
         m.id === msgId && m.role === "assistant" ? { ...m, card: confirmedCard } : m,
       ),
     );
-    sessionStorage.removeItem("last_reply");
     void qc.invalidateQueries({ queryKey: ["training-today"] });
     void qc.invalidateQueries({ queryKey: ["training-sessions"] });
     void qc.invalidateQueries({ queryKey: ["training-dashboard"] });
@@ -291,218 +353,263 @@ export function CoachPage({ profile }: Props) {
     navigate("/");
   }
 
-  function clearHistory() {
-    setMessages([]);
-    localStorage.removeItem(CHAT_STORAGE_KEY);
-    sessionStorage.removeItem("last_reply");
+  async function startNewChat() {
+    if (busy) return;
+    try {
+      const next = await api<ConversationState>("/api/chat/conversation", {
+        method: "POST",
+      });
+      setMessages(fromApiMessages(next.messages || []));
+      setHydrated(true);
+      void qc.setQueryData(["chat-conversation"], next);
+    } catch (e) {
+      alert(`无法开始新对话：${String(e)}`);
+    }
   }
 
+  function runAction(action: CoachAction) {
+    if (busy) return;
+    if (action.kind === "prompt") {
+      void handleSend(action.prompt);
+      return;
+    }
+    if (action.kind === "nav") {
+      navigate(action.to);
+      return;
+    }
+    flash("即将上线");
+  }
+
+  const showThread = hydrated && messages.length > 0;
+  const showWelcome = hydrated && messages.length === 0 && !conversationLoading;
+
+  const bottomChips = showWelcome ? actions : promptChips;
+
   return (
-    <div className="flex min-h-full flex-col px-4 pb-3 pt-3">
-      {/* 顶部标题区 */}
-      <div className="flex items-center justify-between border-b border-line pb-2.5">
-        <div>
-          <div className="flex items-center gap-1.5">
-            <span className="grid h-2.5 w-2.5 rounded-full bg-accent animate-pulse" />
-            <h1 className="font-display text-xl font-bold tracking-tight">AI 专属教练</h1>
-          </div>
-          <p className="mt-0.5 text-[11px] text-muted">
-            {profile.goal} · {profile.experience} · {profile.weight_kg}kg
-            {profile.session_minutes ? ` · ${profile.session_minutes}分` : ""}
-            {profile.preferences?.length && profile.preferences.length < 4
-              ? ` · ${profile.preferences.join("/")}`
-              : ""}
-            {profile.injuries.length > 0
-              ? ` · 伤痛规避(${profile.injuries.join("、")})`
-              : " · 无伤痛记录"}
-          </p>
-        </div>
-        {messages.length > 0 && (
-          <button
-            type="button"
-            onClick={clearHistory}
-            className="pressable rounded-md border border-line bg-elevated px-2 py-1 text-[11px] font-bold text-muted hover:text-ink"
-          >
-            清空对话
-          </button>
-        )}
-      </div>
-
-      {/* 对话流区 */}
-      <div className="flex-1 space-y-4 py-4">
-        {/* 空对话时的欢迎卡片 */}
-        {messages.length === 0 && (
-          <div className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-5 rise-in">
-            <div className="flex items-center gap-2">
-              <div className="grid h-8 w-8 place-items-center rounded-full bg-ink font-display text-xs font-black text-accent">
-                AI
-              </div>
-              <span className="font-display text-base font-bold">Hi，我是你的私教</span>
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-muted">
-              告诉我你今天想练什么，我按你的目标和记录来排。生成草稿后可自由换动作、微调重量，再一键采纳执行。
+    <div className="flex h-full min-h-0 flex-col px-page pb-2 pt-3">
+      <header className="flex shrink-0 items-center justify-between pb-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-tint text-accent-text">
+            <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="font-display text-title font-semibold tracking-tight">AI 教练</h1>
+            <p className="mt-0.5 truncate text-micro text-muted">
+              {profile.goal} · {profile.experience} · 每周 {profile.days_per_week} 练
             </p>
-
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {prompts.map((q) => (
-                <button
-                  key={q.label}
-                  type="button"
-                  disabled={busy}
-                  className="pressable flex flex-col justify-between rounded-xl border border-line bg-elevated p-3 text-left shadow-sm hover:border-ink/40"
-                  onClick={() => handleSend(q.prompt)}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm">{q.icon}</span>
-                    <span className="font-display text-xs font-bold text-ink">{q.label}</span>
-                  </div>
-                  <span className="mt-1 line-clamp-1 text-[10px] text-muted">{q.prompt}</span>
-                </button>
-              ))}
-            </div>
           </div>
-        )}
+        </div>
+        <button
+          type="button"
+          disabled={busy || (!showThread && !conversationLoading)}
+          onClick={() => void startNewChat()}
+          aria-label="新对话"
+          title="新对话"
+          className="pressable grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line bg-elevated text-ink disabled:opacity-40"
+        >
+          <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+      </header>
 
-        {/* 消息列表 */}
-        {messages.map((m) => {
-          if (m.role === "user") {
-            return (
-              <div key={m.id} className="flex justify-end rise-in">
-                <div className="max-w-[85%] rounded-2xl rounded-tr-none bg-ink px-4 py-2.5 text-xs font-medium text-bg shadow-sm">
-                  {m.text}
-                </div>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-3">
+          {conversationLoading && !hydrated && (
+            <p className="text-center text-meta text-muted">加载对话…</p>
+          )}
+
+          {showWelcome && (
+            <div className="rise-in">
+              <div className="px-3 py-2 text-center">
+                <p className="font-display text-title font-semibold leading-snug text-accent-text">
+                  Hi，我是你的训练教练，请问有什么可以帮到你？
+                </p>
+                <p className="mt-2 text-micro leading-relaxed text-muted">
+                  点入口或直接说想练什么，会落成可改草稿。
+                </p>
               </div>
-            );
-          }
 
-          if (m.role === "thinking") {
-            return (
-              <div key={m.id} className="flex gap-2.5 rise-in">
-                <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent/20 font-display text-[10px] font-black text-accent-ink">
-                  AI
-                </div>
-                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-none border border-line bg-elevated p-3 shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="grid h-2 w-2 rounded-full bg-accent animate-ping" />
-                    <span className="font-display text-xs font-bold text-ink">
-                      教练正在思考与编排...
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {primaryActions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction(action)}
+                    className="pressable rounded-lg border border-line bg-elevated px-3 py-3 text-left shadow-card"
+                  >
+                    <span className="grid h-8 w-8 place-items-center rounded-md bg-tint text-accent-text">
+                      {action.icon}
                     </span>
-                    <span className="text-[10px] text-muted">({m.elapsedSec}s)</span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted transition-all duration-300">
-                    {m.step}
-                  </p>
-                </div>
+                    <span className="mt-2 block text-meta font-semibold text-ink">{action.title}</span>
+                    <span className="mt-0.5 block truncate text-micro text-muted">{action.sub}</span>
+                  </button>
+                ))}
               </div>
-            );
-          }
 
-          if (m.role === "assistant") {
-            return (
-              <div key={m.id} className="flex flex-col gap-2 rise-in">
-                <div className="flex gap-2.5">
-                  <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink font-display text-[10px] font-black text-accent">
+              <div className="mt-2 grid grid-cols-3 gap-1.5">
+                {secondaryActions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction(action)}
+                    className={`pressable rounded-md border border-line bg-elevated px-2 py-2 text-center ${
+                      action.kind === "soon" ? "opacity-50" : ""
+                    }`}
+                  >
+                    <span className="mx-auto grid h-7 w-7 place-items-center text-accent-text">
+                      {action.icon}
+                    </span>
+                    <span className="mt-1 block text-micro font-semibold text-ink">{action.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((m) => {
+            if (m.role === "user") {
+              return (
+                <div key={m.id} className="flex justify-end rise-in">
+                  <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-ink px-4 py-2.5 text-meta font-medium text-accent-ink shadow-card">
+                    {m.text}
+                  </div>
+                </div>
+              );
+            }
+
+            if (m.role === "thinking") {
+              return (
+                <div key={m.id} className="flex gap-2.5 rise-in">
+                  <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-tint text-micro font-semibold text-accent-text">
                     AI
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="rounded-2xl rounded-tl-none border border-line bg-elevated p-3.5 shadow-sm">
-                      {m.elapsedSec != null && (
-                        <div className="mb-1 text-[10px] font-semibold text-muted">
-                          {m.awaitingConfirm
-                            ? `先跟你确认 · 用时 ${m.elapsedSec} 秒`
-                            : `已根据画像完成规划 · 用时 ${m.elapsedSec} 秒`}
-                        </div>
-                      )}
-                      <p className="text-xs leading-relaxed text-ink">{m.text}</p>
+                  <div className="min-w-0 flex-1 rounded-lg rounded-tl-sm border border-line bg-elevated p-3 shadow-card">
+                    <div className="flex items-center gap-2">
+                      <span className="grid h-2 w-2 rounded-full bg-accent opacity-80" />
+                      <span className="text-meta font-semibold text-ink">教练正在编排…</span>
+                      <span className="text-micro text-muted">({m.elapsedSec}s)</span>
                     </div>
-
-                    {m.suggestions && m.suggestions.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {m.suggestions.map((s) => (
-                          <button
-                            key={s.prompt}
-                            type="button"
-                            disabled={busy}
-                            className="pressable rounded-full border border-line bg-bg px-2.5 py-1 text-[11px] font-bold text-ink hover:border-ink"
-                            onClick={() => handleSend(s.prompt)}
-                          >
-                            {s.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 内嵌的交互式可定制草稿卡 */}
-                    {m.card && m.card.card_type === "training_draft" && (
-                      <div className="mt-2.5">
-                        <DraftCard
-                          card={m.card}
-                          todayStatus={todayStatus}
-                          onChange={(newCard) => handleCardChange(m.id, newCard)}
-                          onAdopted={(session, confirmedCard) =>
-                            handleAdopted(session, confirmedCard, m.id)
-                          }
-                        />
-                      </div>
-                    )}
-
-                    {m.traceId != null && (
-                      <div className="mt-1.5 text-right">
-                        <span className="text-[10px] text-muted">调试轨迹 #{m.traceId}</span>
-                      </div>
-                    )}
+                    <p className="mt-1 text-meta text-muted">{m.step}</p>
                   </div>
                 </div>
-              </div>
-            );
-          }
+              );
+            }
 
-          return null;
-        })}
+            if (m.role === "assistant") {
+              return (
+                <div key={m.id} className="flex flex-col gap-2 rise-in">
+                  <div className="flex gap-2.5">
+                    <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink text-micro font-semibold text-accent-ink">
+                      AI
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="rounded-lg rounded-tl-sm border border-line bg-elevated p-3.5 shadow-card">
+                        {m.elapsedSec != null && (
+                          <div className="mb-1 text-micro font-medium text-muted">
+                            {m.card
+                              ? `已按画像排好 · ${m.elapsedSec}s`
+                              : m.awaitingConfirm
+                                ? `先跟你确认 · ${m.elapsedSec}s`
+                                : `${m.elapsedSec}s`}
+                          </div>
+                        )}
+                        <p className="text-meta leading-relaxed text-ink">{m.text}</p>
+                      </div>
 
-        <div ref={scrollRef} />
-      </div>
+                      {m.traceId != null && <MessageFeedback traceId={m.traceId} />}
 
-      {/* 底部快捷胶囊（有对话记录时依然快捷可点） */}
-      {messages.length > 0 && !busy && (
-        <div className="no-scrollbar mb-2 flex gap-1.5 overflow-x-auto py-1">
-          {prompts.map((q) => (
+                      {m.suggestions && m.suggestions.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {m.suggestions.map((s) => (
+                            <button
+                              key={s.prompt}
+                              type="button"
+                              disabled={busy}
+                              className="pressable rounded-full border border-line bg-bg px-2.5 py-1 text-micro font-semibold text-ink"
+                              onClick={() => void handleSend(s.prompt)}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {m.card && m.card.card_type === "training_draft" && (
+                        <div className="mt-2.5">
+                          <DraftCard
+                            card={m.card}
+                            todayStatus={todayStatus}
+                            onChange={(newCard) => handleCardChange(m.id, newCard)}
+                            onAdopted={(session, confirmedCard) =>
+                              handleAdopted(session, confirmedCard, m.id)
+                            }
+                          />
+                        </div>
+                      )}
+
+                      {m.traceId != null && (
+                        <div className="mt-1.5 text-right">
+                          <span className="text-micro text-muted">调试轨迹 #{m.traceId}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return null;
+          })}
+
+          <div ref={scrollRef} />
+        </div>
+
+        <div className="shrink-0 border-t border-line bg-bg pt-2">
+          <div className="no-scrollbar mb-2 flex gap-1.5 overflow-x-auto py-0.5">
+            {bottomChips.map((item) => (
+              <button
+                key={`chip-${item.id}`}
+                type="button"
+                disabled={busy}
+                onClick={() => runAction(item)}
+                className={`pressable flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-elevated px-2.5 py-1.5 text-micro font-semibold text-ink ${
+                  item.kind === "soon" ? "opacity-50" : ""
+                }`}
+              >
+                <span className="text-accent-text">{item.icon}</span>
+                {item.title}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-elevated px-3 py-1.5 shadow-card">
+            <input
+              className="min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-muted"
+              placeholder={busy ? "教练正在生成中…" : "询问 AI 教练，如「练背」"}
+              value={inputVal}
+              disabled={busy}
+              onChange={(e) => setInputVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void handleSend()}
+            />
             <button
-              key={q.label}
               type="button"
-              className="pressable shrink-0 rounded-full border border-line bg-elevated px-2.5 py-1 text-[11px] font-bold text-muted hover:border-ink hover:text-ink"
-              onClick={() => handleSend(q.prompt)}
+              disabled={busy || !inputVal.trim()}
+              onClick={() => void handleSend()}
+              className="pressable rounded-md bg-accent px-3 py-2 font-display text-label font-semibold text-accent-ink disabled:opacity-40"
             >
-              {q.icon} {q.label}
+              {busy ? "…" : "发送"}
             </button>
-          ))}
+          </div>
+          <p className="mt-1 text-center text-micro text-muted">内容由 AI 生成 · 采纳前可改草稿</p>
         </div>
-      )}
-
-      {/* 底部发送输入栏 */}
-      <div className="sticky bottom-0 z-20 shrink-0 border-t border-line bg-bg/95 pt-2 backdrop-blur-sm">
-        <div className="flex items-center gap-2 rounded-xl border border-line bg-elevated px-3 py-1.5 shadow-sm focus-within:border-ink">
-          <input
-            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted"
-            placeholder={busy ? "教练正在生成中..." : "告诉教练你想练什么，如「练背」..."}
-            value={inputVal}
-            disabled={busy}
-            onChange={(e) => setInputVal(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          />
-          <button
-            type="button"
-            disabled={busy || !inputVal.trim()}
-            onClick={() => handleSend()}
-            className="pressable rounded-lg bg-accent px-3 py-1.5 font-display text-xs font-extrabold text-accent-ink disabled:opacity-40"
-          >
-            {busy ? "…" : "发送"}
-          </button>
-        </div>
-        <p className="mt-1 text-center text-[10px] text-muted">
-          内容由 AI 模型生成 · 采纳前可随意调整
-        </p>
       </div>
+
+      {toast && (
+        <p className="pointer-events-none fixed bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-micro font-semibold text-accent-ink">
+          {toast}
+        </p>
+      )}
     </div>
   );
 }

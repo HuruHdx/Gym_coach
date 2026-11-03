@@ -37,14 +37,15 @@ def test_injury_bans_deadlift_for_waist():
 
 def test_alternatives_excludes_banned():
     opts = alternatives("腿", injuries=["膝盖"])
-    assert "深蹲" not in "".join(opts)
-    assert "腿举" in opts or "臀桥" in opts
+    joined = "".join(opts)
+    assert "深蹲" not in joined
+    assert any("腿举" in o or "臀推" in o or "弯举" in o for o in opts)
 
 
 def test_deadlift_shows_up_for_leg_role_swap():
     opts = alternatives("腿")
     assert "杠铃硬拉" in opts
-    assert "罗马尼亚硬拉" in opts
+    assert "杠铃罗马尼亚硬拉" in opts
 
 
 def test_validate_drops_banned_items():
@@ -55,12 +56,12 @@ def test_validate_drops_banned_items():
             "title": "腿训",
             "items": [
                 {"id": "1", "title": "硬拉", "meta": {"sets": 3, "reps": "5", "weight": 80, "muscle": "腿"}, "selected": True},
-                {"id": "2", "title": "腿举", "meta": {"sets": 4, "reps": "10", "weight": 100, "muscle": "腿"}, "selected": True},
+                {"id": "2", "title": "滑车45度腿举", "meta": {"sets": 4, "reps": "10", "weight": 100, "muscle": "腿"}, "selected": True},
             ],
         },
     }
     blocks = validate_and_build_blocks(raw, injuries=["腰"])
     card = next(b for b in blocks if b.kind == "card")
     titles = [i.title for i in card.items]
-    assert "硬拉" not in titles
-    assert "腿举" in titles
+    assert "硬拉" not in titles and "杠铃硬拉" not in titles
+    assert "滑车45度腿举" in titles

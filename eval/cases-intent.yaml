@@ -1,0 +1,342 @@
+# 意图评测（topic 层）· 2026-10-26
+#
+# 只锁一件事：topic ∈ plan | qa | chitchat。一条用例一个期望，不测 domain、不测 route、
+# 不测检索、不测回答质量。domain / route / 细分（训练计划 vs 饮食计划）留给后续分层评测。
+#
+# 这样也顺带解决了「夹具换老炮就红」的问题：topic 与画像无关。
+#
+#   cd api && uv run uvicorn app.main:app --port 8000
+#   cd eval && npx promptfoo eval -c promptfooconfig-intent.yaml
+
+# ── I00 契约探针 ──────────────────────────────────────────────────────────
+- description: "I00 契约就绪：intent.topic 已返回且在枚举内"
+  tags: [intent, canary, p0]
+  vars:
+    question: "今天练背"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {}
+
+# ── plan（12）：要一份安排 ────────────────────────────────────────────────
+- description: "I01 典型排课句"
+  tags: [intent, plan, p0]
+  vars:
+    question: "今天练背"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I02 带侧重"
+  tags: [intent, plan]
+  vars:
+    question: "今天练腿，侧重股四头肌"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I03 带时长"
+  tags: [intent, plan]
+  vars:
+    question: "明天想练胸，40分钟"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I04 一次排多堂"
+  tags: [intent, plan]
+  vars:
+    question: "这周帮我排两堂课"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I05 信息不足（反问是后续行为，不是 topic）"
+  tags: [intent, plan, boundary]
+  vars:
+    question: "今天练"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I06 有草稿时改稿"
+  tags: [intent, plan, draft]
+  vars:
+    question: "把坐姿划船换掉"
+    draft_title: "背训"
+    draft_items:
+      - {id: c1, title: 高位下拉, selected: true, meta: {sets: 3, reps: "8-10", muscle: 背}}
+      - {id: c2, title: 坐姿划船, selected: true, meta: {sets: 3, reps: "10-12", muscle: 背}}
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I08 带历史引用仍是排课（历史是约束，不是主题）"
+  tags: [intent, plan, boundary, p0]
+  vars:
+    question: "今天练胸，卧推按上次的重量来"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I09 排饮食计划（饮食是 plan 的细分，本层不判细分）"
+  tags: [intent, plan, boundary, p0]
+  vars:
+    question: "帮我排个减脂餐"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I10 带频次约束"
+  tags: [intent, plan]
+  vars:
+    question: "这周想练三次，帮我安排一下"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I30 口头采纳「就这个吧」（采纳是 flag，topic 仍算 plan）"
+  tags: [intent, plan, boundary, adopt, decision_pending]
+  vars:
+    question: "就这个吧，今天的计划"
+    draft_title: "背训"
+    draft_items:
+      - {id: c1, title: 高位下拉, selected: true, meta: {sets: 3, reps: "8-10", muscle: 背}}
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I31 多轮改稿：接着上一轮换动作"
+  tags: [intent, plan, multi_turn]
+  vars:
+    question: "那换成哑铃卧推吧"
+    history:
+      - {role: user, text: "今天练胸"}
+      - role: assistant
+        text: "安排好了"
+        card_title: "胸训"
+        card_items: [杠铃卧推, 上斜哑铃卧推]
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+- description: "I33 累但还是要练（是排课，不是闲聊）"
+  tags: [intent, plan, boundary, p0]
+  vars:
+    question: "今天好累，随便练练"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan}
+
+# ── qa（17）：要解释 / 建议 / 对比 / 做法 / 自己的数据 ──────────────
+- description: "I07 边界：练胸还是练背（给建议，不是排课）"
+  tags: [intent, qa, boundary, p0]
+  vars:
+    question: "明天练胸还是练背好"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I11 正式名练哪里"
+  tags: [intent, qa, p0]
+  vars:
+    question: "杠杆坐姿划船练哪里"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I12 怎么做"
+  tags: [intent, qa, p0]
+  vars:
+    question: "深蹲怎么做"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I13 两类比较"
+  tags: [intent, qa]
+  vars:
+    question: "高位下拉和划船有啥区别"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I14 频率"
+  tags: [intent, qa]
+  vars:
+    question: "新手一周练几次背合适"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I15 伤痛 + 动作能不能做"
+  tags: [intent, qa, boundary, p0]
+  vars:
+    question: "我腰不好，硬拉能做吗"
+    profile: {goal: "增肌", experience: "新手", weight_kg: 70, days_per_week: 4, injuries: ["腰"]}
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I16 幽灵叫法"
+  tags: [intent, qa]
+  vars:
+    question: "史密斯坐姿划船练哪里"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I17 一类动作"
+  tags: [intent, qa]
+  vars:
+    question: "腿举练哪里"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I18 纠错找原因"
+  tags: [intent, qa]
+  vars:
+    question: "引体向上练不到背是什么原因"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I19 练完背疼正常吗（症状，不是排课）"
+  tags: [intent, qa, boundary, p0]
+  vars:
+    question: "昨天练背，今天背有点疼正常吗"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I20 补碳水时机（营养知识，不是排课）"
+  tags: [intent, qa, boundary, p0]
+  vars:
+    question: "练完要不要马上补碳水"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I21 补剂对比（营养知识）"
+  tags: [intent, qa, boundary, p0]
+  vars:
+    question: "蛋白粉和增肌粉哪个好"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I22 热量建议（营养知识）"
+  tags: [intent, qa, nutrition]
+  vars:
+    question: "减脂期一天吃多少热量"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I23 问自己的数（数据由工具给，不是单独主题）"
+  tags: [intent, qa, data, p0]
+  vars:
+    question: "我上次卧推多少"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I24 本月次数（同上）"
+  tags: [intent, qa, data]
+  vars:
+    question: "我这个月练了几次"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I25 档案字段（画像已注入）"
+  tags: [intent, qa, data]
+  vars:
+    question: "我体重多少"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+- description: "I34 吃的问题（营养知识，不是排课、也不是营养占位）"
+  tags: [intent, qa, nutrition, p0]
+  vars:
+    question: "今天吃什么蛋白粉"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: qa}
+
+# ── chitchat（5）：既不要安排也不要知识 ───────────────────────────────────
+- description: "I26 寒暄"
+  tags: [intent, chitchat]
+  vars:
+    question: "你好"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: chitchat}
+
+- description: "I27 情绪"
+  tags: [intent, chitchat]
+  vars:
+    question: "今天好累啊"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: chitchat}
+
+- description: "I28 不想练（不是 plan）"
+  tags: [intent, chitchat, boundary, p0]
+  vars:
+    question: "今天心情不好，不想练"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: chitchat}
+
+- description: "I29 道谢"
+  tags: [intent, chitchat]
+  vars:
+    question: "谢谢"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: chitchat}
+
+- description: "I32 短回复（没有指代对象）"
+  tags: [intent, chitchat, short_reply]
+  vars:
+    question: "嗯嗯"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: chitchat}

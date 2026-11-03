@@ -2,10 +2,19 @@
 api/.venv/
 api/data/
 api/.env
+api/static/exercises/
+api/assets/opengym/_*.txt
 web/node_modules/
 web/dist/
+web/tsconfig.tsbuildinfo
 **/__pycache__/
 **/.pytest_cache/
 *.pyc
 .idea/
 .vscode/
+eval/node_modules/
+eval/out/
+eval/.pf/
+eval/cases.yaml.bak*
+# 差评回流草稿：未审不进仓；保留 inbox/README.md
+eval/inbox/FB-*.yaml

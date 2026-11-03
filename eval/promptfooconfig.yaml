@@ -1,0 +1,28 @@
+# 整体评测（端到端）· v0.4
+#
+#   cd api && uv run uvicorn app.main:app --port 8000
+#   cd eval && npx promptfoo eval --no-cache
+#
+# 40 条：F 事实 12 / A 建议 7 / D 数据 5 / S 安全 3 / B 边界 8 / R 非问答 5
+# 逐条期望见 ../评测集-v0.4.md
+
+description: "gym-coach · 整体评测 v0.5"
+
+# provider 自己从 vars.question 组请求体，prompt 只是占位
+prompts:
+  - "{{question}}"
+
+providers:
+  - file://provider.js
+
+# 每条都先过契约形状检查：分支枚举、citations 只属 kb、suggestions 只属 ask、
+# model_called 与分支自洽、sources 形状
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/shape.js
+  options:
+    # 软 case 的评分模型；换评审模型只改这一行
+    provider: "deepseek:deepseek-chat"
+
+tests: file://cases.yaml

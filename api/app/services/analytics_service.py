@@ -43,12 +43,44 @@ class SessionSnap:
     sets: list[SetSnap]
 
 
+# 估算 1RM 涨跌超过这个比例才算进步或回落，避免一次次数波动被写成涨跌。
+_ONE_RM_BAND = 0.03
+
+
 def _effective_weight(s: SetSnap) -> Optional[float]:
-    if s.actual_weight is not None:
+    if s.actual_weight is not None and s.actual_weight > 0:
         return float(s.actual_weight)
-    if s.target_weight is not None:
+    if s.target_weight is not None and s.target_weight > 0:
         return float(s.target_weight)
     return None
+
+
+def epley_1rm(
+    weight: Optional[float],
+    reps: Optional[int],
+    body_weight: Optional[float] = None,
+) -> Optional[float]:
+    """Epley：重量 × (1 + 次数/30)。没记重量的自重动作用体重。"""
+    if reps is None or reps <= 0:
+        return None
+    load = weight if weight is not None and weight > 0 else None
+    if load is None and body_weight is not None and body_weight > 0:
+        load = float(body_weight)
+    if load is None:
+        return None
+    return load * (1 + reps / 30)
+
+
+def _one_rm_delta(curr: float, prev: float) -> tuple[str, str]:
+    if prev <= 0:
+        return "flat", "持平"
+    ratio = (curr - prev) / prev
+    pct = int(round(ratio * 100))
+    if ratio >= _ONE_RM_BAND:
+        return "up", f"+{pct}%"
+    if ratio <= -_ONE_RM_BAND:
+        return "down", f"{pct}%"
+    return "flat", "持平"
 
 
 def _top_set(sets: list[SetSnap]) -> Optional[SetSnap]:
@@ -99,23 +131,69 @@ def start_of_week_monday(today: date) -> date:
     return today - timedelta(days=today.weekday())
 
 
+def _period_bounds(today: date, period: str) -> tuple[date, date, date, date, str, int]:
+    """当前周期起止、上一周期起止、对比文案、周期天数。"""
+    if period == "month":
+        start = today.replace(day=1)
+        if start.month == 12:
+            next_start = date(start.year + 1, 1, 1)
+        else:
+            next_start = date(start.year, start.month + 1, 1)
+        end = next_start - timedelta(days=1)
+        if start.month == 1:
+            prev_start = date(start.year - 1, 12, 1)
+        else:
+            prev_start = date(start.year, start.month - 1, 1)
+        prev_end = start - timedelta(days=1)
+        span = (end - start).days + 1
+        return start, end, prev_start, prev_end, "上月", span
+    start = start_of_week_monday(today)
+    end = start + timedelta(days=6)
+    return start, end, start - timedelta(days=7), start - timedelta(days=1), "上周", 7
+
+
+def _set_volume(s: SetSnap) -> float:
+    if not s.completed or s.actual_weight is None or s.actual_reps is None:
+        return 0.0
+    if s.actual_weight <= 0 or s.actual_reps <= 0:
+        return 0.0
+    return float(s.actual_weight) * int(s.actual_reps)
+
+
+def _range_volume(sessions: list[SessionSnap], start: date, end: date) -> float:
+    total = 0.0
+    for sess in sessions:
+        if sess.status not in ("done", "active"):
+            continue
+        if sess.session_date < start or sess.session_date > end:
+            continue
+        total += sum(_set_volume(s) for s in sess.sets)
+    return round(total, 1)
+
+
 def build_week_rhythm(
     sessions: list[SessionSnap],
     target_days: int,
     today: date,
+    period: str = "week",
 ) -> dict[str, Any]:
-    start = start_of_week_monday(today)
+    if period not in ("week", "month"):
+        period = "week"
+    start, end, prev_start, prev_end, compare_label, span = _period_bounds(today, period)
     by_date: dict[date, list[SessionSnap]] = {}
     for s in sessions:
         if s.status not in ("done", "active"):
             continue
         by_date.setdefault(s.session_date, []).append(s)
 
+    weekly_target = min(7, max(1, target_days or 4))
+    target = weekly_target if period == "week" else max(1, round(weekly_target * span / 7))
+
     days: list[dict[str, Any]] = []
     trained_days = 0
     session_count = 0
-    for i in range(7):
-        d = start + timedelta(days=i)
+    d = start
+    while d <= end:
         day_sessions = by_date.get(d, [])
         muscles = sorted({m for ss in day_sessions for m in muscles_from_session(ss)})
         trained = len(day_sessions) > 0
@@ -123,16 +201,14 @@ def build_week_rhythm(
             trained_days += 1
             session_count += len(day_sessions)
         primary = day_sessions[0] if day_sessions else None
-        mins = None
-        if primary and primary.duration_minutes is not None:
-            mins = primary.duration_minutes
+        mins = primary.duration_minutes if primary and primary.duration_minutes is not None else None
         done_sets = sum(1 for ss in day_sessions for x in ss.sets if x.completed)
         total_sets = sum(len(ss.sets) for ss in day_sessions)
         pct = round(100 * done_sets / total_sets) if total_sets else None
         days.append(
             {
                 "date": d.isoformat(),
-                "label": WEEKDAY_LABELS[i],
+                "label": WEEKDAY_LABELS[d.weekday()],
                 "is_today": d == today,
                 "trained": trained,
                 "muscles": muscles,
@@ -142,12 +218,23 @@ def build_week_rhythm(
                 "completion_pct": pct,
             }
         )
+        d += timedelta(days=1)
+
+    volume = _range_volume(sessions, start, end)
+    prev_volume = _range_volume(sessions, prev_start, prev_end)
+    volume_delta_pct = (
+        round((volume - prev_volume) / prev_volume * 100) if prev_volume > 0 else None
+    )
 
     return {
         "days": days,
         "trained_days": trained_days,
-        "target_days": min(7, max(1, target_days or 4)),
+        "target_days": target,
         "sessions": session_count,
+        "period": period,
+        "compare_label": compare_label,
+        "volume_kg": volume,
+        "volume_delta_pct": volume_delta_pct,
     }
 
 
@@ -155,6 +242,7 @@ def build_muscle_pulse(
     sessions: list[SessionSnap],
     today: date,
     window_days: int = 30,
+    body_weight: Optional[float] = None,
 ) -> list[dict[str, Any]]:
     cutoff = today - timedelta(days=window_days - 1)
     done = [s for s in sessions if s.status == "done" and s.session_date >= cutoff]
@@ -174,7 +262,7 @@ def build_muscle_pulse(
         # trend from last two sessions of this muscle
         trend = "→"
         if len(dated) >= 2:
-            up, down = _session_delta_score(dated[0], dated[1], muscle)
+            up, down = _session_delta_score(dated[0], dated[1], muscle, body_weight)
             if up > down:
                 trend = "↑"
             elif down > up:
@@ -211,28 +299,23 @@ def _session_delta_score(
     curr: SessionSnap,
     prev: SessionSnap,
     muscle: Optional[str] = None,
+    body_weight: Optional[float] = None,
 ) -> tuple[int, int]:
     curr_tops = _tops_by_exercise(curr, muscle)
     prev_tops = _tops_by_exercise(prev, muscle)
     up = down = 0
-    for name, c in curr_tops.items():
-        p = prev_tops.get(name)
+    for _name, c in curr_tops.items():
+        p = prev_tops.get(_name)
         if not p:
             continue
-        cw, cr = _effective_weight(c), c.actual_reps or 0
-        pw, pr = _effective_weight(p), p.actual_reps or 0
-        if cw is not None and pw is not None:
-            if cw > pw + 0.01:
-                up += 1
-            elif cw < pw - 0.01:
-                down += 1
-            elif cr > pr:
-                up += 1
-            elif cr < pr:
-                down += 1
-        elif cr > pr:
+        curr_1rm = epley_1rm(_effective_weight(c), c.actual_reps, body_weight)
+        prev_1rm = epley_1rm(_effective_weight(p), p.actual_reps, body_weight)
+        if curr_1rm is None or prev_1rm is None:
+            continue
+        kind, _label = _one_rm_delta(curr_1rm, prev_1rm)
+        if kind == "up":
             up += 1
-        elif cr < pr:
+        elif kind == "down":
             down += 1
     return up, down
 
@@ -259,6 +342,7 @@ def _tops_by_exercise(
 
 def build_session_compare(
     sessions: list[SessionSnap],
+    body_weight: Optional[float] = None,
 ) -> Optional[dict[str, Any]]:
     done = sorted(
         [s for s in sessions if s.status == "done"],
@@ -301,40 +385,19 @@ def build_session_compare(
         delta_label = "首次"
         weight_delta: Optional[float] = None
         reps_delta: Optional[int] = None
+        if p and cw is not None and pw is not None:
+            weight_delta = round(cw - pw, 2)
+        if p and cr is not None and pr is not None:
+            reps_delta = cr - pr
 
         if p:
-            if cw is not None and pw is not None:
-                weight_delta = round(cw - pw, 2)
-                if weight_delta > 0.01:
-                    delta_kind = "up"
-                    delta_label = f"+{weight_delta:g}kg"
-                elif weight_delta < -0.01:
-                    delta_kind = "down"
-                    delta_label = f"{weight_delta:g}kg"
-                else:
-                    weight_delta = 0.0
-                    if cr is not None and pr is not None and cr != pr:
-                        reps_delta = cr - pr
-                        if reps_delta > 0:
-                            delta_kind = "up"
-                            delta_label = f"+{reps_delta}次"
-                        else:
-                            delta_kind = "down"
-                            delta_label = f"{reps_delta}次"
-                    else:
-                        delta_kind = "flat"
-                        delta_label = "持平"
-            elif cr is not None and pr is not None:
-                reps_delta = cr - pr
-                if reps_delta > 0:
-                    delta_kind = "up"
-                    delta_label = f"+{reps_delta}次"
-                elif reps_delta < 0:
-                    delta_kind = "down"
-                    delta_label = f"{reps_delta}次"
-                else:
-                    delta_kind = "flat"
-                    delta_label = "持平"
+            curr_1rm = epley_1rm(cw, cr, body_weight)
+            prev_1rm = epley_1rm(pw, pr, body_weight)
+            if curr_1rm is not None and prev_1rm is not None:
+                delta_kind, delta_label = _one_rm_delta(curr_1rm, prev_1rm)
+            else:
+                delta_kind = "flat"
+                delta_label = "持平"
 
         load = _format_load(cw, cr)
         lifts.append(
@@ -465,6 +528,7 @@ def build_key_lifts(
                 "trend": trend,
                 "is_pr": is_pr,
                 "last_date": last_date.isoformat(),
+                "history": [p[1] for p in points[-8:]],
                 "_score": score,
             }
         )
@@ -502,13 +566,13 @@ def build_headline(
         up = [x for x in compare["lifts"] if x["delta_kind"] == "up"]
         down = [x for x in compare["lifts"] if x["delta_kind"] == "down"]
         if up and not down:
-            parts.append(f"{muscle}主项较上次上涨（{up[0]['exercise_name']} {up[0]['delta_label']}）")
+            parts.append(f"{muscle}主项较上次进步（{up[0]['exercise_name']} {up[0]['delta_label']}）")
         elif up and down:
-            parts.append(f"{muscle}有涨有掉 · {up[0]['exercise_name']}{up[0]['delta_label']}")
+            parts.append(f"{muscle}有进有落（{up[0]['exercise_name']} {up[0]['delta_label']}）")
         elif down:
-            parts.append(f"{muscle}较上次偏沉 · {down[0]['exercise_name']} {down[0]['delta_label']}")
+            parts.append(f"{muscle}状态回落（{down[0]['exercise_name']} {down[0]['delta_label']}）")
         else:
-            parts.append(f"{muscle}较上次重量持平")
+            parts.append(f"{muscle}较上次持平")
 
     overdue = [p for p in pulse if p["status"] == "overdue"]
     if overdue:
@@ -553,10 +617,56 @@ def _to_snap(sess: TrainingSession, sets: list[TrainingSetLog]) -> SessionSnap:
     )
 
 
-def build_dashboard(session: Session, today: date | None = None) -> dict[str, Any]:
+def weight_histories_from_snaps(
+    snaps: list[SessionSnap],
+    limit: int = 8,
+) -> dict[str, list[float]]:
+    """每个动作最近几次的最高组重量，从旧到新。"""
+    points: dict[str, list[tuple[date, int, float]]] = {}
+    for sess in snaps:
+        if sess.status != "done":
+            continue
+        for name, top in _tops_by_exercise(sess).items():
+            weight = _effective_weight(top)
+            if weight is None:
+                continue
+            points.setdefault(name, []).append((sess.session_date, sess.id, weight))
+    out: dict[str, list[float]] = {}
+    for name, rows in points.items():
+        rows.sort()
+        out[name] = [weight for _day, _sid, weight in rows[-limit:]]
+    return out
+
+
+def recent_top_weights(session: Session, limit: int = 8) -> dict[str, list[float]]:
+    rows = list(
+        session.exec(
+            select(TrainingSession)
+            .where(TrainingSession.status == "done")
+            .order_by(col(TrainingSession.session_date).desc(), col(TrainingSession.id).desc())
+            .limit(80)
+        ).all()
+    )
+    snaps: list[SessionSnap] = []
+    for sess in rows:
+        sets = list(
+            session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == sess.id)).all()
+        )
+        snaps.append(_to_snap(sess, sets))
+    return weight_histories_from_snaps(snaps, limit)
+
+
+def build_dashboard(
+    session: Session,
+    today: date | None = None,
+    period: str = "week",
+) -> dict[str, Any]:
     today = today or date.today()
+    if period not in ("week", "month"):
+        period = "week"
     profile = session.exec(select(Profile).limit(1)).first()
     target_days = profile.days_per_week if profile else 4
+    body_weight = profile.weight_kg if profile else None
 
     from sqlalchemy import or_
 
@@ -583,9 +693,9 @@ def build_dashboard(session: Session, today: date | None = None) -> dict[str, An
     stats = list(session.exec(select(ExerciseStats)).all())
     mine = {m.name: m.muscle for m in session.exec(select(MyExercise)).all()}
 
-    week = build_week_rhythm(snaps, target_days, today)
-    pulse = build_muscle_pulse(snaps, today)
-    compare = build_session_compare(snaps)
+    week = build_week_rhythm(snaps, target_days, today, period=period)
+    pulse = build_muscle_pulse(snaps, today, body_weight=body_weight)
+    compare = build_session_compare(snaps, body_weight=body_weight)
     lifts = build_key_lifts(snaps, stats, mine, today)
     headline = build_headline(week, pulse, compare, lifts)
 
