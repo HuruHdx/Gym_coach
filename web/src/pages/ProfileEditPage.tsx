@@ -1,21 +1,24 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { DateWheelPickerSheet } from "../components/WheelPickerSheet";
 import { api } from "../lib/api";
 import {
   AVOID_PARTS,
   DAY_OPTIONS,
-  DISPLAY_NAME,
   EXPERIENCE_OPTIONS,
   GOAL_OPTIONS,
   MINUTE_PRESETS,
   SCENES,
+  displayNameOf,
+  formatBirthDateLabel,
   injuriesToSave,
   injuryNote,
   partSelected,
   readProfileExtras,
   sceneFromPreferences,
   writeProfileExtras,
+  type AuthUser,
   type SceneId,
 } from "../lib/profileView";
 import type { Experience, Goal, Profile } from "../types";
@@ -34,6 +37,10 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const extras = readProfileExtras();
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<AuthUser>("/api/auth/me"),
+  });
   const [goal, setGoal] = useState<Goal>(profile.goal);
   const [experience, setExperience] = useState<Experience>(profile.experience);
   const [days, setDays] = useState(profile.days_per_week);
@@ -45,17 +52,25 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
     ),
   );
   const [note, setNote] = useState(() => injuryNote(profile.injuries || []));
-  const [weightText, setWeightText] = useState(String(profile.weight_kg));
+  const [weightText, setWeightText] = useState(
+    profile.weight_kg != null ? String(profile.weight_kg) : "",
+  );
   const [heightText, setHeightText] = useState(
     profile.height_cm != null ? String(profile.height_cm) : "",
   );
   const [gender, setGender] = useState<string | null>(extras.gender);
-  const [birthYear, setBirthYear] = useState<number | null>(extras.birthYear);
-  const [picker, setPicker] = useState<"gender" | "year" | null>(null);
+  const [birthDate, setBirthDate] = useState<string | null>(extras.birthDate);
+  const [nick, setNick] = useState("");
+  const [picker, setPicker] = useState<"gender" | "birth" | null>(null);
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const letter = DISPLAY_NAME.slice(0, 1);
+  const shownName = nick.trim() || displayNameOf(me);
+  const letter = shownName.slice(0, 1);
   const minutes = Number(minuteText);
+
+  useEffect(() => {
+    if (me?.display_name != null) setNick(me.display_name);
+  }, [me?.id, me?.display_name]);
 
   function flash(message: string) {
     setHint(message);
@@ -68,10 +83,14 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
 
   async function save() {
     if (busy) return;
-    const weight = Number(weightText);
-    if (!Number.isFinite(weight) || weight <= 30 || weight >= 300) {
-      alert("体重填 30 到 300 之间的公斤数");
-      return;
+    let weight_kg: number | null = null;
+    if (weightText.trim() !== "") {
+      const weight = Number(weightText);
+      if (!Number.isFinite(weight) || weight <= 30 || weight >= 300) {
+        alert("体重填 30 到 300 之间的公斤数，或留空");
+        return;
+      }
+      weight_kg = Math.round(weight * 10) / 10;
     }
     if (!Number.isFinite(minutes) || minutes < 15 || minutes > 180) {
       alert("单次时长填 15 到 180 分钟");
@@ -88,6 +107,10 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
     }
     setBusy(true);
     try {
+      await api("/api/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify({ display_name: nick.trim().slice(0, 40) || null }),
+      });
       await api("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({
@@ -97,11 +120,12 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
           session_minutes: Math.round(minutes),
           preferences: preferencesFor(scene),
           injuries: injuriesToSave(parts, note),
-          weight_kg: Math.round(weight * 10) / 10,
+          weight_kg,
           height_cm,
         }),
       });
-      writeProfileExtras({ gender, birthYear });
+      writeProfileExtras({ gender, birthDate });
+      await qc.invalidateQueries({ queryKey: ["me"] });
       await qc.invalidateQueries({ queryKey: ["weight-history"] });
       await onUpdated();
       navigate("/me");
@@ -130,6 +154,21 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
           更换头像
         </button>
       </div>
+
+      <GroupTitle>称呼</GroupTitle>
+      <Card>
+        <FieldLabel>昵称</FieldLabel>
+        <input
+          type="text"
+          maxLength={40}
+          value={nick}
+          placeholder="例如：阿虎"
+          onChange={(e) => setNick(e.target.value)}
+          className="mt-2 w-full rounded-sm border border-line bg-bg px-3 py-2.5 text-[15px] font-semibold outline-none"
+          style={{ fontSize: 16 }}
+        />
+        <p className="mt-1.5 text-[11px] text-muted">不填则用系统给你取的默认称呼</p>
+      </Card>
 
       <GroupTitle>训练目标</GroupTitle>
       <Card>
@@ -238,6 +277,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
             type="number"
             inputMode="decimal"
             value={weightText}
+            placeholder="未填"
             onChange={(event) => setWeightText(event.target.value)}
             className="w-20 rounded-sm border border-line bg-bg px-2.5 py-2 text-right text-sm font-semibold outline-none"
           />
@@ -248,7 +288,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
             type="number"
             inputMode="numeric"
             value={heightText}
-            placeholder="可选"
+            placeholder="未填"
             onChange={(event) => setHeightText(event.target.value)}
             className="w-20 rounded-sm border border-line bg-bg px-2.5 py-2 text-right text-sm font-semibold outline-none"
           />
@@ -258,8 +298,8 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
           <span className="text-sm font-semibold">{gender ?? "未填"}</span>
           <span className="text-sm text-muted">›</span>
         </BodyRow>
-        <BodyRow label="出生年" last onClick={() => setPicker("year")}>
-          <span className="text-sm font-semibold">{birthYear ?? "未填"}</span>
+        <BodyRow label="出生日期" last onClick={() => setPicker("birth")}>
+          <span className="text-sm font-semibold">{formatBirthDateLabel(birthDate)}</span>
           <span className="text-sm text-muted">›</span>
         </BodyRow>
       </Card>
@@ -280,55 +320,50 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
         </p>
       )}
 
-      {picker && (
-        <PickerSheet title={picker === "gender" ? "性别" : "出生年"} onClose={() => setPicker(null)}>
-          {picker === "gender" ? (
-            <div className="flex gap-2">
-              {(["男", "女"] as const).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => {
-                    setGender(item);
-                    setPicker(null);
-                  }}
-                  className={`flex-1 rounded-md py-3 text-sm font-bold ${
-                    gender === item ? "bg-accent text-accent-ink" : "border border-line bg-elevated"
-                  }`}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="grid max-h-64 grid-cols-4 gap-1.5 overflow-y-auto">
-              {birthYears().map((year) => (
-                <button
-                  key={year}
-                  type="button"
-                  onClick={() => {
-                    setBirthYear(year);
-                    setPicker(null);
-                  }}
-                  className={`rounded-sm py-2 text-sm font-semibold ${
-                    birthYear === year ? "bg-accent text-accent-ink" : "border border-line"
-                  }`}
-                >
-                  {year}
-                </button>
-              ))}
-            </div>
-          )}
+      {picker === "gender" && (
+        <PickerSheet title="性别" onClose={() => setPicker(null)}>
+          <div className="flex gap-2">
+            {(["男", "女"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => {
+                  setGender(item);
+                  setPicker(null);
+                }}
+                className={`flex-1 rounded-md py-3 text-sm font-bold ${
+                  gender === item ? "bg-accent text-accent-ink" : "border border-line bg-elevated"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setGender(null);
+                setPicker(null);
+              }}
+              className={`flex-1 rounded-md py-3 text-sm font-bold ${
+                gender === null ? "bg-accent text-accent-ink" : "border border-line bg-elevated"
+              }`}
+            >
+              不填
+            </button>
+          </div>
         </PickerSheet>
       )}
+      <DateWheelPickerSheet
+        open={picker === "birth"}
+        value={birthDate}
+        onClose={() => setPicker(null)}
+        onConfirm={(next) => {
+          setBirthDate(next);
+          setPicker(null);
+        }}
+      />
     </div>
   );
-}
-
-function birthYears(): number[] {
-  const years: number[] = [];
-  for (let year = 2012; year >= 1950; year -= 1) years.push(year);
-  return years;
 }
 
 function GroupTitle({ children }: { children: string }) {

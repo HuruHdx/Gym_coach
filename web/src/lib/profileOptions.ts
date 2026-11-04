@@ -106,11 +106,11 @@ export function sceneFromPreferences(prefs: string[] | null | undefined): SceneI
   return exact?.id ?? "gym";
 }
 
-/** 跳过引导时的默认画像。 */
+/** 跳过引导时的默认画像（身高体重不预填，用户自己选）。 */
 export const DEFAULT_PROFILE_CREATE = {
   goal: "增肌" as const,
   experience: "进阶" as const,
-  weight_kg: 70,
+  weight_kg: null as number | null,
   height_cm: null as number | null,
   days_per_week: 4,
   session_minutes: 40,

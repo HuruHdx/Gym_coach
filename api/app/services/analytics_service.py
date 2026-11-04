@@ -15,7 +15,8 @@ from typing import Any, Optional
 
 from sqlmodel import Session, col, select
 
-from app.models import ExerciseStats, MyExercise, Profile, TrainingSession, TrainingSetLog
+from app.models import ExerciseStats, MyExercise, TrainingSession, TrainingSetLog
+from app.tenancy import current_user_id, get_current_profile
 
 MUSCLES = ("胸", "背", "肩", "腿", "臂", "核心")
 WEEKDAY_LABELS = ("一", "二", "三", "四", "五", "六", "日")
@@ -639,12 +640,17 @@ def weight_histories_from_snaps(
 
 
 def recent_top_weights(session: Session, limit: int = 8) -> dict[str, list[float]]:
+    uid = current_user_id()
+    if uid is None:
+        return {}
+    sess_q = (
+        select(TrainingSession)
+        .where(TrainingSession.status == "done")
+        .where(TrainingSession.user_id == uid)
+    )
     rows = list(
         session.exec(
-            select(TrainingSession)
-            .where(TrainingSession.status == "done")
-            .order_by(col(TrainingSession.session_date).desc(), col(TrainingSession.id).desc())
-            .limit(80)
+            sess_q.order_by(col(TrainingSession.session_date).desc(), col(TrainingSession.id).desc()).limit(80)
         ).all()
     )
     snaps: list[SessionSnap] = []
@@ -664,15 +670,27 @@ def build_dashboard(
     today = today or date.today()
     if period not in ("week", "month"):
         period = "week"
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     target_days = profile.days_per_week if profile else 4
     body_weight = profile.weight_kg if profile else None
 
     from sqlalchemy import or_
 
+    uid = current_user_id()
+    if uid is None:
+        empty_week = build_week_rhythm([], target_days, today, period=period)
+        return {
+            "as_of": today.isoformat(),
+            "headline": build_headline(empty_week, [], None, []),
+            "week": empty_week,
+            "muscle_pulse": [],
+            "session_compare": None,
+            "key_lifts": [],
+        }
+    sess_q = select(TrainingSession).where(TrainingSession.user_id == uid)
     rows = list(
         session.exec(
-            select(TrainingSession)
+            sess_q
             .where(
                 or_(
                     TrainingSession.status == "done",
@@ -690,7 +708,8 @@ def build_dashboard(
         )
         snaps.append(_to_snap(sess, sets))
 
-    stats = list(session.exec(select(ExerciseStats)).all())
+    stats_q = select(ExerciseStats).where(ExerciseStats.user_id == uid)
+    stats = list(session.exec(stats_q).all())
     mine = {m.name: m.muscle for m in session.exec(select(MyExercise)).all()}
 
     week = build_week_rhythm(snaps, target_days, today, period=period)

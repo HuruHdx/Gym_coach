@@ -13,7 +13,9 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 - API 文档：http://127.0.0.1:8000/docs  
-- 默认口令：`dev-token`（见 `api/.env` 的 `APP_TOKEN`）  
+- 前端登录：手机号 + 密码 → 返回 JWT；业务请求带 `Authorization: Bearer <token>`  
+- 评测与脚本仍可用 `APP_TOKEN`（默认 `dev-token`，见 `api/.env`）  
+- 生产请配置 `JWT_SECRET`  
 - 默认模型：`LLM_PROVIDER=mock`（不需要 Key）
 
 ### 2. 前端（终端 B）

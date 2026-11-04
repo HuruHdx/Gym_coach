@@ -6,7 +6,7 @@ export type Profile = {
   id: number;
   goal: Goal;
   experience: Experience;
-  weight_kg: number;
+  weight_kg: number | null;
   height_cm: number | null;
   days_per_week: number;
   session_minutes: number;

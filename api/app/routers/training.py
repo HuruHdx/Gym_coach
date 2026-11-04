@@ -5,10 +5,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from app.auth import require_token
+from app.auth import AuthContext, bind_auth
 from app.db import get_session
 from app.exercises_catalog import alternatives, alternatives_rich
-from app.models import DebugTrace, ExerciseStats, MyExercise, Profile, TrainingSession, TrainingSetLog
+from app.models import DebugTrace, ExerciseStats, MyExercise, TrainingSession, TrainingSetLog
+from app.tenancy import get_current_profile
 from app.schemas import (
     AdoptRequest,
     AlternativesOut,
@@ -33,7 +34,7 @@ router = APIRouter(prefix="/api/training", tags=["training"])
 @router.get("/today", response_model=SessionOut | None)
 def today_session(
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     return svc.get_today_active(session)
 
@@ -42,7 +43,7 @@ def today_session(
 def adopt(
     body: AdoptRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     return svc.adopt_draft(session, body)
 
@@ -52,7 +53,7 @@ def reorder_session(
     session_id: int,
     body: ReorderRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     try:
         return svc.reorder_exercises(session, session_id, body.names)
@@ -65,7 +66,7 @@ def patch_set(
     set_id: int,
     body: SetPatch,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     try:
         return svc.patch_set(session, set_id, body)
@@ -112,7 +113,7 @@ def session_timer(
     session_id: int,
     body: TimerRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     try:
         return svc.set_timer(session, session_id, body.action)
@@ -127,7 +128,7 @@ def record_duration(
     session_id: int,
     body: CompleteRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     if body.duration_minutes is None:
         raise HTTPException(400, "duration_minutes required")
@@ -144,7 +145,7 @@ async def complete(
     session_id: int,
     body: CompleteRequest | None = None,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     try:
         out = svc.complete_session(
@@ -163,7 +164,7 @@ async def complete(
 async def resummarize(
     session_id: int,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     """用现有打卡记录重跑总结，不改组数、重量和备注。"""
     try:
@@ -229,7 +230,7 @@ async def _coach_note(facts: str) -> tuple[str | None, str | None, bool]:
 def training_dashboard(
     period: str = "week",
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     """Pure-code week or month rhythm, plus 30d / same-muscle compare — no LLM."""
     if period not in ("week", "month"):
@@ -241,7 +242,7 @@ def training_dashboard(
 def list_sessions(
     limit: int = 20,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     return svc.list_sessions(session, limit=min(limit, 50))
 
@@ -250,7 +251,7 @@ def list_sessions(
 def get_session_detail(
     session_id: int,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     try:
         return svc.get_session_detail(session, session_id)
@@ -263,9 +264,9 @@ def get_alternatives(
     muscle: str = "胸",
     exclude: str | None = None,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     injuries = profile.injuries if profile else []
     rich = alternatives_rich(muscle, exclude=exclude, injuries=injuries)
     names = [r["name"] for r in rich]
@@ -289,12 +290,20 @@ def get_alternatives(
 @router.get("/exercises", response_model=list[ExerciseStatOut])
 def list_exercises(
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
+    from app.tenancy import current_user_id
+
+    uid = current_user_id()
+    # 无登录用户时绝不回全局成绩，避免串号
+    if uid is None:
+        return []
     mine = {m.name: m for m in session.exec(select(MyExercise)).all()}
-    stats = {s.exercise_name: s for s in session.exec(select(ExerciseStats)).all()}
+    stats_q = select(ExerciseStats).where(ExerciseStats.user_id == uid)
+    stats = {s.exercise_name: s for s in session.exec(stats_q).all()}
     histories = recent_top_weights(session)
-    names = sorted(set(mine) | set(stats))
+    # 只列当前用户有成绩的动作，避免旧全局 PR 串号
+    names = sorted(stats.keys())
     out: list[ExerciseStatOut] = []
     for name in names:
         s = stats.get(name)

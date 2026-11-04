@@ -8,7 +8,7 @@ from typing import Any
 from sqlmodel import select
 
 from app.brain.llm import TEMPERATURE_COPY, get_llm
-from app.models import Profile
+from app.tenancy import get_current_profile
 
 KNOWLEDGE_SYSTEM = """【知识问答】
 【角色】
@@ -157,7 +157,7 @@ def collect_training_stats(session: Any, intent: Any, question: str, stats_fixtu
     extra_hits: list[dict[str, Any]] = []
     stats_text = "\n".join(_format_stat_line(row) for row in rows)
     if len(rows) < 3 and list(intent.muscles or []):
-        profile = session.exec(select(Profile).limit(1)).first()
+        profile = get_current_profile(session)
         ctx = build_tool_context(session, intent, profile)
         args = {"muscles": list(intent.muscles), "limit": 4}
         got = execute_tool("get_related_stats", args, ctx)
@@ -256,7 +256,7 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
     from app.brain.memory_context import build_worker_context
 
     session = _session()
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     profile_text = build_profile_summary(profile)
     raw_intent = state.get("intent") or {}
     intent = Intent(

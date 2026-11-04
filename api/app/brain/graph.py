@@ -19,6 +19,8 @@ from langgraph.graph import END, StateGraph
 from sqlmodel import Session, select
 from typing_extensions import TypedDict
 
+from app.tenancy import get_current_profile
+
 from app.brain.intent_rewrite import (
     build_clarification,
     generate_clarification,
@@ -136,7 +138,7 @@ def is_draft_revision_safe(intent: Intent) -> bool:
 
 async def rewrite_intent_node(state: ChatState) -> dict[str, Any]:
     started = time.perf_counter()
-    profile = _session().exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(_session())
     from app.brain.memory_context import build_intent_context
 
     context = build_intent_context(
@@ -189,7 +191,7 @@ async def clarify_node(state: ChatState) -> dict[str, Any]:
     text, options = build_clarification(intent)
     # 意图空白：话术由模型按原话写，不走写死文案
     if not text:
-        profile = _session().exec(select(Profile).limit(1)).first()
+        profile = get_current_profile(_session())
         brief = ""
         if profile is not None:
             from app.brain.memory_context import build_intent_context
@@ -221,7 +223,7 @@ async def clarify_node(state: ChatState) -> dict[str, Any]:
 async def assemble_memory_node(state: ChatState) -> dict[str, Any]:
     started = time.perf_counter()
     session = _session()
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     intent = _intent(state["intent"])
     memory = assemble_memory(session, intent, profile)
     from app.brain.memory_context import build_worker_context
@@ -264,7 +266,7 @@ async def draft_plan_node(state: ChatState) -> dict[str, Any]:
         from app.brain.tools import build_tool_context
 
         session = _session()
-        profile = session.exec(select(Profile).limit(1)).first()
+        profile = get_current_profile(session)
         intent = _intent(state["intent"])
         ctx = build_tool_context(session, intent, profile)
         raw, tool_trace = await draft_plan_with_tools(
@@ -444,9 +446,12 @@ async def chat_reply_node(state: ChatState) -> dict[str, Any]:
         return _finish_reply(started, grounding, text)
 
     if branch == "memory":
-        profile = _session().exec(select(Profile).limit(1)).first()
+        profile = get_current_profile(_session())
         if "体重" in question and "上次" not in question and profile is not None:
-            text = f"你的体重是{profile.weight_kg:g}公斤。"
+            if profile.weight_kg is None:
+                text = "档案里还没填体重，记一笔后再问我。"
+            else:
+                text = f"你的体重是{profile.weight_kg:g}公斤。"
             return _finish_reply(started, grounding, text, profile_text=build_profile_summary(profile))
         from app.brain.knowledge_reply import collect_training_stats
 

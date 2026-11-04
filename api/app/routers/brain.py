@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from app.auth import require_token
+from app.auth import AuthContext, bind_auth
 from app.brain.memory_context import (
     get_or_create_active_conversation_id,
     load_conversation_messages,
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api", tags=["brain"])
 async def chat(
     body: ChatRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     # 确保有活跃段；短期记忆以库为准，history 仅作评测回落
     get_or_create_active_conversation_id(session)
@@ -50,7 +50,7 @@ async def chat(
 @router.get("/chat/conversation")
 def get_conversation(
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     """当前活跃对话段（今天）的气泡，供前端进页渲染。"""
     return load_conversation_messages(session)
@@ -59,7 +59,7 @@ def get_conversation(
 @router.post("/chat/conversation")
 def new_conversation(
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     """新对话：开新 conversation_id，旧流水保留。"""
     cid = start_new_conversation(session)
@@ -138,7 +138,7 @@ def _eval_body(state: dict) -> dict:
 
 
 @router.post("/eval/qa")
-async def eval_qa(body: EvalQaRequest, _: str = Depends(require_token)):
+async def eval_qa(body: EvalQaRequest, _: AuthContext = Depends(bind_auth)):
     """评测专用。不写对话、不改记忆、不写 DebugTrace。"""
     from sqlmodel import SQLModel, Session, create_engine
 
@@ -240,7 +240,7 @@ def _thread_turn(index: int, text: str, state: dict[str, Any]) -> EvalTurnOut:
 
 
 @router.post("/eval/thread", response_model=EvalThreadOut)
-async def eval_thread(body: EvalThreadRequest, _: str = Depends(require_token)):
+async def eval_thread(body: EvalThreadRequest, _: AuthContext = Depends(bind_auth)):
     """
     长对话评测：整条对话在同一台内存库里顺序跑。
 
@@ -362,7 +362,7 @@ def _eval_profile_like(body: EvalThreadRequest) -> Profile:
 def post_feedback(
     body: FeedbackRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     """聊天气泡点赞/点踩。差评写入快照，供导出 eval/inbox。"""
     row = submit_feedback(session, body)
@@ -386,7 +386,7 @@ def get_feedback(
     status: str | None = None,
     limit: int = 50,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     rows = list_feedback(session, status=status, limit=limit)
     return [
@@ -411,7 +411,7 @@ def get_feedback(
 def list_traces(
     limit: int = 20,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     rows = session.exec(select(DebugTrace).order_by(DebugTrace.id.desc()).limit(limit)).all()
     return [
@@ -424,7 +424,7 @@ def list_traces(
 def get_trace(
     trace_id: int,
     session: Session = Depends(get_session),
-    _: str = Depends(require_token),
+    _: AuthContext = Depends(bind_auth),
 ):
     row = session.get(DebugTrace, trace_id)
     if not row:

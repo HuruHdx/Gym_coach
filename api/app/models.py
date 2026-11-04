@@ -27,11 +27,32 @@ class Experience(str, Enum):
     ADVANCED = "老炮"
 
 
+class User(SQLModel, table=True):
+    """手机号 + 密码账号。"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    phone: str = Field(index=True, unique=True, max_length=20)
+    password_hash: str
+    display_name: Optional[str] = Field(default=None, max_length=40)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
+class AuthSession(SQLModel, table=True):
+    """登录会话：Bearer 为不透明 token，可吊销。"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    token: str = Field(index=True, unique=True, max_length=64)
+    expires_at: NaiveDatetime = Field(index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
 class Profile(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, index=True, unique=True)
     goal: Goal = Goal.BULK
     experience: Experience = Experience.NOVICE
-    weight_kg: float = 70.0
+    weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
     days_per_week: int = 4
     session_minutes: int = 45
@@ -51,6 +72,7 @@ class ProfileHistory(SQLModel, table=True):
     """Scalar field change history (weight, goal, experience, days)."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, index=True)
     field: str
     old_value: str
     new_value: str
@@ -98,6 +120,7 @@ class Exercise(SQLModel, table=True):
 
 class TrainingSession(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, index=True)
     session_date: date = Field(index=True)
     split_label: Optional[str] = None
     source: str = "adopted"  # adopted | custom
@@ -130,10 +153,11 @@ class TrainingSetLog(SQLModel, table=True):
 
 
 class ExerciseStats(SQLModel, table=True):
-    """Derived cache — recomputable from logs."""
+    """Derived cache — recomputable from logs。按 user_id 隔离。"""
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    exercise_name: str = Field(index=True, unique=True)
+    user_id: Optional[int] = Field(default=None, index=True)
+    exercise_name: str = Field(index=True)
     last_weight: Optional[float] = None
     last_reps: Optional[int] = None
     last_feeling: Optional[str] = None  # 轻松 | 合适 | 力竭；没打标则为空
@@ -148,9 +172,10 @@ class ExerciseStats(SQLModel, table=True):
 
 
 class ActiveChat(SQLModel, table=True):
-    """当前打开的对话段（单用户单活跃会话）。「新对话」只换 conversation_id，不删流水。"""
+    """当前打开的对话段。「新对话」只换 conversation_id，不删流水。"""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, index=True)
     conversation_id: str = Field(index=True)
     updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
@@ -159,6 +184,7 @@ class ChatTurn(SQLModel, table=True):
     """完整会话流水。按 conversation_id 分段；进模型默认只用「今天 + 当前段」。"""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, index=True)
     conversation_id: str = Field(default="", index=True)
     session_day: date = Field(index=True)
     role: str  # user | assistant

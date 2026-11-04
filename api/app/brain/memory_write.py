@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from app.exercises_catalog import find_catalog_mentions_in_text
 from app.models import Experience, Goal, PendingMemory, Profile, ProfileHistory, utcnow
+from app.tenancy import current_user_id, get_current_profile
 
 _INJURIES = ("膝盖", "腰", "肩", "手腕", "肘", "踝")
 _STANDING_AVOID = (
@@ -93,7 +94,14 @@ def _apply_pending(session: Session, profile: Profile, row: PendingMemory) -> Me
         _clear_pending(session, row)
         session.commit()
         return MemoryEffect()
-    session.add(ProfileHistory(field=field_name, old_value=old_raw, new_value=new_raw))
+    session.add(
+        ProfileHistory(
+            user_id=current_user_id(),
+            field=field_name,
+            old_value=old_raw,
+            new_value=new_raw,
+        )
+    )
     profile.updated_at = utcnow()
     session.add(profile)
     _clear_pending(session, row)
@@ -150,13 +158,15 @@ def _single_value_proposal(text: str, profile: Profile) -> tuple[str, str, str, 
         weight = re.search(r"(\d{2,3}(?:\.\d)?)\s*(?:kg|公斤|千克)", text, re.I)
     if weight and any(mark in text for mark in ("体重", "公斤", "千克", "kg", "KG")):
         new = float(weight.group(1))
-        if abs(new - float(profile.weight_kg)) > 0.05:
-            return (
-                "weight_kg",
-                f"{profile.weight_kg:g}",
-                f"{new:g}",
-                f"档案里体重是 {profile.weight_kg:g}kg，要改成 {new:g}kg 吗？",
+        old = profile.weight_kg
+        if old is None or abs(new - float(old)) > 0.05:
+            old_s = f"{old:g}" if old is not None else ""
+            ask = (
+                f"档案里还没填体重，记成 {new:g}kg 吗？"
+                if old is None
+                else f"档案里体重是 {old:g}kg，要改成 {new:g}kg 吗？"
             )
+            return ("weight_kg", old_s, f"{new:g}", ask)
     goal = re.search(r"(?:长期)?目标(?:改成|改为|换成)\s*(增肌|减脂|减肥|力量|塑形)", text)
     if goal is None:
         goal = re.search(r"(?:改成|改为)\s*(增肌|减脂|减肥|力量|塑形)(?:目标)?", text)
@@ -204,7 +214,7 @@ def _single_value_proposal(text: str, profile: Profile) -> tuple[str, str, str, 
 
 
 def apply_user_memory(session: Session, user_text: str) -> MemoryEffect:
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     if profile is None:
         return MemoryEffect()
     text = user_text.strip()

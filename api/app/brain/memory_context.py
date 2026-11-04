@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.brain.memory import format_profile_for_llm
 from app.models import ActiveChat, ChatTurn, Profile, utcnow
+from app.tenancy import current_user_id
 
 _PAST_CUES = (
     "昨天",
@@ -183,13 +184,25 @@ def _row_to_dict(row: ChatTurn) -> dict[str, Any]:
     }
 
 
+def _active_chat_q():
+    stmt = select(ActiveChat)
+    uid = current_user_id()
+    if uid is not None:
+        stmt = stmt.where(ActiveChat.user_id == uid)
+    return stmt
+
+
 def load_turns(session: Session) -> list[ChatTurn]:
-    return list(session.exec(select(ChatTurn).order_by(ChatTurn.id)).all())
+    stmt = select(ChatTurn).order_by(ChatTurn.id)
+    uid = current_user_id()
+    if uid is not None:
+        stmt = stmt.where(ChatTurn.user_id == uid)
+    return list(session.exec(stmt).all())
 
 
 def get_or_create_active_conversation_id(session: Session) -> str:
     """返回当前活跃 conversation_id；没有则新建，并把今天无归属的旧行挂到新段上。"""
-    active = session.exec(select(ActiveChat).limit(1)).first()
+    active = session.exec(_active_chat_q().limit(1)).first()
     if active and active.conversation_id:
         return active.conversation_id
 
@@ -203,7 +216,7 @@ def get_or_create_active_conversation_id(session: Session) -> str:
     for row in orphan_today:
         row.conversation_id = cid
         session.add(row)
-    session.add(ActiveChat(conversation_id=cid, updated_at=utcnow()))
+    session.add(ActiveChat(user_id=current_user_id(), conversation_id=cid, updated_at=utcnow()))
     session.commit()
     return cid
 
@@ -211,14 +224,14 @@ def get_or_create_active_conversation_id(session: Session) -> str:
 def start_new_conversation(session: Session) -> str:
     """开新对话段：旧流水保留，活跃指针切到新 id。"""
     cid = str(uuid4())
-    active = session.exec(select(ActiveChat).limit(1)).first()
+    active = session.exec(_active_chat_q().limit(1)).first()
     now = utcnow()
     if active:
         active.conversation_id = cid
         active.updated_at = now
         session.add(active)
     else:
-        session.add(ActiveChat(conversation_id=cid, updated_at=now))
+        session.add(ActiveChat(user_id=current_user_id(), conversation_id=cid, updated_at=now))
     session.commit()
     return cid
 
@@ -387,8 +400,10 @@ def save_exchange(
     """一轮来回追加入当前 conversation，不覆盖旧记录。"""
     today = date.today()
     cid = get_or_create_active_conversation_id(session)
+    uid = current_user_id()
     session.add(
         ChatTurn(
+            user_id=uid,
             conversation_id=cid,
             session_day=today,
             role="user",
@@ -426,6 +441,7 @@ def save_exchange(
             )
     session.add(
         ChatTurn(
+            user_id=uid,
             conversation_id=cid,
             session_day=today,
             role="assistant",

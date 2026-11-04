@@ -506,6 +506,11 @@ select {
   color: var(--lb-ink);
   font-family: inherit;
   letter-spacing: 0.15em;
+  font-size: 16px; /* iOS 防缩放 */
+}
+.lb-field input[type="tel"] {
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
 }
 .lb-field input::placeholder {
   color: var(--lb-ink-3);

@@ -6,6 +6,9 @@ class Settings(BaseSettings):
 
     app_name: str = "Gym Coach"
     app_token: str = "dev-token"
+    # 用户登录 JWT（HS256）。空则回落到 app_token 派生，生产务必单独配置
+    jwt_secret: str = ""
+    jwt_expire_days: int = 30
     database_url: str = "sqlite:///./data/gym.db"
     llm_provider: str = "mock"  # mock | openai_compatible
     llm_api_key: str = ""

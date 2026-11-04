@@ -9,13 +9,43 @@ from pydantic import BaseModel, Field
 from app.models import Experience, Goal
 
 
+# ---------- Auth ----------
+
+
+class AuthRegisterIn(BaseModel):
+    phone: str
+    password: str
+    display_name: Optional[str] = Field(default=None, max_length=40)
+
+
+class AuthLoginIn(BaseModel):
+    phone: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: int
+    phone: str
+    display_name: Optional[str] = None
+
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=40)
+
+
+class AuthTokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
 # ---------- Profile ----------
 
 
 class ProfileCreate(BaseModel):
     goal: Goal = Goal.BULK
     experience: Experience = Experience.NOVICE
-    weight_kg: float = Field(gt=30, lt=300)
+    weight_kg: Optional[float] = Field(default=None, gt=30, lt=300)
     height_cm: Optional[float] = Field(default=None, gt=100, lt=250)
     days_per_week: int = Field(ge=1, le=7, default=4)
     session_minutes: int = Field(ge=15, le=180, default=45)
@@ -51,7 +81,7 @@ class ProfileOut(BaseModel):
     id: int
     goal: Goal
     experience: Experience
-    weight_kg: float
+    weight_kg: Optional[float]
     height_cm: Optional[float]
     days_per_week: int
     session_minutes: int

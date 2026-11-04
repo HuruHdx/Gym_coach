@@ -6,13 +6,12 @@ import {
   Flame,
   Home,
   Loader,
-  Minus,
   PersonStanding,
-  Plus,
   Target,
   TrendingUp,
   Zap,
 } from "lucide-react";
+import { DateWheelPickerSheet, WheelPickerSheet, numberRange } from "../components/WheelPickerSheet";
 import { api } from "../lib/api";
 import {
   DAY_OPTIONS,
@@ -26,7 +25,7 @@ import {
   preferencesForScene,
   type SceneId,
 } from "../lib/profileOptions";
-import { writeProfileExtras } from "../lib/profileView";
+import { formatBirthDateLabel, writeProfileExtras } from "../lib/profileView";
 import type { Experience, Goal } from "../types";
 
 type Props = { onDone: () => void };
@@ -51,10 +50,15 @@ export function Onboarding({ onDone }: Props) {
   const [scene, setScene] = useState<SceneId>("gym");
   const [parts, setParts] = useState<string[]>([]);
   const [injuryNote, setInjuryNote] = useState("");
-  const [weight, setWeight] = useState(70);
-  const [height, setHeight] = useState(175);
+  const [weight, setWeight] = useState<number | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
   const [gender, setGender] = useState<string | null>(null);
-  const [birthYear, setBirthYear] = useState<number | null>(null);
+  const [birthDate, setBirthDate] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [bodyPicker, setBodyPicker] = useState<"weight" | "height" | "birth" | null>(null);
+
+  const weightOptions = useMemo(() => numberRange(40, 150, 0.5), []);
+  const heightOptions = useMemo(() => numberRange(140, 210, 1), []);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,17 +102,32 @@ export function Onboarding({ onDone }: Props) {
     setParts((prev) => (prev.includes(tag) ? prev.filter((x) => x !== tag) : [...prev, tag]));
   }
 
+  async function saveDisplayName() {
+    const nick = displayName.trim();
+    if (!nick) return;
+    await api("/api/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: nick.slice(0, 40) }),
+    });
+  }
+
   async function submit(payload: Record<string, unknown>) {
     setBusy(true);
     setError(null);
     try {
       await api("/api/profile", { method: "POST", body: JSON.stringify(payload) });
-      writeProfileExtras({ gender, birthYear });
+      await saveDisplayName();
+      writeProfileExtras({ gender, birthDate });
       onDone();
     } catch (e) {
       // 409 = 画像已存在（刷新重进），直接放行
       if (String(e).includes("409")) {
-        writeProfileExtras({ gender, birthYear });
+        try {
+          await saveDisplayName();
+        } catch {
+          /* ignore */
+        }
+        writeProfileExtras({ gender, birthDate });
         onDone();
       } else {
         setError(String(e));
@@ -119,12 +138,12 @@ export function Onboarding({ onDone }: Props) {
 
   function finish() {
     if (busy) return;
-    if (!Number.isFinite(weight) || weight <= 30 || weight >= 300) {
-      setError("体重填 30 到 300 之间的公斤数");
+    if (weight == null || !Number.isFinite(weight) || weight <= 30 || weight >= 300) {
+      setError("请先选择体重");
       return;
     }
-    if (!Number.isFinite(height) || height <= 100 || height >= 250) {
-      setError("身高填 100 到 250 之间的厘米");
+    if (height == null || !Number.isFinite(height) || height <= 100 || height >= 250) {
+      setError("请先选择身高");
       return;
     }
     void submit({
@@ -330,28 +349,33 @@ export function Onboarding({ onDone }: Props) {
 
           {step === 5 && (
             <Question title="最后，身体数据" sub="体重现在就要用，其余留给以后算热量" compact>
-              <div className="rounded-md border border-line bg-elevated px-3.5">
-                <StepperRow
-                  label="体重"
-                  hint="相对强度基准"
-                  unit="kg"
-                  step={0.5}
-                  min={31}
-                  max={299}
-                  value={weight}
-                  decimals={1}
-                  onChange={setWeight}
+              <label className="mb-3 block rounded-md border border-line bg-elevated px-3.5 py-3">
+                  <span className="text-[12.5px] text-muted">
+                  怎么称呼你
+                  <i className="mt-0.5 block text-[10px] not-italic text-soft">可改；不填会给你一个好听的默认称呼</i>
+                </span>
+                <input
+                  type="text"
+                  maxLength={40}
+                  value={displayName}
+                  placeholder="例如：阿虎"
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent text-[15px] font-semibold text-ink outline-none placeholder:text-soft"
+                  style={{ fontSize: 16 }}
                 />
-                <StepperRow
+              </label>
+              <div className="rounded-md border border-line bg-elevated px-3.5">
+                <PickerRow
+                  label="体重"
+                  hint="点开滚动选择，必填"
+                  value={weight == null ? "未填" : `${weight.toFixed(1)} kg`}
+                  onClick={() => setBodyPicker("weight")}
+                />
+                <PickerRow
                   label="身高"
-                  hint="可选"
-                  unit="cm"
-                  step={1}
-                  min={120}
-                  max={230}
-                  value={height}
-                  decimals={0}
-                  onChange={setHeight}
+                  hint="点开滚动选择，必填"
+                  value={height == null ? "未填" : `${Math.round(height)} cm`}
+                  onClick={() => setBodyPicker("height")}
                 />
                 <div className="flex items-center justify-between gap-3 border-b border-line py-3">
                   <span className="text-[12.5px] text-muted">
@@ -369,14 +393,46 @@ export function Onboarding({ onDone }: Props) {
                     </Segment>
                   </div>
                 </div>
-                <div className="flex items-center justify-between gap-3 py-3">
-                  <span className="text-[12.5px] text-muted">
-                    出生年
-                    <i className="mt-0.5 block text-[10px] not-italic text-soft">比年龄省事</i>
-                  </span>
-                  <YearStepper value={birthYear} onChange={setBirthYear} />
-                </div>
+                <PickerRow
+                  label="出生日期"
+                  hint="算年龄，后面热量会用到"
+                  value={formatBirthDateLabel(birthDate)}
+                  last
+                  onClick={() => setBodyPicker("birth")}
+                />
               </div>
+
+              <WheelPickerSheet
+                open={bodyPicker === "weight"}
+                title="选择体重"
+                values={weightOptions}
+                value={weight}
+                unit="kg"
+                format={(v) => v.toFixed(1)}
+                onClose={() => setBodyPicker(null)}
+                onConfirm={(next) => {
+                  if (next != null) setWeight(next);
+                }}
+              />
+              <WheelPickerSheet
+                open={bodyPicker === "height"}
+                title="选择身高"
+                values={heightOptions}
+                value={height}
+                unit="cm"
+                format={(v) => String(Math.round(v))}
+                onClose={() => setBodyPicker(null)}
+                onConfirm={(next) => {
+                  if (next != null) setHeight(next);
+                }}
+              />
+              <DateWheelPickerSheet
+                open={bodyPicker === "birth"}
+                title="选择出生日期"
+                value={birthDate}
+                onClose={() => setBodyPicker(null)}
+                onConfirm={setBirthDate}
+              />
             </Question>
           )}
         </div>
@@ -651,84 +707,37 @@ function Segment({
   );
 }
 
-function StepperRow({
+function PickerRow({
   label,
   hint,
-  unit,
-  step,
-  min,
-  max,
   value,
-  decimals,
-  onChange,
+  last,
+  onClick,
 }: {
   label: string;
   hint: string;
-  unit: string;
-  step: number;
-  min: number;
-  max: number;
-  value: number;
-  decimals: number;
-  onChange: (next: number) => void;
-}) {
-  const clamp = (next: number) => Math.min(max, Math.max(min, Math.round(next * 10) / 10));
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-line py-3">
-      <span className="text-[12.5px] text-muted">
-        {label}
-        <i className="mt-0.5 block text-[10px] not-italic text-soft">{hint}</i>
-      </span>
-      <span className="flex items-center gap-1">
-        <StepBtn onClick={() => onChange(clamp(value - step))} label={`减少${label}`}>
-          <Minus size={13} />
-        </StepBtn>
-        <span className="num min-w-[62px] text-center text-[15px] font-semibold">
-          {value.toFixed(decimals)}
-          <small className="ml-0.5 text-[10px] font-medium text-soft">{unit}</small>
-        </span>
-        <StepBtn onClick={() => onChange(clamp(value + step))} label={`增加${label}`}>
-          <Plus size={13} />
-        </StepBtn>
-      </span>
-    </div>
-  );
-}
-
-function YearStepper({ value, onChange }: { value: number | null; onChange: (next: number) => void }) {
-  const current = value ?? 1995;
-  return (
-    <span className="flex items-center gap-1">
-      <StepBtn onClick={() => onChange(current - 1)} label="往前一年">
-        <Minus size={13} />
-      </StepBtn>
-      <span className="num min-w-[52px] text-center text-[15px] font-semibold">
-        {value ?? "未填"}
-      </span>
-      <StepBtn onClick={() => onChange(current + 1)} label="往后一年">
-        <Plus size={13} />
-      </StepBtn>
-    </span>
-  );
-}
-
-function StepBtn({
-  onClick,
-  label,
-  children,
-}: {
+  value: string;
+  last?: boolean;
   onClick: () => void;
-  label: string;
-  children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={label}
-      className="pressable grid h-[29px] w-[29px] place-items-center rounded-sm border border-line-strong bg-elevated"
+      className={`pressable flex w-full items-center justify-between gap-3 py-3 text-left ${
+        last ? "" : "border-b border-line"
+      }`}
     >
-      {children}
+      <span className="text-[12.5px] text-muted">
+        {label}
+        <i className="mt-0.5 block text-[10px] not-italic text-soft">{hint}</i>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="num text-[15px] font-semibold text-ink">{value}</span>
+        <span className="text-[13px] text-muted" aria-hidden>
+          ›
+        </span>
+      </span>
     </button>
   );
 }

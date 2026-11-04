@@ -82,6 +82,12 @@ def _ensure_columns() -> None:
         ("profile", "height_cm", "REAL"),
         ("profile", "session_minutes", "INTEGER DEFAULT 45"),
         ("profile", "avoid_exercises", "TEXT"),
+        ("profile", "user_id", "INTEGER"),
+        ("trainingsession", "user_id", "INTEGER"),
+        ("activechat", "user_id", "INTEGER"),
+        ("chatturn", "user_id", "INTEGER"),
+        ("profilehistory", "user_id", "INTEGER"),
+        ("exercisestats", "user_id", "INTEGER"),
         ("chatturn", "conversation_id", "VARCHAR"),
         ("chatturn", "card", "TEXT"),
         ("chatturn", "suggestions", "TEXT"),
@@ -109,6 +115,10 @@ def _ensure_columns() -> None:
             conn.execute(
                 text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {coltype}")
             )
+        # 身高体重改为可空：引导页未选时不写死默认值
+        if conn.execute(text("SELECT to_regclass(:name)"), {"name": "profile"}).scalar():
+            conn.execute(text("ALTER TABLE profile ALTER COLUMN weight_kg DROP NOT NULL"))
+            conn.execute(text("ALTER TABLE profile ALTER COLUMN height_cm DROP NOT NULL"))
         _promote_text_to_jsonb(conn)
 
 

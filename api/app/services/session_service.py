@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, col, or_, select
 
 from app.models import ExerciseStats, MyExercise, TrainingSession, TrainingSetLog, utcnow
+from app.tenancy import current_user_id, get_current_profile
 from app.performance import (
     build_session_summary,
     judge_performance,
@@ -124,10 +125,19 @@ def session_to_out(sess: TrainingSession, sets: list[TrainingSetLog]) -> Session
     )
 
 
+def _sessions_q():
+    """用户 JWT 只看自己的课；APP_TOKEN / 评测不按用户滤。"""
+    stmt = select(TrainingSession)
+    uid = current_user_id()
+    if uid is not None:
+        stmt = stmt.where(TrainingSession.user_id == uid)
+    return stmt
+
+
 def get_today_active(session: Session, day: date | None = None) -> Optional[SessionOut]:
     day = day or date.today()
     sess = session.exec(
-        select(TrainingSession)
+        _sessions_q()
         .where(TrainingSession.session_date == day)
         .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
         .order_by(col(TrainingSession.id).desc())
@@ -140,7 +150,7 @@ def get_today_active(session: Session, day: date | None = None) -> Optional[Sess
 
 def abandon_today_active(session: Session, day: date) -> None:
     rows = session.exec(
-        select(TrainingSession)
+        _sessions_q()
         .where(TrainingSession.session_date == day)
         .where(TrainingSession.status == "active")
     ).all()
@@ -151,7 +161,7 @@ def abandon_today_active(session: Session, day: date) -> None:
 
 def abandon_today_done(session: Session, day: date) -> None:
     rows = session.exec(
-        select(TrainingSession)
+        _sessions_q()
         .where(TrainingSession.session_date == day)
         .where(TrainingSession.status == "done")
     ).all()
@@ -163,7 +173,7 @@ def abandon_today_done(session: Session, day: date) -> None:
 def today_has_done(session: Session, day: date | None = None) -> bool:
     day = day or date.today()
     row = session.exec(
-        select(TrainingSession)
+        _sessions_q()
         .where(TrainingSession.session_date == day)
         .where(TrainingSession.status == "done")
         .limit(1)
@@ -193,6 +203,7 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
         split = body.title.split("·", 1)[-1].strip()
 
     sess = TrainingSession(
+        user_id=current_user_id(),
         session_date=day,
         split_label=split,
         source="adopted",
@@ -329,9 +340,15 @@ def recompute_stats_for_exercise(
         elif latest.actual_weight < prev:
             trend = "↓"
 
-    stats = session.exec(select(ExerciseStats).where(ExerciseStats.exercise_name == name)).first()
+    uid = current_user_id()
+    stats_q = select(ExerciseStats).where(ExerciseStats.exercise_name == name)
+    if uid is not None:
+        stats_q = stats_q.where(ExerciseStats.user_id == uid)
+    else:
+        stats_q = stats_q.where(ExerciseStats.user_id == None)  # noqa: E711
+    stats = session.exec(stats_q).first()
     if not stats:
-        stats = ExerciseStats(exercise_name=name)
+        stats = ExerciseStats(user_id=uid, exercise_name=name)
     ref = reference_set(session_sets) if session_sets is not None else None
     if ref is not None and ref.actual_weight is not None:
         stats.last_weight = ref.actual_weight
@@ -461,7 +478,7 @@ def complete_session(
 
 def list_sessions(session: Session, limit: int = 20) -> list[SessionOut]:
     rows = session.exec(
-        select(TrainingSession)
+        _sessions_q()
         .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
         .order_by(col(TrainingSession.session_date).desc(), col(TrainingSession.id).desc())
         .limit(limit)
@@ -473,10 +490,17 @@ def list_sessions(session: Session, limit: int = 20) -> list[SessionOut]:
     return out
 
 
-def get_session_detail(session: Session, session_id: int) -> SessionOut:
-    sess = session.get(TrainingSession, session_id)
+def _assert_session_owner(sess: TrainingSession | None) -> TrainingSession:
     if not sess:
         raise KeyError("session not found")
+    uid = current_user_id()
+    if uid is not None and sess.user_id is not None and sess.user_id != uid:
+        raise KeyError("session not found")
+    return sess
+
+
+def get_session_detail(session: Session, session_id: int) -> SessionOut:
+    sess = _assert_session_owner(session.get(TrainingSession, session_id))
     sets = list(session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == session_id)).all())
     return session_to_out(sess, sets)
 
@@ -488,7 +512,7 @@ def build_coach_session_context(session: Session, session_id: int) -> str:
     sess = session.get(TrainingSession, session_id)
     if not sess:
         return ""
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     sets = list(session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == session_id)).all())
 
     p_info = []

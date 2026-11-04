@@ -1,58 +1,101 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, markAuthed, setToken } from "../lib/api";
+import { markAuthed, setToken } from "../lib/api";
 import { MOTTO } from "../lib/brand";
 
 type Props = { onDone: () => void };
+type Mode = "login" | "register";
 
 /**
  * 登录页（品牌页）。
  *
- * 与日常界面不同的一套视觉：深色 + 荧光黄绿 + 配重片同心圆。
- * 颜色只在 index.css 的 .login-brand 作用域内定义，不改全站主题。
- *
- * 关于认证：现在仍是「单一访问口令」，调 GET /api/auth/verify。
- * 后续接账号体系时，只需要替换 submitCredential 的实现，界面与状态不用动。
+ * 深色 + 荧光黄绿只在 .login-brand 作用域内。
+ * 认证：手机号 + 密码；POST /api/auth/login 或 /register。
  */
 export function LoginPage({ onDone }: Props) {
+  const [mode, setMode] = useState<Mode>("login");
+  const [phone, setPhone] = useState("");
   const [pass, setPass] = useState("");
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  /** 每次失败递增，用来重放抖动动画（同值不会重新触发 CSS animation）。 */
+  const [hint, setHint] = useState("");
+  /** 每次失败递增，用来重放抖动动画。 */
   const [attempt, setAttempt] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (err) inputRef.current?.focus();
+    if (err) phoneRef.current?.focus();
   }, [err]);
 
-  /** 唯一需要替换的地方：接账号体系时改这里。 */
-  async function submitCredential(secret: string) {
-    setToken(secret);
-    await api("/api/auth/verify");
-    markAuthed();
+  async function postAuth(path: "/api/auth/login" | "/api/auth/register") {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: phone.trim(), password: pass }),
+    });
+    const text = await res.text();
+    let detail = "";
+    try {
+      const body = JSON.parse(text) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    if (!res.ok) {
+      throw new Error(detail || `${res.status}: ${text}`);
+    }
+    if (!text) return {};
+    return JSON.parse(text) as Record<string, unknown>;
   }
 
   async function submit(e?: FormEvent) {
     e?.preventDefault();
     if (busy) return;
-    const secret = pass.trim();
-    if (!secret) {
-      setErr("先输口令");
+    const p = phone.trim();
+    if (!/^1[3-9]\d{9}$/.test(p)) {
+      setErr("请输入 11 位手机号");
+      setHint("");
+      setAttempt((n) => n + 1);
+      return;
+    }
+    if (pass.length < 6) {
+      setErr("密码至少 6 位");
+      setHint("");
       setAttempt((n) => n + 1);
       return;
     }
     setBusy(true);
     setErr("");
+    setHint("");
     try {
-      await submitCredential(secret);
+      if (mode === "register") {
+        await postAuth("/api/auth/register");
+        // 注册成功不自动进 App：切回登录，让用户主动登一次
+        setMode("login");
+        setPass("");
+        setHint("注册成功，请用手机号登录");
+        return;
+      }
+      const data = await postAuth("/api/auth/login");
+      const token = data.access_token;
+      if (typeof token !== "string" || !token) {
+        throw new Error("登录失败");
+      }
+      setToken(token);
+      markAuthed();
       onDone();
-    } catch {
-      setErr("口令不对。它对应服务器 .env 里的 APP_TOKEN。");
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : mode === "login" ? "登录失败" : "注册失败");
       setAttempt((n) => n + 1);
     } finally {
       setBusy(false);
     }
+  }
+
+  function switchMode(next: Mode) {
+    setMode(next);
+    setErr("");
+    setHint("");
   }
 
   return (
@@ -61,7 +104,6 @@ export function LoginPage({ onDone }: Props) {
       <div className="lb-plate" aria-hidden />
 
       <div className="lb-wrap flex-1">
-        {/* ---- 顶部 ---- */}
         <header className="flex shrink-0 items-center justify-between pt-9">
           <span className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.2em] text-[var(--lb-ink-2)]">
             <i
@@ -80,7 +122,6 @@ export function LoginPage({ onDone }: Props) {
           <span className="text-[9.5px] tracking-[0.14em] text-[var(--lb-ink-3)]">中文</span>
         </header>
 
-        {/* ---- 标题区 ---- */}
         <div className="mt-11">
           <p
             className={`text-[9.5px] font-semibold uppercase tracking-[0.26em] ${
@@ -90,16 +131,26 @@ export function LoginPage({ onDone }: Props) {
             {err ? "Access Denied" : "Personal Training Log"}
           </p>
           <h1 className="mt-3 font-display text-[46px] font-bold italic leading-[0.96] tracking-[-0.045em]">
-            先登录
-            <br />
-            再开练
-            <span className="not-italic">.</span>
+            {mode === "login" ? (
+              <>
+                先登录
+                <br />
+                再开练
+                <span className="not-italic">.</span>
+              </>
+            ) : (
+              <>
+                注册账号
+                <br />
+                开练
+                <span className="not-italic">.</span>
+              </>
+            )}
           </h1>
           <p className="mt-4 font-display text-[17px] font-medium tracking-[-0.01em] text-[var(--lb-ink-2)]">
             赶紧训练吧彦祖
           </p>
 
-          {/* 三栏：不涉及任何用户数据，所有人看到的一样 */}
           <div className="mt-5 flex items-stretch border-y border-[var(--lb-line)]">
             {[
               { cn: "训练", en: "TRAIN" },
@@ -121,15 +172,26 @@ export function LoginPage({ onDone }: Props) {
           </div>
         </div>
 
-        {/* ---- 表单 ---- */}
         <form onSubmit={submit} className="mt-auto pb-7 pt-8">
-          <div className="flex items-baseline justify-between text-[9px] font-semibold uppercase tracking-[0.2em]">
-            <span className={err ? "text-[var(--lb-danger)]" : "text-[var(--lb-ink-3)]"}>
-              Access Code
-            </span>
-            <span className={err ? "text-[var(--lb-danger)]" : "text-[var(--lb-accent)]"}>
-              {err ? "ERR" : "●"}
-            </span>
+          <div className="mb-3 flex gap-4 text-[9px] font-semibold uppercase tracking-[0.2em]">
+            <button
+              type="button"
+              onClick={() => switchMode("login")}
+              className={
+                mode === "login" ? "text-[var(--lb-accent)]" : "text-[var(--lb-ink-3)]"
+              }
+            >
+              登录
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode("register")}
+              className={
+                mode === "register" ? "text-[var(--lb-accent)]" : "text-[var(--lb-ink-3)]"
+              }
+            >
+              注册
+            </button>
           </div>
 
           <div
@@ -145,22 +207,36 @@ export function LoginPage({ onDone }: Props) {
           >
             <div className={`lb-field ${err ? "is-error" : ""}`}>
               <input
-                ref={inputRef}
+                ref={phoneRef}
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                placeholder="手机号"
+                value={phone}
+                maxLength={11}
+                onChange={(event) => {
+                  setPhone(event.target.value.replace(/\D/g, "").slice(0, 11));
+                  if (err) setErr("");
+                }}
+                aria-label="手机号"
+              />
+            </div>
+
+            <div className={`lb-field mt-2 ${err ? "is-error" : ""}`}>
+              <input
                 type={visible ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="输入访问口令"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                placeholder={mode === "register" ? "密码（至少 6 位）" : "密码"}
                 value={pass}
                 onChange={(event) => {
                   setPass(event.target.value);
-                  if (err) {
-                    setErr("");
-                  }
+                  if (err) setErr("");
                 }}
-                aria-label="访问口令"
+                aria-label="密码"
               />
               <button
                 type="button"
-                aria-label={visible ? "隐藏口令" : "显示口令"}
+                aria-label={visible ? "隐藏密码" : "显示密码"}
                 onClick={() => setVisible((v) => !v)}
                 className="grid shrink-0 place-items-center p-0.5 text-[var(--lb-ink-3)]"
               >
@@ -171,19 +247,30 @@ export function LoginPage({ onDone }: Props) {
             <button
               type="submit"
               disabled={busy}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-[7px] py-3 text-[14px] font-bold text-[#0f0d16] transition-opacity duration-state disabled:opacity-60"
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-[7px] py-3 text-[14px] font-bold transition-opacity duration-state disabled:opacity-60"
               style={{
                 background: err ? "var(--lb-danger)" : "var(--lb-accent)",
                 color: err ? "#1a0d0d" : "#0f0d16",
               }}
             >
-              {busy ? "验证中…" : err ? "重试" : "进入训练场"}
+              {busy
+                ? "请稍候…"
+                : err
+                  ? "重试"
+                  : mode === "login"
+                    ? "进入训练场"
+                    : "注册"}
               {busy ? <Spinner /> : <Arrow />}
             </button>
           </div>
 
           {err && (
             <p className="mt-2 text-[10px] leading-relaxed text-[rgba(255,160,160,.75)]">{err}</p>
+          )}
+          {!err && hint && (
+            <p className="mt-2 text-center text-[10px] leading-relaxed text-[var(--lb-accent)]">
+              {hint}
+            </p>
           )}
 
           <p className="mt-3.5 text-center text-[10.5px] font-medium text-[var(--lb-ink-2)]">
@@ -197,8 +284,6 @@ export function LoginPage({ onDone }: Props) {
     </div>
   );
 }
-
-/* ---------------- 图标 ---------------- */
 
 function Eye() {
   return (

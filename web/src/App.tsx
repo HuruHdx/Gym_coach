@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api, clearAuth, isAuthed } from "./lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, clearAuth, getToken, isAuthed } from "./lib/api";
 import type { Profile } from "./types";
 import { AppShell } from "./components/AppShell";
 import { LoginPage } from "./pages/LoginPage";
@@ -18,6 +18,7 @@ import { RecapPage } from "./pages/RecapPage";
 import { DebugPage } from "./pages/DebugPage";
 
 export default function App() {
+  const qc = useQueryClient();
   const [authed, setAuthed] = useState(() => isAuthed());
 
   const { data, isLoading, isError, refetch, error } = useQuery({
@@ -27,14 +28,32 @@ export default function App() {
     retry: false,
   });
 
+  function enterAuthed() {
+    // 换账号必须清缓存，否则「我的」会闪旧用户的 PR / 训练次数
+    try {
+      localStorage.removeItem("gym-coach-profile-extras");
+    } catch {
+      /* ignore */
+    }
+    void qc.clear();
+    setAuthed(true);
+  }
+
+  function leaveAuthed() {
+    const token = getToken();
+    if (token) {
+      void fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+    clearAuth();
+    void qc.clear();
+    setAuthed(false);
+  }
+
   if (!authed) {
-    return (
-      <LoginPage
-        onDone={() => {
-          setAuthed(true);
-        }}
-      />
-    );
+    return <LoginPage onDone={enterAuthed} />;
   }
 
   if (isLoading) {
@@ -52,16 +71,13 @@ export default function App() {
           {authFail ? "登录已失效" : "后端还没连上"}
         </p>
         <p className="text-sm text-muted">
-          {authFail ? "请重新输入访问口令。" : "先确认 api 的 uvicorn 在跑，再点重试。"}
+          {authFail ? "请重新登录。" : "先确认 api 的 uvicorn 在跑，再点重试。"}
         </p>
         <div className="flex gap-2">
           {authFail && (
             <button
               className="rounded-md border border-line px-4 py-2 text-sm font-bold"
-              onClick={() => {
-                clearAuth();
-                setAuthed(false);
-              }}
+              onClick={leaveAuthed}
             >
               重新登录
             </button>
@@ -94,14 +110,7 @@ export default function App() {
         <Route
           path="/me"
           element={
-            <MePage
-              profile={data}
-              onUpdated={() => refetch()}
-              onLogout={() => {
-                clearAuth();
-                setAuthed(false);
-              }}
-            />
+            <MePage profile={data} onUpdated={() => refetch()} onLogout={leaveAuthed} />
           }
         />
         <Route

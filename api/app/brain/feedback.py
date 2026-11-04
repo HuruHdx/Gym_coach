@@ -7,8 +7,9 @@ from typing import Any
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.models import ActiveChat, ChatTurn, DebugTrace, FeedbackEvent, Profile, utcnow
+from app.models import ActiveChat, ChatTurn, DebugTrace, FeedbackEvent, utcnow
 from app.schemas import FEEDBACK_TAGS, FeedbackRequest
+from app.tenancy import current_user_id, get_current_profile
 
 _ALLOWED_TAGS = set(FEEDBACK_TAGS)
 
@@ -90,7 +91,7 @@ def build_snapshot(
     if not suggestions and isinstance(grounding.get("suggestions"), list):
         suggestions = grounding.get("suggestions")
 
-    profile = session.exec(select(Profile).limit(1)).first()
+    profile = get_current_profile(session)
     conversation_id = ""
     history: list[dict[str, Any]] = []
     draft_title = None
@@ -124,7 +125,11 @@ def build_snapshot(
         if not suggestions and assistant_turn.suggestions:
             suggestions = list(assistant_turn.suggestions)
     elif conversation_id == "":
-        active = session.exec(select(ActiveChat).limit(1)).first()
+        aq = select(ActiveChat)
+        uid = current_user_id()
+        if uid is not None:
+            aq = aq.where(ActiveChat.user_id == uid)
+        active = session.exec(aq.limit(1)).first()
         conversation_id = (active.conversation_id if active else "") or ""
 
     if not answer:
@@ -200,7 +205,11 @@ def _resolve_context(
             question = (prior.text if prior else "") or ""
     elif trace is not None:
         answer = _text_from_blocks((trace.payload or {}).get("blocks"))
-        active = session.exec(select(ActiveChat).limit(1)).first()
+        aq = select(ActiveChat)
+        uid = current_user_id()
+        if uid is not None:
+            aq = aq.where(ActiveChat.user_id == uid)
+        active = session.exec(aq.limit(1)).first()
         conversation_id = (active.conversation_id if active else "") or ""
         # 尽量挂上刚写下的助手轮
         if conversation_id:

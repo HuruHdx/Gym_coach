@@ -1,10 +1,58 @@
 import type { Profile, TrainingSession } from "../types";
 import { startOfWeekMonday, toDateKey } from "./trainingAnalytics";
 
-/**
- * 画像接口没有昵称。定稿预览用的是这个称呼，单人页面先沿用，不另造用户字段。
- */
-export const DISPLAY_NAME = "Huru";
+/** @deprecated 已改为 /api/auth/me 的 display_name；保留仅防旧引用编译。 */
+export const DISPLAY_NAME = "小燃";
+
+export type AuthUser = {
+  id: number;
+  phone: string;
+  display_name: string | null;
+};
+
+/** 未自填昵称时的默认称呼：好听、好记，按账号稳定映射，不跟手机号拼数字。 */
+const DEFAULT_NICKS = [
+  "小燃",
+  "阿练",
+  "清清",
+  "小满",
+  "阿泽",
+  "南风",
+  "小禾",
+  "阿川",
+  "晚晴",
+  "小屿",
+  "阿野",
+  "青柠",
+  "小舟",
+  "阿白",
+  "初夏",
+  "小棠",
+  "阿辰",
+  "拾光",
+  "小鹿",
+  "阿恒",
+  "星野",
+  "小安",
+  "阿予",
+  "林间",
+] as const;
+
+function stableNickIndex(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return h % DEFAULT_NICKS.length;
+}
+
+/** 展示名：自填昵称优先，否则按账号取一个好听的默认称呼。 */
+export function displayNameOf(user: AuthUser | null | undefined): string {
+  const nick = user?.display_name?.trim();
+  if (nick) return nick;
+  const seed = user?.id != null ? `id:${user.id}` : user?.phone ? `ph:${user.phone}` : "guest";
+  return DEFAULT_NICKS[stableNickIndex(seed)] ?? "小燃";
+}
 
 // 选项目录统一在 profileOptions.ts。这里只做转发，避免两处各写一份后分叉。
 export {
@@ -53,7 +101,8 @@ export function selectedPartLabels(injuries: string[]): string[] {
   );
 }
 
-export function formatKg(n: number): string {
+export function formatKg(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   const rounded = Math.round(n * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
@@ -150,26 +199,62 @@ const EXTRAS_KEY = "gym-coach-profile-extras";
 
 export type ProfileExtras = {
   gender: string | null;
-  birthYear: number | null;
+  /** YYYY-MM-DD；用来算年龄（热量等）。兼容旧字段 birthYear。 */
+  birthDate: string | null;
 };
+
+function normalizeBirthDate(raw: { birthDate?: unknown; birthYear?: unknown }): string | null {
+  if (typeof raw.birthDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.birthDate)) {
+    return raw.birthDate;
+  }
+  // 旧版只存了出生年 → 当成当年 1 月 1 日，编辑页可再改准
+  if (typeof raw.birthYear === "number" && raw.birthYear > 1900 && raw.birthYear < 2020) {
+    return `${raw.birthYear}-01-01`;
+  }
+  return null;
+}
+
+export function ageFromBirthDate(iso: string | null, today = new Date()): number | null {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  let age = today.getFullYear() - y;
+  const beforeBirthday =
+    today.getMonth() + 1 < mo || (today.getMonth() + 1 === mo && today.getDate() < d);
+  if (beforeBirthday) age -= 1;
+  if (age < 5 || age > 100) return null;
+  return age;
+}
+
+export function formatBirthDateLabel(iso: string | null): string {
+  if (!iso) return "未填";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  const age = ageFromBirthDate(iso);
+  const date = `${m[1]}.${m[2]}.${m[3]}`;
+  return age != null ? `${date} · ${age}岁` : date;
+}
 
 export function readProfileExtras(): ProfileExtras {
   try {
     const raw = localStorage.getItem(EXTRAS_KEY);
-    if (!raw) return { gender: null, birthYear: null };
-    const parsed = JSON.parse(raw) as { gender?: unknown; birthYear?: unknown };
+    if (!raw) return { gender: null, birthDate: null };
+    const parsed = JSON.parse(raw) as { gender?: unknown; birthDate?: unknown; birthYear?: unknown };
     const gender = parsed.gender === "男" || parsed.gender === "女" ? parsed.gender : null;
-    const birthYear =
-      typeof parsed.birthYear === "number" && parsed.birthYear > 1900 && parsed.birthYear < 2020
-        ? parsed.birthYear
-        : null;
-    return { gender, birthYear };
+    return { gender, birthDate: normalizeBirthDate(parsed) };
   } catch {
-    return { gender: null, birthYear: null };
+    return { gender: null, birthDate: null };
   }
 }
 
 export function writeProfileExtras(extras: ProfileExtras) {
-  // TODO: 性别、出生年不在 /api/profile。先记在本机，不提交给教练。
+  // TODO: 性别、出生日期还不在 /api/profile。先记本机，热量阶段再入库。
   localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
+}
+
+export function clearProfileExtras() {
+  localStorage.removeItem(EXTRAS_KEY);
 }

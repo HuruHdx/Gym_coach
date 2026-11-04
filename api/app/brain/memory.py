@@ -138,11 +138,12 @@ def format_profile_for_llm(
     prefs = "、".join(profile.preferences) if profile.preferences else "不限"
     avoid = "、".join(profile.avoid_exercises) if getattr(profile, "avoid_exercises", None) else ""
     height = f"{profile.height_cm:g}cm" if profile.height_cm else "未填"
+    weight = f"{profile.weight_kg:g}kg" if profile.weight_kg is not None else "未填"
     minutes = getattr(profile, "session_minutes", None) or 45
     level = _level_phrase(profile.experience)
     line = (
         f"训练经验：{level}；长期目标：{profile.goal.value}；"
-        f"身高：{height}；体重：{profile.weight_kg:g}kg；"
+        f"身高：{height}；体重：{weight}；"
         f"每周：{profile.days_per_week}天；单次约：{minutes}分钟；"
         f"器械偏好：{prefs}；伤痛：{injuries}"
     )

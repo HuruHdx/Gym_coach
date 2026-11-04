@@ -4,15 +4,16 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import {
-  DISPLAY_NAME,
   WEIGHT_NUDGE_DAYS,
   biggestWeekLift,
   daysSince,
+  displayNameOf,
   formatKg,
   insightDetail,
   insightHeadline,
   shortLift,
   weekDoneCount,
+  type AuthUser,
 } from "../lib/profileView";
 import { useSkinStore, type Skin } from "../store/skin";
 import type { ExerciseStat, Profile, TrainingSession } from "../types";
@@ -36,19 +37,28 @@ export function MePage({ profile, onUpdated, onLogout }: Props) {
   const { skin, setSkin } = useSkinStore();
   const [weightOpen, setWeightOpen] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const letter = DISPLAY_NAME.slice(0, 1);
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<AuthUser>("/api/auth/me"),
+  });
+  const name = displayNameOf(me);
+  const letter = name.slice(0, 1);
 
   const { data: history = [], isLoading: weightLoading } = useQuery({
-    queryKey: ["weight-history"],
+    queryKey: ["weight-history", me?.id],
     queryFn: () => api<WeightPoint[]>("/api/profile/weight-history?limit=8"),
+    enabled: Boolean(me?.id),
   });
   const { data: sessions = [], isLoading: sessionsLoading } = useQuery({
-    queryKey: ["training-sessions"],
+    queryKey: ["training-sessions", me?.id],
     queryFn: () => api<TrainingSession[]>("/api/training/sessions?limit=30"),
+    enabled: Boolean(me?.id),
   });
   const { data: exercises = [], isLoading: liftsLoading } = useQuery({
-    queryKey: ["exercises"],
+    queryKey: ["exercises", me?.id],
     queryFn: () => api<ExerciseStat[]>("/api/training/exercises"),
+    enabled: Boolean(me?.id),
   });
 
   const points = useMemo(() => history.slice(-8), [history]);
@@ -84,7 +94,7 @@ export function MePage({ profile, onUpdated, onLogout }: Props) {
           {letter}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-display font-semibold tracking-tight">{DISPLAY_NAME}</h1>
+          <h1 className="font-display text-display font-semibold tracking-tight">{name}</h1>
           <p className="mt-0.5 text-label text-muted">
             {profile.goal} · {profile.experience} · 每周 {profile.days_per_week} 练
           </p>
@@ -109,7 +119,11 @@ export function MePage({ profile, onUpdated, onLogout }: Props) {
           label={liftsLoading ? "主项 PR" : pr.label}
           dark
         />
-        <Stat value={formatKg(profile.weight_kg)} unit="kg" label="当前体重" />
+        <Stat
+          value={formatKg(profile.weight_kg)}
+          unit={profile.weight_kg != null ? "kg" : undefined}
+          label="当前体重"
+        />
       </section>
 
       <section className="relative mt-3.5 overflow-hidden rounded-lg bg-ink px-4 py-4 text-accent-ink">
@@ -149,7 +163,9 @@ export function MePage({ profile, onUpdated, onLogout }: Props) {
         </div>
         <p className="num mt-1 text-display font-semibold leading-none">
           {formatKg(profile.weight_kg)}
-          <small className="ml-1 text-meta font-medium text-muted">kg</small>
+          {profile.weight_kg != null && (
+            <small className="ml-1 text-meta font-medium text-muted">kg</small>
+          )}
         </p>
         <p className="mt-1.5 text-micro text-muted">
           {points.length > 0 ? `近 ${points.length} 次记录` : "还没有体重记录"}
@@ -318,11 +334,12 @@ function WeightSheet({
   onClose,
   onSaved,
 }: {
-  current: number;
+  current: number | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [w, setW] = useState(current);
+  // 未填时滚轮从中间开，不预写进档案
+  const [w, setW] = useState(current ?? 70);
   const [busy, setBusy] = useState(false);
 
   async function save() {
