@@ -54,7 +54,7 @@ export function RepsStepper({
     open &&
     createPortal(
       <div className="fixed inset-0 z-[200] flex items-end justify-center">
-        <button type="button" className="absolute inset-0 bg-black/55" aria-label="关闭" onClick={() => setOpen(false)} />
+        <button type="button" className="absolute inset-0 bg-scrim" aria-label="关闭" onClick={() => setOpen(false)} />
         <div
           role="dialog"
           aria-modal="true"

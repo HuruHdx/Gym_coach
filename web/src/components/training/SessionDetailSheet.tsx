@@ -24,7 +24,7 @@ export function SessionDetailSheet({
   const groups = useMemo(() => groupSets(session.sets), [session.sets]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-scrim sm:items-center sm:p-4">
       <button type="button" className="absolute inset-0 cursor-default" aria-label="关闭" onClick={onClose} />
       <div className="relative z-10 flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-line bg-bg shadow-xl sm:rounded-2xl">
         <div className="shrink-0 border-b border-line px-5 pb-3 pt-4">

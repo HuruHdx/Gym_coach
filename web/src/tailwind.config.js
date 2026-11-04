@@ -4,22 +4,25 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "var(--bg)",
-        elevated: "var(--surface)",
-        surface: "var(--surface)",
-        tint: "var(--tint)",
-        ink: "var(--text-1)",
-        muted: "var(--text-2)",
-        soft: "var(--text-3)",
-        line: "var(--line)",
-        "line-strong": "var(--line-strong)",
-        accent: "var(--accent)",
-        "accent-ink": "var(--accent-ink)",
-        "accent-text": "var(--accent-text)",
-        danger: "var(--danger)",
-        ok: "var(--done-text)",
-        done: "var(--done)",
-        "done-bg": "var(--done-bg)",
+        // 每个色必须是 rgb(var(--x-rgb) / <alpha-value>) 形式，
+        // 否则 `bg-ink/40` 这类透明度工具类会被 Tailwind 静默丢弃（不报错、不生成 CSS）。
+        // 对应的三元组变量在 gym-ui/tokens.css，改色值时两处要一起改。
+        bg: "rgb(var(--bg-rgb) / <alpha-value>)",
+        elevated: "rgb(var(--surface-rgb) / <alpha-value>)",
+        surface: "rgb(var(--surface-rgb) / <alpha-value>)",
+        tint: "rgb(var(--tint-rgb) / <alpha-value>)",
+        ink: "rgb(var(--text-1-rgb) / <alpha-value>)",
+        muted: "rgb(var(--text-2-rgb) / <alpha-value>)",
+        soft: "rgb(var(--text-3-rgb) / <alpha-value>)",
+        line: "rgb(var(--line-rgb) / <alpha-value>)",
+        "line-strong": "rgb(var(--line-strong-rgb) / <alpha-value>)",
+        accent: "rgb(var(--accent-rgb) / <alpha-value>)",
+        "accent-ink": "rgb(var(--accent-ink-rgb) / <alpha-value>)",
+        "accent-text": "rgb(var(--accent-text-rgb) / <alpha-value>)",
+        danger: "rgb(var(--danger-rgb) / <alpha-value>)",
+        ok: "rgb(var(--done-text-rgb) / <alpha-value>)",
+        done: "rgb(var(--done-rgb) / <alpha-value>)",
+        "done-bg": "rgb(var(--done-bg-rgb) / <alpha-value>)",
       },
       borderRadius: {
         sm: "var(--r-sm)",

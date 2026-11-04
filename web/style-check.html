@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<!--
+  设计系统自检页（不参与构建，不进 dist）。
+  用途：肉眼确认透明度工具类、三主题色值是否真的渲染出来。
+  注意：下面的 <link> 指向构建产物的哈希文件名，每次 `pnpm build` 后要改成新的
+  （web/dist/assets/index-*.css）。指向不存在的文件时页面会明显无样式，不会静默出错。
+-->
+<html lang="zh-CN" data-theme="lavender" data-skin="lavender">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>透明度工具类 · 修复自检</title>
+<link rel="stylesheet" href="./dist/assets/index-rz7LCVZR.css" />
+<style>
+  body { margin:0; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--tint); }
+  .wrap { max-width: 420px; margin: 0 auto; background:var(--bg); min-height:100vh; }
+  .head { padding:16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  .head h1 { margin:0; font-size:16px; color:var(--text-1); }
+  .head p { margin:4px 0 0; font-size:12px; color:var(--text-2); }
+  .tabs { display:flex; gap:6px; margin-top:10px; }
+  .tabs button { flex:1; padding:8px; border-radius:8px; border:1px solid var(--line-strong); background:var(--surface); color:var(--text-1); font-size:12px; font-weight:600; cursor:pointer; }
+  .tabs button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .demo { padding:16px; }
+  .demo h2 { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-2); margin:20px 0 8px; }
+  .demo h2:first-child { margin-top:0; }
+  .note { font-size:11px; color:var(--text-3); margin:4px 0 10px; line-height:1.6; }
+  .fake-card { border:1px solid var(--line); border-radius:9px; background:var(--surface); padding:12px; }
+  .row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .row:last-child { border-bottom:0; }
+  /* 模拟 Sheet 遮罩：容器内绝对定位，方便看清压暗效果 */
+  .stage { position:relative; height:150px; border-radius:12px; overflow:hidden; border:1px solid var(--line); }
+  .stage .behind { position:absolute; inset:0; padding:14px; font-size:12px; color:var(--text-2); background:var(--bg); }
+  .stage .behind b { display:block; color:var(--text-1); font-size:14px; margin-bottom:6px; }
+  .stage .sheetbar { position:absolute; left:0; right:0; bottom:0; background:var(--surface); border-radius:14px 14px 0 0; padding:14px; font-size:13px; font-weight:600; box-shadow:0 -8px 24px rgba(0,0,0,.08); }
+  .chips { display:flex; gap:6px; }
+  .chip { flex:1; text-align:center; padding:8px 0; border-radius:9px; font-size:11px; font-weight:700; }
+  .caption { font-size:10px; color:var(--text-3); margin-top:6px; font-family:ui-monospace,monospace; }
+  .strike { text-decoration: line-through; opacity:.55; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>透明度工具类 · 修复自检</h1>
+    <p>下面每一块都是修复前「整条 CSS 没生成」的地方。左边切换主题，验证三个主题的三元组都齐。</p>
+    <div class="tabs">
+      <button data-theme-btn="lavender" class="on">淡紫</button>
+      <button data-theme-btn="mint">薄荷</button>
+      <button data-theme-btn="dark">深色</button>
+    </div>
+  </div>
+
+  <div class="demo">
+    <h2>1. 抽屉遮罩 bg-scrim</h2>
+    <p class="note">修复前：遮罩完全透明，抽屉像浮在半空。修复后：背后的内容应该被压暗。</p>
+    <div class="stage">
+      <div class="behind">
+        <b>今日 · 胸训</b>
+        哑铃卧推 4×8 30kg<br />
+        上斜哑铃推 3×10 20kg<br />
+        龙门架坐姿夹胸 3×12 40kg<br />
+        这一层应该被压暗，但仍能看清内容。
+      </div>
+      <div class="absolute inset-0 bg-scrim" style="position:absolute"></div>
+      <div class="sheetbar">查看详情 · 本场 12 组</div>
+    </div>
+    <p class="caption">stage 内第二层：absolute inset-0 bg-scrim（走主题 --mask，深色主题不会变白雾）</p>
+
+    <h2>2. 选中态底色 bg-accent/20</h2>
+    <p class="note">修复前：选中项只有边框变化，没有底色。修复后：应有一层淡强调底。</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="w-full rounded-md border border-ink bg-accent/20 px-3.5 py-3 text-left">
+        <span class="block text-[13px] font-semibold">增肌</span>
+        <span class="mt-0.5 block text-[11px] text-muted">8~12 次，留 1~2 次余力</span>
+      </div>
+      <div class="w-full rounded-md border border-line bg-bg px-3.5 py-3 text-left">
+        <span class="block text-[13px] font-semibold">减脂</span>
+        <span class="mt-0.5 block text-[11px] text-muted">10~15 次，组间歇短</span>
+      </div>
+    </div>
+    <p class="caption">border-ink + bg-accent/20</p>
+
+    <h2>3. 草稿卡标签 bg-accent/20</h2>
+    <div class="fake-card" style="background:var(--text-1)">
+      <span class="rounded bg-accent/20 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-accent-ink">Draft</span>
+      <span class="ml-2 text-[10px] text-accent-ink/70">未采纳</span>
+    </div>
+    <p class="caption">bg-accent/20 + text-accent-ink/70（压在深色卡上）</p>
+
+    <h2>4. 周视图日期块 border-ink/30 · bg-bg/80</h2>
+    <div class="chips">
+      <div class="chip bg-ink text-accent">一</div>
+      <div class="chip border border-ink/30 bg-bg">今</div>
+      <div class="chip bg-bg/80 text-ink">三</div>
+      <div class="chip bg-bg/80 text-ink">四</div>
+      <div class="chip bg-bg/80 text-ink">五</div>
+    </div>
+    <p class="caption">第 1 个已练；第 2 个今天（描边）；其余 bg-bg/80</p>
+
+    <h2>5. 组记录线条 border-line/40 · bg-bg/80</h2>
+    <div class="rounded-lg border border-line/60 bg-bg/80 px-3 py-2.5">
+      <div class="flex items-center justify-between text-[13px]">
+        <span class="font-semibold">第 1 组</span>
+        <span class="num text-muted">30kg × 8</span>
+      </div>
+      <div class="space-y-2 border-t border-line/40 px-2.5 py-2.5 mt-2 text-[11px] text-muted">
+        组内备注区：这条分隔线修复前是近黑色的（border-color 退回 currentColor）
+      </div>
+    </div>
+    <p class="caption">border-line/60 外框 + border-line/40 内分隔</p>
+
+    <h2>6. 完成态整行 bg-ok/15</h2>
+    <div class="rounded-lg bg-ok/15 px-3 py-2.5 text-[13px] font-semibold text-ok">已完成 · 12/12 组</div>
+    <p class="caption">这个类一直被手工覆盖成不透明的 done-bg，属于刻意语义，不受本次改动影响</p>
+
+    <h2>7. 底部栏 bg-bg/95 + 毛玻璃</h2>
+    <div class="stage" style="height:90px">
+      <div class="behind" style="padding:8px 14px;font-size:11px">滚动内容 · 训练记录 · 动作趋势 · 本周容量</div>
+      <div class="absolute bottom-0 left-0 right-0 border-t border-line bg-bg/95 px-3 py-3 text-[11px] font-semibold backdrop-blur-sm">今日 · 训练 · 教练 · 我的</div>
+    </div>
+    <p class="caption">bg-bg/95 —— 修复前是纯透明，滚动内容会糊在一起</p>
+  </div>
+</div>
+<script>
+  document.querySelectorAll("[data-theme-btn]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var t = btn.getAttribute("data-theme-btn");
+      document.documentElement.setAttribute("data-theme", t);
+      document.documentElement.setAttribute("data-skin", t);
+      document.querySelectorAll("[data-theme-btn]").forEach(function (b) { b.classList.remove("on"); });
+      btn.classList.add("on");
+    });
+  });
+</script>
+</body>
+</html>

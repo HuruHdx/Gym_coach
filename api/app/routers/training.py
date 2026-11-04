@@ -205,9 +205,12 @@ async def _coach_note(facts: str) -> tuple[str | None, str | None, bool]:
    - 严禁空洞套话或前后矛盾，所有结论必须严谨基于输入中的事实。"""
 
     try:
+        from app.brain.llm import TEMPERATURE_COPY
+
         raw = await get_llm().complete_json(
             sys_prompt,
             facts,
+            temperature=TEMPERATURE_COPY,
         )
     except Exception as e:  # noqa: BLE001
         log.exception("session summary llm failed")

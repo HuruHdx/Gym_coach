@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.brain.llm import LLMClient, MockLLM, _extract_json
+from app.brain.llm import TEMPERATURE_PLAN, LLMClient, MockLLM, _extract_json
 from app.brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
 
@@ -66,7 +66,7 @@ async def draft_plan_with_tools(
     ]
 
     for _ in range(max_rounds):
-        turn = await llm.chat_turn(messages, tools=TOOL_SCHEMAS)
+        turn = await llm.chat_turn(messages, tools=TOOL_SCHEMAS, temperature=TEMPERATURE_PLAN)
         tool_calls = turn.get("tool_calls") or []
         content = turn.get("content") or ""
 
@@ -148,6 +148,7 @@ async def draft_plan_with_tools(
     raw = await llm.complete_json(
         "【PLAN】只输出 training_draft JSON：{\"text\":\"...\",\"card\":{...}}",
         fallback_user,
+        temperature=TEMPERATURE_PLAN,
     )
     return raw, ctx.tool_trace
 
@@ -170,7 +171,7 @@ async def _prefetch_then_json(
     )
     from app.brain.pipeline import SYSTEM_PROMPT
 
-    raw = await llm.complete_json(SYSTEM_PROMPT, enriched)
+    raw = await llm.complete_json(SYSTEM_PROMPT, enriched, temperature=TEMPERATURE_PLAN)
     execute_tool(
         "submit_training_draft",
         {

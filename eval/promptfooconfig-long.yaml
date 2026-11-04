@@ -1,0 +1,28 @@
+# 长对话评测 · v2
+#
+# 每条用例是一条完整对话链（1~4 轮），跑在同一个内存库里。
+# 断言按「第几轮」取值，看的是流程有没有走歪，不是单句答得好不好。
+#
+#   cd api && uv run uvicorn app.main:app --port 8000
+#   cd eval && npx promptfoo eval -c promptfooconfig-long.yaml --no-cache
+#
+# 说明见 ../评测集-长对话.md
+#
+# 注意：defaultTest 必须是 file:// —— promptfoo 把内联多行 value 当函数体执行，
+# 写成 `(output, ctx) => {...}` 会返回 undefined，18 条全部 ERROR。
+
+description: "gym-coach · 长对话 v2"
+
+prompts:
+  - "{{name}}"
+
+providers:
+  - file://provider-long.js
+
+# 每条都先过基础形状检查：轮次非空、每轮有 route、条目数与 selected 自洽
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/shape-long.js
+
+tests: file://cases-long.yaml

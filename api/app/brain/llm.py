@@ -9,16 +9,32 @@ import httpx
 
 from app.config import settings
 
+# 按用途分档。同一个数字喂给所有调用点是不对的：
+# - 意图提取是槽位/分类任务，要可复现，温度高会让同一句话两次给出不同 topic；
+# - 文案要像人说的话，温度太低会每次写出几乎一样的句子；
+# - 排课介于两者之间：动作选择需要多样性，但组次和负荷不能跳。
+TEMPERATURE_STRUCTURED = 0.0  # 意图改写：同一句输入应得到同一份槽位
+TEMPERATURE_PLAN = 0.4  # 排课：稳定为主，保留换动作的余地
+TEMPERATURE_COPY = 0.7  # 文案：问答、训练总结、澄清话术
+
 
 class LLMClient(ABC):
     @abstractmethod
-    async def complete_json(self, system: str, user: str) -> dict[str, Any]:
+    async def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = TEMPERATURE_COPY,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     async def chat_turn(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        *,
+        temperature: float = TEMPERATURE_PLAN,
     ) -> dict[str, Any]:
         """One chat completion turn. Returns {content, tool_calls:[{id,name,arguments}]}."""
         raise NotImplementedError(f"{type(self).__name__} does not support chat_turn")
@@ -42,7 +58,13 @@ def _extract_json(content: str) -> dict[str, Any]:
 class MockLLM(LLMClient):
     """Deterministic mock for local Phase 0/1 without API key."""
 
-    async def complete_json(self, system: str, user: str) -> dict[str, Any]:
+    async def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = TEMPERATURE_COPY,
+    ) -> dict[str, Any]:
         # 意图改写槽：与规则解析对齐，便于本地 hybrid 稳定可测；接真模型后走真实语义
         if "【SESSION_SUMMARY】" in system:
             return {"text": "按你写下的备注和这次的重量来看，下次同一动作先用这次的最高重量。"}
@@ -366,11 +388,17 @@ class OpenAICompatibleLLM(LLMClient):
             "Content-Type": "application/json",
         }
 
-    async def complete_json(self, system: str, user: str) -> dict[str, Any]:
+    async def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = TEMPERATURE_COPY,
+    ) -> dict[str, Any]:
         # DeepSeek Flash: disable thinking for faster structured JSON
         body: dict[str, Any] = {
             "model": settings.llm_model,
-            "temperature": 0.4,
+            "temperature": temperature,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system},
@@ -394,10 +422,12 @@ class OpenAICompatibleLLM(LLMClient):
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        *,
+        temperature: float = TEMPERATURE_PLAN,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": settings.llm_model,
-            "temperature": 0.4,
+            "temperature": temperature,
             "messages": messages,
             "thinking": {"type": "disabled"},
         }

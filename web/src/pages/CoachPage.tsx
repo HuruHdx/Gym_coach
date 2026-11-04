@@ -13,6 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { COACH_NAME } from "../lib/brand";
 import { DraftCard } from "../components/DraftCard";
 import { MessageFeedback } from "../components/MessageFeedback";
 import type {
@@ -421,7 +422,7 @@ export function CoachPage({ profile }: Props) {
             <div className="rise-in">
               <div className="px-3 py-2 text-center">
                 <p className="font-display text-title font-semibold leading-snug text-accent-text">
-                  Hi，我是你的训练教练，请问有什么可以帮到你？
+                  我是{COACH_NAME}。今天练什么？
                 </p>
                 <p className="mt-2 text-micro leading-relaxed text-muted">
                   点入口或直接说想练什么，会落成可改草稿。
@@ -487,7 +488,7 @@ export function CoachPage({ profile }: Props) {
                   <div className="min-w-0 flex-1 rounded-lg rounded-tl-sm border border-line bg-elevated p-3 shadow-card">
                     <div className="flex items-center gap-2">
                       <span className="grid h-2 w-2 rounded-full bg-accent opacity-80" />
-                      <span className="text-meta font-semibold text-ink">教练正在编排…</span>
+                      <span className="text-meta font-semibold text-ink">{COACH_NAME}正在编排…</span>
                       <span className="text-micro text-muted">({m.elapsedSec}s)</span>
                     </div>
                     <p className="mt-1 text-meta text-muted">{m.step}</p>
@@ -586,7 +587,7 @@ export function CoachPage({ profile }: Props) {
           <div className="flex items-center gap-2 rounded-lg border border-line bg-elevated px-3 py-1.5 shadow-card">
             <input
               className="min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-muted"
-              placeholder={busy ? "教练正在生成中…" : "询问 AI 教练，如「练背」"}
+              placeholder={busy ? `${COACH_NAME}正在生成中…` : `问${COACH_NAME}，比如「练背」`}
               value={inputVal}
               disabled={busy}
               onChange={(e) => setInputVal(e.target.value)}

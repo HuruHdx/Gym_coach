@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlmodel import select
 
-from app.brain.llm import get_llm
+from app.brain.llm import TEMPERATURE_COPY, get_llm
 from app.models import Profile
 
 KNOWLEDGE_SYSTEM = """【知识问答】
@@ -86,13 +86,14 @@ def normalize_basis(raw: Any) -> list[str]:
 async def _complete_decision(prompt: str, *, profile_present: bool) -> tuple[str, dict[str, Any]]:
     """档案在时 basis 不能空。空了重试一次，检查的是字段名。"""
     llm = get_llm()
-    raw = await llm.complete_json(DECIDE_SYSTEM, prompt)
+    raw = await llm.complete_json(DECIDE_SYSTEM, prompt, temperature=TEMPERATURE_COPY)
     basis = normalize_basis(raw.get("basis"))
     text = str(raw.get("text") or "").strip()
     if profile_present and not basis:
         raw = await llm.complete_json(
             DECIDE_SYSTEM,
             prompt + "\n\n上一答的 basis 是空的。档案在【长期记忆】里。basis 至少填一个字段名，text 按这些字段重写。",
+            temperature=TEMPERATURE_COPY,
         )
         basis = normalize_basis(raw.get("basis"))
         text = str(raw.get("text") or "").strip() or text
@@ -320,7 +321,7 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
     parse_ok = True
     error: str | None = None
     try:
-        raw = await get_llm().complete_json(KNOWLEDGE_SYSTEM, prompt)
+        raw = await get_llm().complete_json(KNOWLEDGE_SYSTEM, prompt, temperature=TEMPERATURE_COPY)
         text = str(raw.get("text") or "").strip() or "可以说具体一点，我按这个动作给你讲。"
     except Exception as exc:  # noqa: BLE001
         parse_ok = False

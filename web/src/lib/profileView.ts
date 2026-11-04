@@ -1,4 +1,4 @@
-import type { Experience, Goal, Profile, TrainingSession } from "../types";
+import type { Profile, TrainingSession } from "../types";
 import { startOfWeekMonday, toDateKey } from "./trainingAnalytics";
 
 /**
@@ -6,54 +6,20 @@ import { startOfWeekMonday, toDateKey } from "./trainingAnalytics";
  */
 export const DISPLAY_NAME = "Huru";
 
-export const GOAL_OPTIONS: Goal[] = ["增肌", "减脂", "力量", "塑形"];
+// 选项目录统一在 profileOptions.ts。这里只做转发，避免两处各写一份后分叉。
+export {
+  DAY_OPTIONS,
+  EXPERIENCE_OPTIONS,
+  GOAL_OPTIONS,
+  SESSION_MINUTE_OPTIONS,
+  SCENES,
+  preferencesForScene,
+  sceneFromPreferences,
+  type SceneId,
+} from "./profileOptions";
 
-export const EXPERIENCE_OPTIONS: { value: Experience; label: string }[] = [
-  { value: "新手", label: "新手" },
-  { value: "进阶", label: "进阶" },
-  { value: "老炮", label: "老炮" },
-];
-
-export const DAY_OPTIONS = [2, 3, 4, 5, 6, 7] as const;
-export const MINUTE_PRESETS = [45, 60, 90] as const;
-
-export type SceneId = "gym" | "home" | "bodyweight";
-
-export const SCENES: {
-  id: SceneId;
-  title: string;
-  sub: string;
-  preferences: string[];
-}[] = [
-  {
-    id: "gym",
-    title: "健身房",
-    sub: "器械齐全 · 杠铃哑铃都有",
-    preferences: ["自由重量", "器械", "绳索", "自重"],
-  },
-  {
-    id: "home",
-    title: "居家",
-    sub: "哑铃 / 弹力带 / 单杠",
-    // 现有器械标签没有「弹力带」，居家落到自由重量 + 自重。
-    preferences: ["自由重量", "自重"],
-  },
-  {
-    id: "bodyweight",
-    title: "纯徒手",
-    sub: "无器械 · 自重为主",
-    preferences: ["自重"],
-  },
-];
-
-export function sceneFromPreferences(prefs: string[] | null | undefined): SceneId {
-  const set = new Set(prefs || []);
-  if (set.size === 1 && set.has("自重")) return "bodyweight";
-  if (set.has("自由重量") && set.has("自重") && !set.has("器械") && !set.has("绳索")) {
-    return "home";
-  }
-  return "gym";
-}
+/** 编辑页的时长快捷档位。包含引导页的 SESSION_MINUTE_OPTIONS，外加旧的 45 兼容已存值。 */
+export const MINUTE_PRESETS = [40, 45, 60, 75, 90] as const;
 
 /** 展示短名。存库用教练关键词能命中的写法：膝→膝盖，腕→手腕。 */
 export const AVOID_PARTS = [

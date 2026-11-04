@@ -1,0 +1,405 @@
+# 长对话评测 · v2（2026-11-04）
+#
+# 测的是「一条对话链走下来，每一步有没有走歪」，不是单句答得好不好。
+# 单轮评测见 cases.yaml（40 条）与 cases-intent.yaml（35 条）。
+#
+# ── 为什么需要独立接口 ───────────────────────────────────────────────
+# /api/eval/qa 每次新建内存库、无状态。要测多轮就得在 YAML 里手工写 history，
+# 而「上一版草稿里到底几个动作、哪几个被伤痛 drop 了」只有模型自己知道。
+# 所以用 /api/eval/thread：整条对话跑在同一个内存库里，
+# 上一轮产出的 card 自动变成下一轮的 draft_items —— 这才是前端的真实行为。
+#
+# ── 跑法 ────────────────────────────────────────────────────────────
+#   cd api && uv run uvicorn app.main:app --port 8000
+#   cd eval && npx promptfoo eval -c promptfooconfig-long.yaml --no-cache
+#
+# ── 断言写法 ────────────────────────────────────────────────────────
+#   assertions/thread.js  → 看第 N 轮：route / topic / draft_relation /
+#                            卡片标题是否被改 / 条目数 / 条目名单 / 组数 /
+#                            伤痛 drop / 文案
+#   assertions/adopt.js   → 看最后采纳落库：组数（含按卡片展开核对）、
+#                            动作名单、status
+#
+#   turn: 2 表示断言第 2 轮；省略则断言最后一轮。
+#   「不该出现某动作」用 items_not_has（卡片名单）或 exercises_none（落库名单），
+#   不要用 text_not_has 里碰巧出现的字符串。
+#
+# ── 标签 ────────────────────────────────────────────────────────────
+#   p0          核心链路，挂一票否决（p0 用例同时带 metadata.p0=true）
+#   revise      改稿链路
+#   fresh       重排链路
+#   safety      伤痛规避
+#   knowledge   问答夹杂在排课里
+#   adopt       走到落库
+#   boundary    边界（跑题 / 重复指令 / 省略指代）
+#
+# 只跑核心链路（promptfoo 的 CLI 只按 metadata 过滤，tags 不参与选择）：
+#   npx promptfoo eval -c promptfooconfig-long.yaml --filter-metadata p0=true
+
+# ══ L1 排课 → 改稿 → 采纳 ═══════════════════════════════════════════════
+
+- description: "L01 练胸 → 换掉没器械的动作（标题必须保留）"
+  tags: [long, revise, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L01 换动作保留标题"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "健身房没有龙门架，把这个换掉"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: plan, card: exists, min_items: 3 }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, keeps_title: true, min_items: 3, items_not_has: ["龙门架"] }
+
+- description: "L02 练背 → 删掉一项（标题不变，被删的动作不进卡）"
+  tags: [long, revise, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L02 删一项"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练背"
+      - "引体向上我做不了，去掉这个动作"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, keeps_title: true, items_not_has: ["引体"] }
+    # 删一项 → 条目数应变少。若第 1 轮本来就没排引体，这条会红，说明「去掉这个动作」没生效
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, fewer_items_than_prev: true }
+
+- description: "L03 练腿 → 强度低一点（这是改稿，不是新开课）"
+  tags: [long, revise, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L03 降强度"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练腿"
+      - "太重了，强度低一点"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, keeps_title: true, min_items: 2 }
+
+- description: "L04 练胸 → 确认（不该再出卡）→ 再要一版新动作"
+  tags: [long, revise, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L04 确认后重排"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "行，就按这套来"
+      - "这套动作都太熟了，换一套"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, draft_relation: confirm, card: none }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 3, route: plan, card: exists, draft_relation: fresh }
+
+# ══ L2 换部位 / 重排 ═══════════════════════════════════════════════════
+
+- description: "L05 练腿 → 算了改练背（标题必须变）"
+  tags: [long, fresh, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L05 换部位"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练腿"
+      - "算了，今天改练背"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, min_items: 2, session_target: switch, changed_title: true }
+
+- description: "L06 练背 → 换个计划（部位去留没说清，应先问）"
+  tags: [long, fresh, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L06 部位去留未说明"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练背"
+      - "这版不行，换个计划"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, session_target: ask, card: none }
+
+# ══ L3 伤痛规避（跨轮） ════════════════════════════════════════════════
+
+- description: "L07 腰有伤 → 练腿（硬拉类必须不进卡）"
+  tags: [long, safety, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L07 腰伤练腿"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: ["腰"] }
+    turns:
+      - "今天练腿"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: plan, card: exists, min_items: 2 }
+    # validate 因伤痛剔除的动作不会留在 items 里（只进 meta.dropped），所以「不在卡里」就够
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, items_not_has: ["硬拉", "山羊", "早安"] }
+
+- description: "L08 腰有伤 → 点名要硬拉（应拒绝并解释，不给卡或给替代）"
+  tags: [long, safety, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L08 点名硬拉"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: ["腰"] }
+    turns:
+      - "今天练腿，我要做硬拉"
+  assert:
+    # 允许「先反问」或「直接给替代方案」，但不允许把硬拉排进卡里
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: ["plan", "clarify"], items_not_has: ["硬拉"] }
+
+- description: "L09 膝有伤 → 练腿 → 要求加重（不能因为改了强度就绕过规避）"
+  tags: [long, safety, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L09 膝伤加重仍规避"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: ["膝盖"] }
+    turns:
+      - "今天练腿"
+      - "再加点重量，大重量低次数"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, card: exists, keeps_title: true }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, items_not_has: ["深蹲", "箭步", "分腿蹲", "腿屈伸", "跳"] }
+
+# ══ L4 排课中夹问答 ════════════════════════════════════════════════════
+
+- description: "L10 练胸 → 问动作怎么做 → 继续改稿（问答不该丢草稿）"
+  tags: [long, knowledge, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L10 夹问答"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "哑铃卧推手腕怎么放"
+      - "那把这个动作换成上斜的"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: chat, card: none }
+    # 问完还能接着改稿，说明草稿没被问答冲掉；换的动作要真的进卡
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 3, route: plan, card: exists, keeps_title: true, items_has: ["上斜"] }
+
+- description: "L11 练背 → 问上次练了啥 → 按上次重量排（数据要进上下文）"
+  tags: [long, knowledge, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L11 查历史再排课"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    stats_fixture:
+      - { name: "高位下拉", last_weight: 45, last_reps: 10, trend: "↑" }
+      - { name: "杠铃划船", last_weight: 40, last_reps: 8, trend: "→" }
+    turns:
+      - "我上次练背都上了多重"
+      - "就按这个重量给我排一堂"
+  assert:
+    # 数字必须是 fixture 里的值 —— 这是「查了记录才说」的直接证据
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: chat, card: none, text_has: ["45"] }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists }
+
+# ══ L5 走到落库 ════════════════════════════════════════════════════════
+
+- description: "L12 练胸 → 采纳落库（组数应按 meta.sets 展开）"
+  tags: [long, adopt, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L12 采纳落库"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    adopt_after: 1
+    turns:
+      - "今天练胸"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: plan, card: exists, min_items: 3 }
+    # 逐条核对「卡片上写的组数」 == 「落库的组数」，不是拍一个下限
+    - type: javascript
+      value: file://assertions/adopt.js
+      config: { status: active, set_count_matches_last_card: true, exercises_min: 3 }
+
+- description: "L13 练背 → 改稿 → 采纳（落库的是改后的版本）"
+  tags: [long, adopt, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L13 改后采纳"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    adopt_after: 2
+    turns:
+      - "今天练背"
+      - "引体向上我去掉"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, keeps_title: true }
+    - type: javascript
+      value: file://assertions/adopt.js
+      config: { status: active, set_count_matches_last_card: true, exercises_none: ["引体"] }
+
+- description: "L14 全身课 → 采纳（至少 4 个动作）"
+  tags: [long, adopt]
+  vars:
+    name: "L14 全身采纳"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    adopt_after: 1
+    turns:
+      - "今天全身练一轮，40 分钟"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: plan, card: exists, min_items: 4 }
+    - type: javascript
+      value: file://assertions/adopt.js
+      config: { status: active, exercises_min: 4, set_count_matches_last_card: true }
+
+# ══ L6 边界 ════════════════════════════════════════════════════════════
+
+- description: "L15 空泛表达 → 先反问 → 说部位 → 出卡"
+  tags: [long, p0]
+  metadata: { p0: true }
+  vars:
+    name: "L15 反问后出卡"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天想动一动"
+      - "那就练肩吧"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: clarify, card: none }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists }
+
+- description: "L16 连续改三次（不该越改越散，每次诉求都要落地）"
+  tags: [long, revise]
+  vars:
+    name: "L16 连续改稿"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "把夹胸类的去掉"
+      - "再加一个上斜的"
+      - "组数都改成 4 组"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, card: exists, keeps_title: true, min_items: 2, items_not_has: ["夹胸"] }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 3, card: exists, keeps_title: true, min_items: 2, items_has: ["上斜"] }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 4, card: exists, keeps_title: true, min_items: 2, sets_all: 4 }
+
+- description: "L17 闲聊不该冲掉草稿"
+  tags: [long, revise]
+  vars:
+    name: "L17 闲聊后接着改"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练背"
+      - "谢谢啊，今天状态一般"
+      - "那把划船换成下拉"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: chat, card: none }
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 3, route: plan, card: exists, keeps_title: true, items_has: ["下拉"] }
+
+- description: "L18 营养计划不该出训练卡"
+  tags: [long]
+  vars:
+    name: "L18 营养走占位"
+    profile: { goal: 减脂, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "帮我排一份减脂一天的饮食"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 1, route: nutrition, card: none }
+
+# ══ L7 跨轮约束变化 / 指代 / 跑题 ══════════════════════════════════════
+
+- description: "L19 练腿 → 用户自己说腰不舒服（改稿里也要规避，且不改标题）"
+  tags: [long, safety]
+  vars:
+    name: "L19 中途加限制"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练腿"
+      - "我腰有点不舒服，硬拉那类今天别排"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, keeps_title: true, items_not_has: ["硬拉", "山羊", "早安"] }
+
+- description: "L20 同一句说两遍（幂等，不该条目翻倍）"
+  tags: [long, boundary]
+  vars:
+    name: "L20 重复指令"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "今天练胸"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, keeps_title: true, max_items: 6 }
+
+- description: "L21 省略指代（把第二个换掉，第一个不能动）"
+  tags: [long, revise, boundary]
+  vars:
+    name: "L21 指代改稿"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "把第二个换掉"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: plan, card: exists, keeps_title: true, same_first_item: true }
+
+- description: "L22 跑题（写诗）不该出训练卡，也不该丢草稿"
+  tags: [long, boundary]
+  vars:
+    name: "L22 跑题不出卡"
+    profile: { goal: 增肌, experience: 进阶, weight_kg: 70, days_per_week: 4, injuries: [] }
+    turns:
+      - "今天练胸"
+      - "帮我写一首关于深蹲的诗"
+  assert:
+    - type: javascript
+      value: file://assertions/thread.js
+      config: { turn: 2, route: ["chat", "clarify"], card: none, items_not_has: ["深蹲"] }

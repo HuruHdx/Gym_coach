@@ -64,7 +64,7 @@ export function SwapExerciseModal({
     <div className="fixed inset-0 z-[200] flex items-end justify-center">
       <button
         type="button"
-        className="absolute inset-0 bg-black/55"
+        className="absolute inset-0 bg-scrim"
         aria-label="关闭"
         onClick={onClose}
       />

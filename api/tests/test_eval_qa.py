@@ -33,7 +33,7 @@ def _run(monkeypatch, payload: dict) -> dict:
 
 def test_eval_exact_hit_does_not_search(monkeypatch):
     class _Fake:
-        async def complete_json(self, _system, prompt):
+        async def complete_json(self, _system, prompt, **kwargs):
             assert "目标肌" in prompt or "上背" in prompt
             return {"text": "杠杆坐姿划船主要练上背，斜方和菱形肌也会一起干活。"}
 
@@ -51,7 +51,7 @@ def test_eval_exact_hit_does_not_search(monkeypatch):
 
 def test_eval_family_name_is_open_knowledge(monkeypatch):
     class _Fake:
-        async def complete_json(self, _system, _prompt):
+        async def complete_json(self, _system, _prompt, **kwargs):
             return {"text": "坐姿划船主要练背，上背和背阔肌都会参与，握距不同侧重点会变一点。"}
 
     monkeypatch.setattr("app.brain.knowledge_reply.get_llm", lambda: _Fake())
@@ -68,7 +68,7 @@ def test_eval_family_name_is_open_knowledge(monkeypatch):
 
 def test_eval_miss_with_empty_fixture_still_calls_model(monkeypatch):
     class _Fake:
-        async def complete_json(self, _system, prompt):
+        async def complete_json(self, _system, prompt, **kwargs):
             assert "按教练知识" in prompt or "没有外部摘录" in prompt
             return {"text": "新手练背一周 2 次就够，中间隔开一天恢复。"}
 
@@ -86,7 +86,7 @@ def test_eval_intent_mode_skips_the_reply(monkeypatch):
     called = {"n": 0}
 
     class _Fake:
-        async def complete_json(self, _system, _prompt):
+        async def complete_json(self, _system, _prompt, **kwargs):
             called["n"] += 1
             return {"text": "不应被调用"}
 
@@ -110,7 +110,7 @@ def test_decide_retries_when_basis_is_empty(monkeypatch):
     calls = {"n": 0}
 
     class _Fake:
-        async def complete_json(self, system, _prompt):
+        async def complete_json(self, system, _prompt, **kwargs):
             calls["n"] += 1
             assert "basis" in system
             if calls["n"] == 1:
@@ -132,7 +132,7 @@ def test_record_question_uses_stats_fixture(monkeypatch):
     called = {"n": 0}
 
     class _Fake:
-        async def complete_json(self, _system, _prompt):
+        async def complete_json(self, _system, _prompt, **kwargs):
             called["n"] += 1
             return {"text": "不应编重量"}
 

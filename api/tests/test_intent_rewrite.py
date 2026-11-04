@@ -223,7 +223,7 @@ def test_positive_named_rower_comes_from_model():
 
 def test_hybrid_uses_model_named_lifts_not_rules_hotwords():
     class NamedLiftLLM(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             if "【INTENT_REWRITE】" in system:
                 return {
                     "agent": "coach_plan",
@@ -506,7 +506,7 @@ def test_change_plan_asks_without_dropping_the_current_part(monkeypatch):
     """换计划但没说换部位：问一次，不写成不练当前部位。"""
 
     class AskPlan(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             if "【INTENT_REWRITE】" in system:
                 return {
                     "agent": "coach_plan",
@@ -535,7 +535,7 @@ def test_change_plan_asks_without_dropping_the_current_part(monkeypatch):
     assert "不练腿" not in line
 
     class SaysQuit(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             return {
                 "text": "行，那今天不练腿了——你想换成推的上肢吗？",
                 "suggestions": [
@@ -554,7 +554,7 @@ def test_same_part_new_exercises_keeps_the_focus_already_stated():
     """部位不变只换动作：沿用上一张已经写过的侧重，不再追问。"""
 
     class KeepMoves(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             if "【INTENT_REWRITE】" in system:
                 return {
                     "agent": "coach_plan",
@@ -588,7 +588,7 @@ def test_same_part_new_exercises_keeps_the_focus_already_stated():
 
 def test_named_new_part_still_switches():
     class SwitchBack(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             if "【INTENT_REWRITE】" in system:
                 return {
                     "agent": "coach_plan",
@@ -620,7 +620,7 @@ def test_intent_model_does_not_see_profile_or_decide_tension():
     seen: dict[str, str] = {}
 
     class Spy(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             seen["system"] = system
             seen["user"] = user
             return await super().complete_json(system, user)
@@ -640,7 +640,7 @@ def test_routing_ignores_model_tension_for_novice_leg_day():
     """新手只说练腿：模型即便标了 focus 张力，路由仍直接排。"""
 
     class FocusTension(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             return {
                 "agent": "coach_plan",
                 "ready": False,
@@ -669,7 +669,7 @@ def test_model_focus_detail_skips_advanced_clarify():
     """老炮用口语说出侧重、热词表对不上时，认模型的 has_focus_detail。"""
 
     class Detail(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             return {
                 "agent": "coach_plan",
                 "muscles": ["腿"],
@@ -814,7 +814,7 @@ def test_confirm_keeps_plan_topic_and_does_not_replan():
     from app.brain.graph import _pick_route
 
     class Confirm(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             return {
                 "agent": "coach_chat",
                 "topic": "plan",

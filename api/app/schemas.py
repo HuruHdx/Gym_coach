@@ -193,6 +193,64 @@ class ChatRequest(BaseModel):
     history: list[ChatHistoryTurn] = Field(default_factory=list, max_length=24)
 
 
+# ---------- 长对话评测（/api/eval/thread） ----------
+
+
+class EvalTurnIn(BaseModel):
+    """一句话。前面几轮的上下文由服务端在同一台内存库里累积，不用手工写 history。"""
+
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class EvalThreadRequest(BaseModel):
+    """
+    多轮对话评测。和 /eval/qa 的区别：整条对话跑在同一个内存库里，
+    上一轮产出的草稿会自动变成下一轮的 draft_items —— 复刻前端的真实行为。
+    """
+
+    name: str = ""
+    turns: list[EvalTurnIn] = Field(min_length=1, max_length=12)
+    profile: Optional[EvalProfileIn] = None
+    search_mode: Literal["fixture", "live", "off"] = "fixture"
+    search_fixture: list[SearchHitIn] = Field(default_factory=list)
+    stats_fixture: list[StatsFixtureItem] = Field(default_factory=list)
+    # 只跑意图、不跑排课（/eval/qa 用的捷径）。长对话默认走真实链路：
+    # 排课要真的出卡，否则「改稿有没有保留标题」这类断言无从谈起。
+    short_circuit: bool = False
+    # 评测结束后是否把会话里的卡片落成训练记录（测「采纳 → 打卡 → 回写」用）。
+    # 取值只作开关：给了就采纳最后一张草稿，数字本身不参与判断。
+    adopt_after: Optional[int] = None
+
+
+class EvalTurnOut(BaseModel):
+    index: int
+    text: str
+    route: str = ""
+    topic: Optional[str] = None
+    domain: Optional[str] = None
+    draft_relation: Optional[str] = None
+    session_target: Optional[str] = None
+    card_title: Optional[str] = None
+    card_items: list[str] = Field(default_factory=list)
+    # 条目细节（title / selected / meta），用来断言「组数有没有改到」这类改稿语义
+    card_items_meta: list[dict[str, Any]] = Field(default_factory=list)
+    card_item_count: int = 0
+    selected_count: int = 0
+    dropped: list[str] = Field(default_factory=list)
+    text_block: str = ""
+    suggestions: list[dict[str, Any]] = Field(default_factory=list)
+    # 本轮卡片标题（= 下一轮会带上的草稿标题）。没出卡时为空，下一轮沿用旧草稿
+    draft_title: Optional[str] = None
+
+
+class EvalThreadOut(BaseModel):
+    name: str = ""
+    turns: list[EvalTurnOut] = Field(default_factory=list)
+    # 采纳后的落库结果（adopt_after 给了才有）
+    adopted: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 FEEDBACK_TAGS = (
     "wrong_topic",
     "wrong_route",

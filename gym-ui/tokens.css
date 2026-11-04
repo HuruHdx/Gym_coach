@@ -94,6 +94,27 @@
   --shadow-card: 0 2px 10px rgba(80, 60, 140, .06);
   --shadow-float: 0 8px 28px rgba(50, 30, 100, .12);
   --mask: rgba(28, 22, 50, .42);
+
+  /* -------- 同一批颜色的 rgb 三元组 --------
+     用途：Tailwind 的 `bg-ink/40`、`border-line/60` 这类透明度工具类。
+     色值写成 var(--x) 时 Tailwind 算不出 alpha，整条规则会被静默丢弃，
+     所以每个需要透明度的颜色必须额外给一份 `R G B` 三元组。
+     改上面的十六进制色值时，这里的三个数字要一起改，否则两者会分叉。 */
+  --bg-rgb: 245 244 250;
+  --surface-rgb: 255 255 255;
+  --tint-rgb: 239 235 254;
+  --text-1-rgb: 23 22 28;
+  --text-2-rgb: 107 104 117;
+  --text-3-rgb: 143 139 156;
+  --line-rgb: 236 234 242;
+  --line-strong-rgb: 222 219 232;
+  --accent-rgb: 124 92 246;
+  --accent-text-rgb: 108 75 232;
+  --accent-ink-rgb: 255 255 255;
+  --done-rgb: 18 161 80;
+  --done-text-rgb: 13 122 60;
+  --done-bg-rgb: 232 248 238;
+  --danger-rgb: 217 83 79;
 }
 
 /* ============================================================
@@ -125,6 +146,23 @@
   --shadow-card: 0 2px 10px rgba(20, 90, 70, .06);
   --shadow-float: 0 8px 28px rgba(20, 70, 60, .12);
   --mask: rgba(10, 40, 32, .42);
+
+  /* rgb 三元组：给透明度工具类用，口径同淡紫主题。 */
+  --bg-rgb: 242 248 246;
+  --surface-rgb: 255 255 255;
+  --tint-rgb: 225 243 236;
+  --text-1-rgb: 16 26 22;
+  --text-2-rgb: 95 114 107;
+  --text-3-rgb: 132 150 143;
+  --line-rgb: 230 238 234;
+  --line-strong-rgb: 211 224 217;
+  --accent-rgb: 16 163 127;
+  --accent-text-rgb: 11 131 103;
+  --accent-ink-rgb: 255 255 255;
+  --done-rgb: 16 163 127;
+  --done-text-rgb: 11 131 103;
+  --done-bg-rgb: 225 243 236;
+  --danger-rgb: 217 83 79;
 }
 
 /* ============================================================
@@ -158,4 +196,21 @@
   --shadow-card: none;
   --shadow-float: 0 12px 32px rgba(0, 0, 0, .5);
   --mask: rgba(0, 0, 0, .62);
+
+  /* rgb 三元组：给透明度工具类用，口径同淡紫主题。 */
+  --bg-rgb: 23 22 31;
+  --surface-rgb: 33 32 44;
+  --tint-rgb: 45 39 69;
+  --text-1-rgb: 245 244 249;
+  --text-2-rgb: 186 183 200;
+  --text-3-rgb: 148 145 159;
+  --line-rgb: 50 47 61;
+  --line-strong-rgb: 68 65 79;
+  --accent-rgb: 167 139 250;
+  --accent-text-rgb: 193 174 255;
+  --accent-ink-rgb: 22 18 31;
+  --done-rgb: 52 199 123;
+  --done-text-rgb: 95 223 160;
+  --done-bg-rgb: 29 50 39;
+  --danger-rgb: 239 122 118;
 }

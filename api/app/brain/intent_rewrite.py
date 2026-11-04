@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from app.brain.llm import LLMClient, get_llm
+from app.brain.llm import TEMPERATURE_COPY, TEMPERATURE_STRUCTURED, LLMClient, get_llm
 from app.brain.memory import Intent, parse_intent
 from app.config import settings
 from app.exercises_catalog import MODALITIES
@@ -503,7 +503,11 @@ async def rewrite_intent(
         f"用户本句：{user_text.strip()}\n"
     )
     try:
-        raw = await client.complete_json(INTENT_REWRITE_SYSTEM, user_payload)
+        raw = await client.complete_json(
+            INTENT_REWRITE_SYSTEM,
+            user_payload,
+            temperature=TEMPERATURE_STRUCTURED,
+        )
         model_intent = intent_from_model_json(raw, user_text)
     except Exception:  # noqa: BLE001
         rules.params["source"] = "rules_fallback"
@@ -1242,7 +1246,7 @@ async def generate_clarification(intent: Intent, profile_brief: str = "") -> tup
     )
     if client is not None:
         try:
-            raw = await client.complete_json(CLARIFY_SYSTEM, user)
+            raw = await client.complete_json(CLARIFY_SYSTEM, user, temperature=TEMPERATURE_COPY)
             text = _scrub_level_address(str(raw.get("text") or ""))
             if kind == "session":
                 text = _scrub_assumed_quit(text, intent.raw or "", open_target)

@@ -59,18 +59,28 @@ body,
   font-weight: var(--fw-strong);
 }
 
-/* 亮色强调只当填充；文字走 --accent-text（§1） */
+/* 刻意的语义覆盖：这几个类名和 Tailwind 生成的默认含义不同，不能删。
+   颜色本身走 tailwind.config.js 的 rgb 三元组，透明度变体（如 bg-ink/40）由 Tailwind 生成；
+   下面只处理"同名但语义要偏一档"的情况。 */
 .text-accent {
+  /* 强调填充色不能当文字（§1），文字统一走更深的 --accent-text */
   color: var(--accent-text);
+}
+.bg-ok\/15 {
+  /* 完成态整行铺的是一个不透明的浅色 done-bg，不是 done-text 的 15% */
+  background-color: var(--done-bg);
 }
 .bg-accent {
   background-color: var(--accent);
 }
+
+/* 遮罩专用：走主题的 --mask（每个主题自带正确的深浅，深色主题是纯黑 62%）。
+   不要用 bg-ink/NN —— 深色主题里 --text-1 是近白色，遮罩会变成一层白雾。 */
+.bg-scrim {
+  background-color: var(--mask);
+}
 .text-accent-ink {
   color: var(--accent-ink);
-}
-.bg-ok\/15 {
-  background-color: var(--done-bg);
 }
 .text-ok {
   color: var(--done-text);
@@ -200,6 +210,146 @@ a,
   animation: pop var(--dur-move) var(--ease-out) both;
 }
 
+/* ============================================================
+   引导页动效
+   只动 transform / opacity / stroke-dashoffset（§4）。
+   错开用 --i（元素序号）算延迟，不在 JS 里排时间。
+   ============================================================ */
+
+/* 选项逐个浮上来 */
+@keyframes ob-stagger {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ob-stagger {
+  animation: ob-stagger 320ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+/* 切屏：从右进来 / 从左回来 */
+@keyframes ob-in-next {
+  from {
+    opacity: 0;
+    transform: translateX(26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes ob-in-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.ob-next {
+  animation: ob-in-next 280ms var(--ease-out) both;
+}
+.ob-prev {
+  animation: ob-in-prev 280ms var(--ease-out) both;
+}
+
+/* 选中勾：描出来的，不是淡入 */
+@keyframes ob-tick {
+  from {
+    stroke-dashoffset: 20;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.ob-tick {
+  stroke-dasharray: 20;
+  animation: ob-tick 240ms var(--ease-out) 80ms both;
+}
+
+/* 顶部进度段：当前这段从左边长出来 */
+.ob-seg {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 340ms var(--ease-out);
+}
+.ob-seg.is-on {
+  transform: scaleX(1);
+}
+
+/* 大数字被选中时轻微顶一下 */
+@keyframes ob-bump {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(0.94);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.ob-bump {
+  animation: ob-bump 220ms var(--ease-out);
+}
+
+/* 提交中的呼吸点 */
+@keyframes ob-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.ob-breathe {
+  animation: ob-breathe 1.3s ease-in-out infinite;
+}
+
+/* 场景卡背景字形：缓慢漂移，幅度极小，只为了不呆板 */
+@keyframes ob-drift {
+  from {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  to {
+    transform: translate3d(-4px, -5px, 0) rotate(-3deg);
+  }
+}
+.ob-drift {
+  animation: ob-drift 9s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-stagger,
+  .ob-next,
+  .ob-prev,
+  .ob-tick,
+  .ob-bump {
+    animation: none;
+  }
+  .ob-tick {
+    stroke-dashoffset: 0;
+  }
+  .ob-seg {
+    transition: none;
+  }
+  .ob-breathe,
+  .ob-drift {
+    animation: none;
+  }
+  .ob-drift {
+    opacity: 0.06 !important;
+  }
+}
+
 /* 海报/结算：分享场合可用深色底；色值用 mask/深色主题变量，避免再写一套 Court 渐变 */
 .recap-poster {
   background: var(--bg);
@@ -239,4 +389,164 @@ input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 textarea,
 select {
   font-size: 16px;
+}
+
+/* ============================================================
+   登录页（品牌页）
+   ------------------------------------------------------------
+   DESIGN.md 说“不做科技感、不做霓虹”，但登录页是一次性入口，
+   与健身房现场操作是两种场景，因此这里允许另一套视觉语言。
+   规则：
+   1. 颜色只在 .login-brand 作用域内定义，不污染 --bg / --text-1；
+   2. 不用 backdrop-filter（微信 X5 旧内核不支持），改用半透明实色 + 内高光；
+   3. 动画只动 transform / opacity。
+   ============================================================ */
+.login-brand {
+  --lb-bg: #0f0d16;
+  --lb-ink: #f3f3f6;
+  --lb-ink-2: rgba(255, 255, 255, 0.62);
+  --lb-ink-3: rgba(255, 255, 255, 0.34);
+  --lb-accent: #d4ff3f;
+  --lb-danger: #ff6b6b;
+  --lb-line: rgba(255, 255, 255, 0.1);
+  --lb-field-bg: rgba(0, 0, 0, 0.3);
+
+  position: relative;
+  /* 小屏（如 320×568）内容会超高，登录页必须可滚，否则按钮被挤出视口 */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--lb-bg);
+  color: var(--lb-ink);
+}
+
+/* 背景光：渐变只当光，不承担信息 */
+.lb-sky {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 78% 8%, rgba(150, 120, 255, 0.42), transparent 46%),
+    radial-gradient(circle at 12% 78%, rgba(212, 255, 63, 0.16), transparent 44%),
+    radial-gradient(circle at 50% 104%, rgba(255, 92, 57, 0.16), transparent 52%),
+    linear-gradient(168deg, #1b1530 0%, #0f0d16 62%);
+}
+.lb-sky.is-error {
+  background:
+    radial-gradient(circle at 78% 8%, rgba(255, 92, 92, 0.34), transparent 46%),
+    radial-gradient(circle at 12% 78%, rgba(255, 92, 57, 0.14), transparent 44%),
+    linear-gradient(168deg, #241424 0%, #0f0d16 62%);
+}
+
+/* 配重片：同心圆 + 中心孔。90s 一圈，几乎察觉不到在动 */
+.lb-plate {
+  position: absolute;
+  right: -88px;
+  top: 44px;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 0 0 0 18px rgba(255, 255, 255, 0.022),
+    inset 0 0 0 20px rgba(255, 255, 255, 0.05);
+  animation: lb-spin 90s linear infinite;
+}
+.lb-plate::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.02);
+}
+@keyframes lb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lb-wrap {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  padding: 0 var(--page-x);
+}
+/* 背景光/配重片固定在视口上，不随内容滚动 */
+.lb-sky,
+.lb-plate {
+  position: fixed;
+}
+
+/* 输入框：深色下不用原生焦点环，改边框变色 */
+.lb-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  border-radius: 7px;
+  border: 1px solid var(--lb-line);
+  background: var(--lb-field-bg);
+  padding: 0 11px;
+  transition: border-color var(--dur-state) var(--ease-out);
+}
+.lb-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--lb-ink);
+  font-family: inherit;
+  letter-spacing: 0.15em;
+}
+.lb-field input::placeholder {
+  color: var(--lb-ink-3);
+  letter-spacing: 0.03em;
+}
+.lb-field:focus-within {
+  border-color: rgba(212, 255, 63, 0.72);
+}
+.lb-field.is-error {
+  border-color: rgba(255, 107, 107, 0.72);
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.13);
+}
+
+/* 错误时整块抖一下，只动 translateX */
+@keyframes lb-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  18% {
+    transform: translateX(-5px);
+  }
+  38% {
+    transform: translateX(4px);
+  }
+  58% {
+    transform: translateX(-3px);
+  }
+  78% {
+    transform: translateX(2px);
+  }
+}
+.lb-shake {
+  animation: lb-shake 380ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-plate {
+    animation: none;
+  }
+  .lb-shake {
+    animation: none;
+  }
 }

@@ -17,7 +17,7 @@ def test_confirm_relation_does_not_open_a_second_plan(monkeypatch):
     from app.brain.llm import MockLLM
 
     class ConfirmLLM(MockLLM):
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             if "【INTENT_REWRITE】" in system:
                 return {
                     "agent": "coach_plan",
@@ -81,7 +81,7 @@ def test_named_muscle_runs_plan_nodes(monkeypatch):
         return Intent(expert="training", muscles=["胸"], raw=text, params={})
 
     class FakeLLM:
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             return {
                 "text": "胸训",
                 "card": {
@@ -124,7 +124,7 @@ def test_dialogue_history_reaches_intent_and_plan_prompt(monkeypatch):
         return Intent(expert="training", muscles=["胸"], raw=text, params={"modality": ["抗阻"]})
 
     class FakeLLM:
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             seen["plan_user"] = user
             return {
                 "text": "胸训",
@@ -190,7 +190,7 @@ def test_missing_rower_revises_draft_keeps_other_moves(monkeypatch):
         )
 
     class FakeLLM:
-        async def complete_json(self, system: str, user: str):
+        async def complete_json(self, system: str, user: str, **kwargs):
             assert "划船机" in user
             assert "短期记忆" in user
             assert "当前屏幕上的草稿" not in user

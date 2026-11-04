@@ -341,7 +341,7 @@ function WeightSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-scrim p-0 sm:items-center sm:p-4">
       <button type="button" className="absolute inset-0 cursor-default" aria-label="关闭" onClick={onClose} />
       <div className="relative z-10 w-full max-w-md rounded-t-2xl border border-line bg-bg px-5 pb-8 pt-5 shadow-xl sm:rounded-2xl">
         <div className="flex items-center justify-between">

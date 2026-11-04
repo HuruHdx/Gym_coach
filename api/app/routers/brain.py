@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
@@ -13,7 +15,17 @@ from app.brain.pipeline import run_chat_pipeline
 from app.db import get_session
 from app.brain.feedback import list_feedback, submit_feedback
 from app.models import DebugTrace, Experience, Goal, Profile
-from app.schemas import AgentReply, ChatRequest, EvalQaRequest, FeedbackOut, FeedbackRequest
+from app.schemas import (
+    AgentReply,
+    ChatDraftItem,
+    ChatRequest,
+    EvalQaRequest,
+    EvalThreadOut,
+    EvalThreadRequest,
+    EvalTurnOut,
+    FeedbackOut,
+    FeedbackRequest,
+)
 
 router = APIRouter(prefix="/api", tags=["brain"])
 
@@ -160,6 +172,190 @@ async def eval_qa(body: EvalQaRequest, _: str = Depends(require_token)):
         )
         state = {**state, "stats": stats}
     return _eval_body(state)
+
+
+def _turn_cards(state: dict[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
+    """从这一轮的 blocks 里取出草稿卡。这张卡就是「前端屏幕上看到的东西」。"""
+    for block in state.get("blocks") or []:
+        if block.get("kind") == "card":
+            return block.get("title"), list(block.get("items") or [])
+    return None, []
+
+
+def _to_draft_items(items: list[dict[str, Any]]) -> list[ChatDraftItem]:
+    """卡片 → 下一轮的 draft_items。只带选中项，和前端点「采纳」的语义一致。"""
+    out: list[ChatDraftItem] = []
+    for item in items:
+        if not item.get("selected", True):
+            continue
+        out.append(
+            ChatDraftItem(
+                title=str(item.get("title") or ""),
+                selected=True,
+                meta=dict(item.get("meta") or {}),
+            )
+        )
+    return out
+
+
+def _thread_turn(index: int, text: str, state: dict[str, Any]) -> EvalTurnOut:
+    intent = state.get("intent") or {}
+    params = intent.get("params") or {}
+    title, items = _turn_cards(state)
+    dropped = []
+    for block in state.get("blocks") or []:
+        if block.get("kind") == "card":
+            dropped = list((block.get("meta") or {}).get("dropped") or [])
+    text_block = ""
+    for block in state.get("blocks") or []:
+        if block.get("kind") == "text" and block.get("text"):
+            text_block = str(block["text"])
+            break
+    card_items_meta = [
+        {
+            "title": str(item.get("title") or ""),
+            "selected": bool(item.get("selected", True)),
+            "meta": dict(item.get("meta") or {}),
+        }
+        for item in items
+    ]
+    return EvalTurnOut(
+        index=index,
+        text=text,
+        route=str(state.get("route") or ""),
+        topic=params.get("topic"),
+        domain=params.get("domain"),
+        draft_relation=params.get("draft_relation"),
+        session_target=params.get("session_target"),
+        card_title=title,
+        card_items=[str(i.get("title") or "") for i in items],
+        card_items_meta=card_items_meta,
+        card_item_count=len(items),
+        selected_count=sum(1 for i in items if i.get("selected", True)),
+        dropped=dropped,
+        text_block=text_block,
+        suggestions=list(state.get("suggestions") or []),
+        draft_title=title,
+    )
+
+
+@router.post("/eval/thread", response_model=EvalThreadOut)
+async def eval_thread(body: EvalThreadRequest, _: str = Depends(require_token)):
+    """
+    长对话评测：整条对话在同一台内存库里顺序跑。
+
+    和 /eval/qa 的关键区别 —— 上一轮产出的草稿会自动变成下一轮的 draft_items，
+    复刻「模型给一版 → 用户在这版上改」的真实链路。
+    手工在 YAML 里维护 history 做不到这一点：草稿内容只有模型自己知道。
+
+    默认走**真实排课链路**（draft_plan → validate，会真的出卡）；只有显式传
+    short_circuit=True 时才复用 /eval/qa 的「只回路由说明」捷径 —— 那条捷径不出卡，
+    长对话的改稿/伤痛/采纳断言全部无从谈起。
+    """
+    from sqlmodel import SQLModel, Session, create_engine
+
+    from app.brain.graph import invoke_chat_graph
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    out = EvalThreadOut(name=body.name)
+
+    with Session(engine) as session:
+        session.add(_eval_profile_like(body))
+        session.commit()
+
+        history: list[dict[str, Any]] = []
+        draft_items: list[ChatDraftItem] = []
+        draft_title: str | None = None
+
+        for index, turn in enumerate(body.turns):
+            try:
+                state = await invoke_chat_graph(
+                    session,
+                    user_text=turn.text,
+                    draft_title=draft_title,
+                    draft_items=draft_items,
+                    history=history,
+                    eval_mode=body.short_circuit,
+                    search_mode=body.search_mode,
+                    search_fixture=[item.model_dump() for item in body.search_fixture],
+                    stats_fixture=[item.model_dump() for item in body.stats_fixture],
+                )
+            except Exception as exc:  # noqa: BLE001
+                out.error = f"第 {index + 1} 轮失败：{exc}"
+                return out
+
+            out.turns.append(_thread_turn(index, turn.text, state))
+
+            # 累积对话摘要（给下一轮当短期记忆）
+            title, items = _turn_cards(state)
+            answer = ""
+            for block in state.get("blocks") or []:
+                if block.get("kind") == "text" and block.get("text"):
+                    answer = str(block["text"])
+                    break
+            history.append({"role": "user", "text": turn.text})
+            history.append(
+                {
+                    "role": "assistant",
+                    "text": answer,
+                    "card_title": title,
+                    "card_items": [str(i.get("title") or "") for i in items],
+                }
+            )
+
+            # 这一轮出了新卡 → 变成下一轮的草稿；没出卡 → 沿用旧草稿（改稿语义）
+            if title:
+                draft_title = title
+                draft_items = _to_draft_items(items)
+
+        # 可选：把最后一张草稿真的落成记录，验证「采纳 → 打卡 → 回写」
+        if body.adopt_after is not None and not draft_items:
+            # 没有草稿多半是链路走了短路 / 整条对话没出卡，明确报出来而不是静默跳过
+            out.error = "采纳失败：整条对话没有产出可采纳的卡片"
+        if body.adopt_after is not None and draft_items:
+            from app.schemas import AdoptRequest, DraftItemIn
+            from app.services import session_service as svc
+
+            try:
+                adopted = svc.adopt_draft(
+                    session,
+                    AdoptRequest(
+                        title=draft_title or "今日计划",
+                        items=[
+                            DraftItemIn(title=i.title, meta=i.meta, selected=True)
+                            for i in draft_items
+                        ],
+                        replace_today=True,
+                    ),
+                )
+                out.adopted = {
+                    "session_id": adopted.id,
+                    "status": adopted.status,
+                    "set_count": len(adopted.sets),
+                    "exercises": sorted({s.exercise_name for s in adopted.sets}),
+                    "progress": adopted.progress,
+                }
+            except Exception as exc:  # noqa: BLE001
+                out.error = f"采纳失败：{exc}"
+
+    return out
+
+
+def _eval_profile_like(body: EvalThreadRequest) -> Profile:
+    """thread 请求只带 profile 简表，这里复用 /eval/qa 的映射。"""
+    raw = body.profile
+    if raw is None:
+        return Profile(
+            goal=Goal.BULK, experience=Experience.NOVICE, weight_kg=70, days_per_week=4, injuries=[]
+        )
+    return Profile(
+        goal=_GOALS.get(raw.goal, Goal.BULK),
+        experience=_LEVELS.get(raw.experience, Experience.NOVICE),
+        weight_kg=raw.weight_kg,
+        days_per_week=raw.days_per_week,
+        injuries=list(raw.injuries or []),
+    )
 
 
 @router.post("/feedback", response_model=FeedbackOut)

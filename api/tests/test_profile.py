@@ -131,7 +131,9 @@ def test_assemble_memory_skips_strength_stats_for_cardio():
         raw="做有氧",
         params={"modality": ["有氧"], "cardio": True},
     )
-    pack = assemble_memory(session, intent, p)
+    # prefetch=True：这条用例验证的是「有氧课只带有氧统计、不带力量统计」，
+    # 属于预取路径的行为。默认 prefetch=False 时只带档案摘要，两条断言都测不到。
+    pack = assemble_memory(session, intent, p, prefetch=True)
     session.close()
     block = pack.as_prompt_block()
     assert "哑铃卧推" not in block
