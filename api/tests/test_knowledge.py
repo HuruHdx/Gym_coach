@@ -112,6 +112,16 @@ def test_single_family_is_not_a_menu():
     assert g.suggestions == []
 
 
+def test_what_is_this_does_not_list_variants():
+    for question in ("滑车是什么 没有这个动作", "杠杆是什么，我用不了"):
+        g = ground_question(question)
+        assert g.branch == "knowledge"
+        assert g.reason == "term"
+        assert g.suggestions == []
+        assert "变体" in g.passage
+        assert "这个叫法" not in (g.direct_answer or "")
+
+
 def test_smith_seated_row_corrects_to_smith_rows():
     g = ground_question("史密斯坐姿划船练哪里")
     labels = [item["label"] for item in g.suggestions if item["label"] != "都不是"]

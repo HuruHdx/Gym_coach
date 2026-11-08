@@ -830,3 +830,159 @@ def test_confirm_keeps_plan_topic_and_does_not_replan():
     assert intent.params.get("adopt_hint") is True
     assert intent.params.get("agent") == "coach_chat"
     assert _pick_route(intent, has_draft=True) == "chat"
+
+
+def test_missing_card_item_revises_the_draft_instead_of_name_search():
+    from app.brain.graph import _pick_route
+    from app.brain.intent_rewrite import bind_rejected_draft_item
+
+    intent = intent_from_model_json(
+        {
+            "agent": "coach_chat",
+            "topic": "qa",
+            "qa_kind": "explain",
+            "domain": "training",
+            "rewrite": "询问滑车是什么",
+        },
+        "滑车是什么 没有这个动作",
+    )
+    bound = bind_rejected_draft_item(
+        intent,
+        [
+            {"title": "滑车45度单腿腿举", "meta": {"muscle": "腿"}},
+            {"title": "分腿蹲", "meta": {"muscle": "腿"}},
+        ],
+    )
+    assert bound.params["topic"] == "plan"
+    assert bound.params["exclude_exercises"] == ["滑车45度单腿腿举"]
+    assert bound.params["explain_term"] == "滑车"
+    assert _pick_route(bound, has_draft=True) == "plan"
+    line = format_intent_for_prompt(bound)
+    assert "说明「滑车」指什么" in line
+    assert "不要再带「滑车」" in line
+    assert "龙门架" not in line
+    assert "只删除" not in line
+
+    smith = intent_from_model_json(
+        {
+            "agent": "coach_chat",
+            "topic": "qa",
+            "qa_kind": "explain",
+            "domain": "training",
+            "rewrite": "询问史密斯",
+        },
+        "史密斯是什么，店里没有",
+    )
+    smith_bound = bind_rejected_draft_item(
+        smith,
+        [
+            {"title": "史密斯机卧推", "meta": {"muscle": "胸"}},
+            {"title": "杠铃卧推", "meta": {"muscle": "胸"}},
+        ],
+    )
+    assert smith_bound.params["exclude_exercises"] == ["史密斯机卧推"]
+    assert smith_bound.params["explain_term"] == "史密斯"
+
+
+def test_exclude_instruction_follows_the_utterance():
+    drop = intent_from_model_json(
+        {
+            "agent": "coach_plan",
+            "topic": "plan",
+            "domain": "training",
+            "ready": True,
+            "exclude_exercises": ["引体向上"],
+            "rewrite": "去掉引体向上",
+        },
+        "把引体向上去掉",
+    )
+    drop_line = format_intent_for_prompt(drop)
+    assert drop.params["exclude_mode"] == "drop"
+    assert "只删除" in drop_line
+    assert "不要补同类" in drop_line
+
+    swap = intent_from_model_json(
+        {
+            "agent": "coach_plan",
+            "topic": "plan",
+            "domain": "training",
+            "ready": True,
+            "exclude_exercises": ["划船机"],
+            "rewrite": "替换不可用的划船机",
+        },
+        "不行健身房没有划船机呢",
+    )
+    swap_line = format_intent_for_prompt(swap)
+    assert swap.params["exclude_mode"] == "replace"
+    assert "换成同类" in swap_line
+
+    both = intent_from_model_json(
+        {
+            "agent": "coach_plan",
+            "topic": "plan",
+            "domain": "training",
+            "ready": True,
+            "exclude_exercises": ["引体向上"],
+            "rewrite": "去掉引体向上并换成高位下拉",
+        },
+        "去掉引体向上，换成高位下拉",
+    )
+    both_line = format_intent_for_prompt(both)
+    assert both.params["exclude_mode"] == "replace"
+    assert "换成同类" in both_line
+
+
+def test_drop_only_removes_the_item_and_the_substitute():
+    from app.brain.pipeline import _draft_prompt, apply_drop_only
+    from app.brain.validate import validate_and_build_blocks
+
+    intent = Intent(
+        expert="training",
+        raw="把引体向上去掉",
+        params={"exclude_exercises": ["引体向上"], "exclude_mode": "drop"},
+    )
+    raw = {
+        "text": "换成了高位下拉。你今天想练少点呢？",
+        "card": {
+            "card_type": "training_draft",
+            "title": "引体向上",
+            "items": [
+                {"title": "杠铃划船", "meta": {"sets": 4, "reps": "8", "muscle": "背"}},
+                {"title": "高位下拉", "meta": {"sets": 3, "reps": "10", "muscle": "背"}},
+            ],
+        },
+    }
+    blocks = validate_and_build_blocks(raw, [])
+    draft = [
+        {"title": "杠铃划船", "selected": True, "meta": {"sets": 4, "reps": "8", "muscle": "背"}},
+        {"title": "引体向上", "selected": True, "meta": {"sets": 3, "reps": "8", "muscle": "背"}},
+        {"title": "面拉", "selected": True, "meta": {"sets": 3, "reps": "12", "muscle": "背"}},
+    ]
+    out = apply_drop_only(blocks, intent, draft, previous_title="背训")
+    card = next(block for block in out if getattr(block, "kind", None) == "card")
+    titles = [item.title for item in card.items]
+    assert "引体向上" not in titles
+    assert "高位下拉" not in titles
+    assert any("划船" in title for title in titles)
+    assert any("面拉" in title for title in titles)
+    assert card.title == "背训"
+    text = next(block for block in out if getattr(block, "kind", None) == "text")
+    assert "少点" not in text.text
+    assert "换成" not in text.text
+
+    kept = apply_drop_only(
+        blocks,
+        Intent(
+            expert="training",
+            raw="没有引体向上",
+            params={"exclude_exercises": ["引体向上"], "exclude_mode": "replace"},
+        ),
+        draft,
+        previous_title="背训",
+    )
+    replaced = next(block for block in kept if getattr(block, "kind", None) == "card")
+    assert any(item.title == "高位下拉" for item in replaced.items)
+
+    prompt = _draft_prompt("背训", [type("Item", (), {"title": "引体向上", "selected": True, "meta": {"muscle": "背"}})()], intent)
+    assert "只删除" in prompt
+    assert "换成同类" not in prompt

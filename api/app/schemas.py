@@ -48,7 +48,7 @@ class ProfileCreate(BaseModel):
     weight_kg: Optional[float] = Field(default=None, gt=30, lt=300)
     height_cm: Optional[float] = Field(default=None, gt=100, lt=250)
     days_per_week: int = Field(ge=1, le=7, default=4)
-    session_minutes: int = Field(ge=15, le=180, default=45)
+    session_minutes: Optional[int] = Field(default=None, ge=15, le=180)
     injuries: list[str] = Field(default_factory=list)
     preferences: list[str] = Field(default_factory=list)
     avoid_foods: list[str] = Field(default_factory=list)
@@ -84,7 +84,7 @@ class ProfileOut(BaseModel):
     weight_kg: Optional[float]
     height_cm: Optional[float]
     days_per_week: int
-    session_minutes: int
+    session_minutes: Optional[int]
     injuries: list[str]
     preferences: list[str]
     avoid_exercises: list[str] = Field(default_factory=list)
@@ -157,6 +157,12 @@ class AgentReply(BaseModel):
     blocks: list[TextBlock | CardBlock]
     suggestions: list[Suggestion] = Field(default_factory=list)
     trace_id: Optional[int] = None
+    # 这条助手气泡在会话流水里的 id，采纳后用来把卡片标成已采纳
+    turn_id: Optional[int] = None
+
+
+class MarkCardAdopted(BaseModel):
+    session_id: int
 
 
 class ChatDraftItem(BaseModel):

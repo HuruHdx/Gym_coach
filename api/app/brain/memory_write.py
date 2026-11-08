@@ -202,14 +202,15 @@ def _single_value_proposal(text: str, profile: Profile) -> tuple[str, str, str, 
     minutes = re.search(r"(?:每次|单次)(?:练)?\s*(\d{2,3})\s*分钟", text)
     if minutes and any(mark in text for mark in ("以后", "改成", "改为")):
         new_minutes = int(minutes.group(1))
-        current = profile.session_minutes or 45
+        current = profile.session_minutes
         if 15 <= new_minutes <= 180 and new_minutes != current:
-            return (
-                "session_minutes",
-                str(current),
-                str(new_minutes),
-                f"档案里单次约 {current} 分钟，要改成 {new_minutes} 分钟吗？",
-            )
+            if current is None:
+                ask = f"档案里还没填单次时长，记成 {new_minutes} 分钟吗？"
+                old_s = ""
+            else:
+                ask = f"档案里单次约 {current} 分钟，要改成 {new_minutes} 分钟吗？"
+                old_s = str(current)
+            return ("session_minutes", old_s, str(new_minutes), ask)
     return None
 
 

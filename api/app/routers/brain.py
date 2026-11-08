@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.auth import AuthContext, bind_auth
 from app.brain.memory_context import (
     get_or_create_active_conversation_id,
     load_conversation_messages,
+    mark_card_adopted,
     start_new_conversation,
 )
 from app.brain.pipeline import run_chat_pipeline
@@ -18,6 +19,7 @@ from app.models import DebugTrace, Experience, Goal, Profile
 from app.schemas import (
     AgentReply,
     ChatDraftItem,
+    MarkCardAdopted,
     ChatRequest,
     EvalQaRequest,
     EvalThreadOut,
@@ -26,16 +28,31 @@ from app.schemas import (
     FeedbackOut,
     FeedbackRequest,
 )
+from app.tenancy import set_current_user_id
 
 router = APIRouter(prefix="/api", tags=["brain"])
+
+
+def _bind_chat_user(auth: AuthContext) -> int:
+    """在接口函数体内再绑一次 user_id。
+
+    FastAPI 会在 async 事件循环里解析 Depends，再把 sync 接口丢进线程池；
+    async 接口本身也不在依赖那个线程。Depends(bind_auth) 设的 ContextVar
+    到函数体时常已丢，聊天就会写成 user_id=NULL，换账号还能看见旧对话。
+    """
+    if auth.user_id is None:
+        raise HTTPException(status_code=401, detail="需要用户登录")
+    set_current_user_id(auth.user_id)
+    return auth.user_id
 
 
 @router.post("/chat", response_model=AgentReply)
 async def chat(
     body: ChatRequest,
     session: Session = Depends(get_session),
-    _: AuthContext = Depends(bind_auth),
+    auth: AuthContext = Depends(bind_auth),
 ):
+    _bind_chat_user(auth)
     # 确保有活跃段；短期记忆以库为准，history 仅作评测回落
     get_or_create_active_conversation_id(session)
     return await run_chat_pipeline(
@@ -50,20 +67,36 @@ async def chat(
 @router.get("/chat/conversation")
 def get_conversation(
     session: Session = Depends(get_session),
-    _: AuthContext = Depends(bind_auth),
+    auth: AuthContext = Depends(bind_auth),
 ):
     """当前活跃对话段（今天）的气泡，供前端进页渲染。"""
+    _bind_chat_user(auth)
     return load_conversation_messages(session)
 
 
 @router.post("/chat/conversation")
 def new_conversation(
     session: Session = Depends(get_session),
-    _: AuthContext = Depends(bind_auth),
+    auth: AuthContext = Depends(bind_auth),
 ):
     """新对话：开新 conversation_id，旧流水保留。"""
+    _bind_chat_user(auth)
     cid = start_new_conversation(session)
     return {"conversation_id": cid, "messages": []}
+
+
+@router.post("/chat/turns/{turn_id}/adopted")
+def mark_adopted_card(
+    turn_id: int,
+    body: MarkCardAdopted,
+    session: Session = Depends(get_session),
+    auth: AuthContext = Depends(bind_auth),
+):
+    """把已采纳的卡片写回会话，刷新后不再显示采纳按钮。"""
+    _bind_chat_user(auth)
+    if not mark_card_adopted(session, turn_id, body.session_id):
+        raise HTTPException(status_code=404, detail="卡片不存在")
+    return {"ok": True}
 
 
 _GOALS = {"增肌": Goal.BULK, "减脂": Goal.CUT, "力量": Goal.STRENGTH, "塑形": Goal.SHAPE}

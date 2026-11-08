@@ -115,10 +115,11 @@ def _ensure_columns() -> None:
             conn.execute(
                 text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {coltype}")
             )
-        # 身高体重改为可空：引导页未选时不写死默认值
+        # 身高体重/单次时长可空：引导未选时不写死默认值
         if conn.execute(text("SELECT to_regclass(:name)"), {"name": "profile"}).scalar():
             conn.execute(text("ALTER TABLE profile ALTER COLUMN weight_kg DROP NOT NULL"))
             conn.execute(text("ALTER TABLE profile ALTER COLUMN height_cm DROP NOT NULL"))
+            conn.execute(text("ALTER TABLE profile ALTER COLUMN session_minutes DROP NOT NULL"))
         _promote_text_to_jsonb(conn)
 
 

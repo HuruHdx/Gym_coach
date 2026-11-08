@@ -5,7 +5,6 @@ import {
   Apple,
   BarChart3,
   Dumbbell,
-  LayoutGrid,
   PersonStanding,
   RefreshCw,
   Scale,
@@ -14,6 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { COACH_NAME } from "../lib/brand";
+import { CoachMark } from "../components/CoachMark";
 import { DraftCard } from "../components/DraftCard";
 import { MessageFeedback } from "../components/MessageFeedback";
 import type {
@@ -49,6 +49,7 @@ type ChatMessage =
       suggestions?: Suggestion[];
       awaitingConfirm?: boolean;
       traceId?: number | null;
+      turnId?: number | null;
       createdAt?: number;
     };
 
@@ -64,6 +65,21 @@ type CoachAction = {
 );
 
 const iconCls = "h-4 w-4";
+
+function cardMatchesToday(card: CardBlock, session: TrainingSession | null | undefined) {
+  if (!session || (session.status !== "active" && session.status !== "done")) return false;
+  const onCard = [...new Set(card.items.filter((item) => item.selected).map((item) => item.title.trim()))]
+    .filter(Boolean)
+    .sort();
+  const adopted = [...new Set(session.sets.map((set) => set.exercise_name.trim()))].filter(Boolean).sort();
+  return onCard.length > 0 && onCard.length === adopted.length && onCard.every((name, index) => name === adopted[index]);
+}
+
+function turnIdOf(messageId: string, turnId?: number | null) {
+  if (turnId) return turnId;
+  const matched = /^db-a-(\d+)$/.exec(messageId);
+  return matched ? Number(matched[1]) : null;
+}
 
 function isDraftLocked(status: string | undefined) {
   return status === "confirmed" || status === "expired";
@@ -123,11 +139,14 @@ const THINKING_STEPS = [
   "正在生成专属组次、次数与负荷草稿...",
 ];
 
-function buildActions(injuries: string[]): CoachAction[] {
+function buildActions(injuries: string[], sessionMinutes: number | null): CoachAction[] {
   const knee = injuries.some((item) => item.includes("膝"));
   const lowerBack = injuries.some((item) => item.includes("腰"));
   const guards = [knee ? "膝盖" : "", lowerBack ? "腰" : ""].filter(Boolean);
   const legPrompt = guards.length ? `今天练腿，注意保护${guards.join("和")}` : "今天练腿";
+  // 没填时长就不要在快捷句里写死分钟，否则会盖掉画像
+  const chestPrompt =
+    sessionMinutes != null ? `今天练胸，安排${sessionMinutes}分钟` : "今天练胸";
 
   return [
     {
@@ -136,7 +155,7 @@ function buildActions(injuries: string[]): CoachAction[] {
       sub: "按画像排胸日草稿，可改再采纳",
       icon: <Dumbbell className={iconCls} strokeWidth={1.75} />,
       kind: "prompt",
-      prompt: "今天练胸，安排40分钟",
+      prompt: chestPrompt,
     },
     {
       id: "back",
@@ -197,9 +216,14 @@ export function CoachPage({ profile }: Props) {
     queryKey: ["training-today"],
     queryFn: () => api<TrainingSession | null>("/api/training/today"),
   });
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<{ id: number }>("/api/auth/me"),
+  });
   const { data: conversation, isLoading: conversationLoading } = useQuery({
-    queryKey: ["chat-conversation"],
+    queryKey: ["chat-conversation", me?.id],
     queryFn: () => api<ConversationState>("/api/chat/conversation"),
+    enabled: me?.id != null,
   });
   const todayStatus: "none" | "active" | "done" = !todaySession
     ? "none"
@@ -209,7 +233,7 @@ export function CoachPage({ profile }: Props) {
         ? "active"
         : "none";
 
-  const actions = buildActions(profile.injuries || []);
+  const actions = buildActions(profile.injuries || [], profile.session_minutes);
   const primaryActions = actions.filter((item) => item.kind === "prompt");
   const secondaryActions = actions.filter((item) => item.kind !== "prompt");
   const promptChips = primaryActions;
@@ -218,6 +242,12 @@ export function CoachPage({ profile }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
+
+  // 换账号后必须重新灌库，不能沿用上一用户的 hydrated 气泡
+  useEffect(() => {
+    setMessages([]);
+    setHydrated(false);
+  }, [me?.id]);
 
   useEffect(() => {
     if (!conversation || hydrated) return;
@@ -309,12 +339,13 @@ export function CoachPage({ profile }: Props) {
                 awaitingConfirm: Boolean(reply.suggestions?.length) && !cardBlock,
                 elapsedSec: totalElapsed,
                 traceId: reply.trace_id,
+                turnId: reply.turn_id,
                 createdAt: Date.now(),
               }
             : m,
         ),
       );
-      void qc.invalidateQueries({ queryKey: ["chat-conversation"] });
+      void qc.invalidateQueries({ queryKey: ["chat-conversation", me?.id] });
     } catch (e) {
       clearInterval(timer);
       setMessages((prev) =>
@@ -341,12 +372,24 @@ export function CoachPage({ profile }: Props) {
     );
   }
 
-  function handleAdopted(_session: TrainingSession, confirmedCard: CardBlock, msgId: string) {
+  function handleAdopted(
+    session: TrainingSession,
+    confirmedCard: CardBlock,
+    msgId: string,
+    turnId?: number | null,
+  ) {
     setMessages((prev) =>
       prev.map((m) =>
         m.id === msgId && m.role === "assistant" ? { ...m, card: confirmedCard } : m,
       ),
     );
+    const id = turnIdOf(msgId, turnId);
+    if (id) {
+      void api(`/api/chat/turns/${id}/adopted`, {
+        method: "POST",
+        body: JSON.stringify({ session_id: session.id }),
+      }).catch(() => undefined);
+    }
     void qc.invalidateQueries({ queryKey: ["training-today"] });
     void qc.invalidateQueries({ queryKey: ["training-sessions"] });
     void qc.invalidateQueries({ queryKey: ["training-dashboard"] });
@@ -362,7 +405,7 @@ export function CoachPage({ profile }: Props) {
       });
       setMessages(fromApiMessages(next.messages || []));
       setHydrated(true);
-      void qc.setQueryData(["chat-conversation"], next);
+      void qc.setQueryData(["chat-conversation", me?.id], next);
     } catch (e) {
       alert(`无法开始新对话：${String(e)}`);
     }
@@ -390,11 +433,9 @@ export function CoachPage({ profile }: Props) {
     <div className="flex h-full min-h-0 flex-col px-page pb-2 pt-3">
       <header className="flex shrink-0 items-center justify-between pb-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-tint text-accent-text">
-            <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </span>
+          <CoachMark />
           <div className="min-w-0">
-            <h1 className="font-display text-title font-semibold tracking-tight">AI 教练</h1>
+            <h1 className="font-display text-title font-semibold tracking-tight">{COACH_NAME}</h1>
             <p className="mt-0.5 truncate text-micro text-muted">
               {profile.goal} · {profile.experience} · 每周 {profile.days_per_week} 练
             </p>
@@ -482,9 +523,7 @@ export function CoachPage({ profile }: Props) {
             if (m.role === "thinking") {
               return (
                 <div key={m.id} className="flex gap-2.5 rise-in">
-                  <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-tint text-micro font-semibold text-accent-text">
-                    AI
-                  </div>
+                  <CoachMark />
                   <div className="min-w-0 flex-1 rounded-lg rounded-tl-sm border border-line bg-elevated p-3 shadow-card">
                     <div className="flex items-center gap-2">
                       <span className="grid h-2 w-2 rounded-full bg-accent opacity-80" />
@@ -501,9 +540,7 @@ export function CoachPage({ profile }: Props) {
               return (
                 <div key={m.id} className="flex flex-col gap-2 rise-in">
                   <div className="flex gap-2.5">
-                    <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink text-micro font-semibold text-accent-ink">
-                      AI
-                    </div>
+                    <CoachMark />
                     <div className="min-w-0 flex-1">
                       <div className="rounded-lg rounded-tl-sm border border-line bg-elevated p-3.5 shadow-card">
                         {m.elapsedSec != null && (
@@ -539,11 +576,15 @@ export function CoachPage({ profile }: Props) {
                       {m.card && m.card.card_type === "training_draft" && (
                         <div className="mt-2.5">
                           <DraftCard
-                            card={m.card}
+                            card={
+                              isDraftLocked(m.card.status) || !cardMatchesToday(m.card, todaySession)
+                                ? m.card
+                                : { ...m.card, status: "confirmed" }
+                            }
                             todayStatus={todayStatus}
                             onChange={(newCard) => handleCardChange(m.id, newCard)}
                             onAdopted={(session, confirmedCard) =>
-                              handleAdopted(session, confirmedCard, m.id)
+                              handleAdopted(session, confirmedCard, m.id, m.turnId)
                             }
                           />
                         </div>

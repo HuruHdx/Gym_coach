@@ -44,7 +44,9 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
   const [goal, setGoal] = useState<Goal>(profile.goal);
   const [experience, setExperience] = useState<Experience>(profile.experience);
   const [days, setDays] = useState(profile.days_per_week);
-  const [minuteText, setMinuteText] = useState(String(profile.session_minutes ?? 45));
+  const [minuteText, setMinuteText] = useState(
+    profile.session_minutes != null ? String(profile.session_minutes) : "",
+  );
   const [scene, setScene] = useState<SceneId>(sceneFromPreferences(profile.preferences));
   const [parts, setParts] = useState<string[]>(() =>
     AVOID_PARTS.filter((part) => partSelected(profile.injuries || [], part.stored, part.label)).map(
@@ -66,7 +68,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
   const [hint, setHint] = useState<string | null>(null);
   const shownName = nick.trim() || displayNameOf(me);
   const letter = shownName.slice(0, 1);
-  const minutes = Number(minuteText);
+  const minutes = minuteText.trim() === "" ? null : Number(minuteText);
 
   useEffect(() => {
     if (me?.display_name != null) setNick(me.display_name);
@@ -92,9 +94,13 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
       }
       weight_kg = Math.round(weight * 10) / 10;
     }
-    if (!Number.isFinite(minutes) || minutes < 15 || minutes > 180) {
-      alert("单次时长填 15 到 180 分钟");
-      return;
+    let session_minutes: number | null = null;
+    if (minuteText.trim() !== "") {
+      if (minutes == null || !Number.isFinite(minutes) || minutes < 15 || minutes > 180) {
+        alert("单次时长填 15 到 180 分钟，或留空");
+        return;
+      }
+      session_minutes = Math.round(minutes);
     }
     let height_cm: number | null = null;
     if (heightText.trim() !== "") {
@@ -117,7 +123,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
           goal,
           experience,
           days_per_week: days,
-          session_minutes: Math.round(minutes),
+          session_minutes,
           preferences: preferencesFor(scene),
           injuries: injuriesToSave(parts, note),
           weight_kg,
@@ -205,8 +211,11 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
       </Card>
 
       <Card>
-        <FieldLabel>单次时长</FieldLabel>
+        <FieldLabel>单次时长（可不填）</FieldLabel>
         <div className="mt-2 flex flex-wrap gap-1.5">
+          <Pill active={minuteText.trim() === ""} onClick={() => setMinuteText("")}>
+            未填
+          </Pill>
           {MINUTE_PRESETS.map((item) => (
             <Pill key={item} active={minutes === item} onClick={() => setMinuteText(String(item))}>
               {item}

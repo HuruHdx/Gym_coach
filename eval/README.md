@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **整体评测** | `cases.yaml` / `promptfooconfig.yaml` | 40 | 一句话进去，看整体回答对不对（内容 + 依据 + 行为） |
 | **意图门禁** | `cases-intent.yaml` / `promptfooconfig-intent.yaml` | 35 | 改提示词时防 topic 回归 |
-| **长对话** | `cases-long.yaml` / `promptfooconfig-long.yaml` | 22 | 一条对话链（1~4 轮）走下来，每步有没有走歪 |
+| **长对话** | `cases-long.yaml` / `promptfooconfig-long.yaml` | 23 | 一条对话链（1~4 轮）走下来，每步有没有走歪 |
 
 设计说明：`../评测集-v0.4.md`、`../评测集-长对话.md`。
 
@@ -30,7 +30,7 @@
 |---|---|
 | `cases.yaml` | 整体评测 40 条 |
 | `cases-intent.yaml` | 意图门禁 35 条 |
-| `cases-long.yaml` | 长对话 22 条（1~4 轮/条） |
+| `cases-long.yaml` | 长对话 23 条（1~4 轮/条；轮次写在 `vars.thread.turns`，勿顶层 `vars.turns`，否则 promptfoo 会按句拆案） |
 | `promptfooconfig.yaml` / `-intent.yaml` / `-long.yaml` | 三个入口；各自挂 `defaultTest` 契约检查 |
 | `provider.js` | **class**；调 `/api/eval/qa`，透传 `search_fixture` / `stats_fixture` |
 | `provider-long.js` | **class**；调 `/api/eval/thread`，一次跑完整条对话，每轮结果进 metadata |

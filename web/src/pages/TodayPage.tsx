@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { COACH_NAME } from "../lib/brand";
 import type { SetLog, TrainingSession } from "../types";
 import { WeightStepper } from "../components/WeightStepper";
 import { RepsStepper } from "../components/RepsStepper";
@@ -193,7 +194,7 @@ export function TodayPage() {
             to="/coach"
             className="pressable relative mt-auto inline-flex w-full items-center justify-center rounded-md bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink"
           >
-            呼叫 AI 教练定制
+            让{COACH_NAME}定制
           </Link>
         </div>
       </div>

@@ -49,8 +49,6 @@ def _as_str_list(value: Any) -> list[str]:
 
 
 def _out(p: Profile) -> ProfileOut:
-    if getattr(p, "session_minutes", None) is None:
-        p.session_minutes = 45
     p.preferences = _as_str_list(p.preferences)
     p.injuries = _as_str_list(p.injuries)
     p.avoid_exercises = _as_str_list(getattr(p, "avoid_exercises", None))
@@ -140,10 +138,10 @@ def update_profile(
     now = utcnow()
 
     for field in SCALAR_FIELDS:
-        # height_cm / weight_kg 允许显式清空为 null；其余标量忽略 None
+        # height/weight/时长允许显式清空为 null；其余标量忽略 None
         if field not in data:
             continue
-        if data[field] is None and field not in ("height_cm", "weight_kg"):
+        if data[field] is None and field not in ("height_cm", "weight_kg", "session_minutes"):
             continue
         old = getattr(p, field)
         new = data[field]

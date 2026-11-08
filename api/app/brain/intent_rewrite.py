@@ -795,6 +795,83 @@ def user_named_target(text: str) -> bool:
     return any(k in text for k in _NAMED_TARGETS)
 
 
+# 对着当前卡片上的某一项：问它是什么，或说没有、用不了。不限具体器械名。
+_CARD_ITEM_CUES = (
+    "没有这个",
+    "没这个",
+    "没有这种",
+    "没有这动作",
+    "用不了",
+    "做不了",
+    "没法做",
+    "店里没有",
+    "是什么",
+    "什么是",
+    "什么意思",
+    "这是啥",
+    "啥意思",
+)
+_TITLE_STOP = frozenset({"没有", "这个", "动作", "什么", "是", "哪", "一个", "不是", "意思"})
+
+
+def _title_token(title: str, text: str) -> str:
+    """动作名里出现在原话中的最长一段。停用词和纯数字不算。"""
+    best = ""
+    span = min(len(title), 8)
+    for length in range(span, 1, -1):
+        for i in range(0, len(title) - length + 1):
+            piece = title[i : i + length]
+            if piece in _TITLE_STOP or piece in best:
+                continue
+            if not any("\u4e00" <= ch <= "\u9fff" for ch in piece):
+                continue
+            if piece in text and len(piece) > len(best):
+                best = piece
+        if len(best) >= 2:
+            break
+    return best
+
+
+def bind_rejected_draft_item(intent: Intent, draft_items: list[Any] | None) -> Intent:
+    """屏幕上已有草稿，用户对着其中一项问叫法或说没有：改这版，不当成动作名查询。"""
+    text = intent.raw or ""
+    if not draft_items or not any(cue in text for cue in _CARD_ITEM_CUES):
+        return intent
+    matched: list[dict[str, Any]] = []
+    for item in draft_items:
+        if isinstance(item, dict):
+            title = str(item.get("title") or "")
+            meta = item.get("meta") or {}
+        else:
+            title = str(getattr(item, "title", "") or "")
+            meta = getattr(item, "meta", None) or {}
+        token = _title_token(title, text) if title else ""
+        if token:
+            matched.append(
+                {"title": title, "muscle": str((meta or {}).get("muscle") or ""), "token": token}
+            )
+    if not matched:
+        return intent
+    params = dict(intent.params or {})
+    params["topic"] = "plan"
+    params["domain"] = "training"
+    params["agent"] = "coach_plan"
+    params["draft_relation"] = "revise"
+    params["ready"] = True
+    params["exclude_exercises"] = [item["title"] for item in matched]
+    params["explain_term"] = "+".join(dict.fromkeys(item["token"] for item in matched))
+    params.pop("qa_kind", None)
+    params.pop("tension", None)
+    params.pop("explain_gear", None)
+    params.pop("explain_gear_gloss", None)
+    muscles = [item["muscle"] for item in matched if item["muscle"]]
+    if muscles:
+        intent.muscles = list(dict.fromkeys(muscles))
+    intent.expert = "training"
+    intent.params = params
+    return intent
+
+
 def is_draft_revision(text: str, params: dict[str, Any] | None = None) -> bool:
     """屏幕上已有草稿时，这句话是在改这一版，不是在重开一堂课。"""
     if params and params.get("exclude_exercises"):

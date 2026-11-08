@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlmodel import Session
 
-from app.brain.memory import draft_title_for_intent
+from app.brain.memory import classify_exclude_mode, draft_title_for_intent
 from app.models import DebugTrace
 from app.taxonomy import canonicalize_exercise
-from app.schemas import AgentReply, CardBlock, Suggestion, TextBlock
+from app.schemas import AgentReply, CardBlock, CardItem, Suggestion, TextBlock
+
+_DROP_NOISE = re.compile(
+    r"[^。！？\n]*?(?:想少练|练少|少点|少练|换成|换上|替代)[^。！？\n]*[。！？]?"
+)
 
 
 CHAT_SYSTEM = """【CHAT】
@@ -57,12 +62,13 @@ SYSTEM_PROMPT = """【PLAN】
 
 【约束】
 1) 对学员用「你」；不要把档案字段当称呼。
-2) 优先用候选库标准中文名；meta 含 sets、reps、muscle；抗阻可写 weight，有氧/自重不写。
+2) 优先用候选库标准中文名；meta 含 sets、reps、muscle；抗阻可写 weight，有氧/自重不写。subtitle 留空，不要写动作怎么做。
 3) 有「标题=xxx」则原样用；改稿只替换不可用项。
+4) 「单次时长=N分钟」以结构化意图为准，只用来控制容量；回复不必写出这个分钟数。若「未指定」，不要硬套 40 分钟。
 
 【格式】
 只输出 JSON：
-{"text":"...","card":{"card_type":"training_draft","title":"...","items":[{"id":"c1","title":"...","subtitle":"...","selected":true,"meta":{"sets":4,"reps":"8-10","weight":30,"muscle":"背"}}]}}
+{"text":"...","card":{"card_type":"training_draft","title":"...","items":[{"id":"c1","title":"...","subtitle":"","selected":true,"meta":{"sets":4,"reps":"8-10","weight":30,"muscle":"背"}}]}}
 """
 
 
@@ -118,17 +124,128 @@ def _draft_prompt(title: str | None, items: list[Any], intent: Any | None = None
         )
     elif exclude:
         names = "、".join(exclude)
-        tail = (
-            f"\n用户说草稿里「{names}」不可用或要换掉。请在当前草稿上改："
-            "保留其他动作与原标题，只把不可用的换成同类替代（同等课型/相近时长），"
-            "不要输出空卡片，不要把标题改成被排除的动作名，不要整堂重排。\n\n"
-        )
+        mode = params.get("exclude_mode") or classify_exclude_mode(getattr(intent, "raw", "") or "") or "replace"
+        if mode == "drop":
+            tail = (
+                f"\n用户要把草稿里的「{names}」去掉，不是换成别的。"
+                "只删除这项，不要补同类，不要新增动作，不要问是不是想少练；"
+                "其余动作和原标题保留，课可以变短。"
+                "不要把标题改成被删的动作名，不要整堂重排。\n\n"
+            )
+        else:
+            tail = (
+                f"\n用户说草稿里「{names}」不可用或要换掉。请在当前草稿上改："
+                "保留其他动作与原标题，只把不可用的换成同类替代（同等课型/相近时长），"
+                "不要输出空卡片，不要把标题改成被排除的动作名，不要整堂重排。\n\n"
+            )
     else:
         tail = (
             "\n如果用户是在改这一版（只要某几个、去掉、换成），就在这版上改，不要反问练胸、练背、练腿还是全身。"
             "如果用户是在新开一堂课，按新意图重排，不要把旧草稿里没被点名的动作都留着。\n\n"
         )
     return head + "\n".join(lines) + tail
+
+
+def _matches_exclude(title: str, excludes: list[str]) -> bool:
+    name = canonicalize_exercise(title)
+    if not name:
+        return False
+    for raw in excludes:
+        token = canonicalize_exercise(str(raw))
+        if not token:
+            continue
+        if len(token) < 2:
+            if token == name:
+                return True
+            continue
+        if token == name or token in name or name in token:
+            return True
+    return False
+
+
+def _scrub_drop_text(text: str) -> str:
+    cleaned = _DROP_NOISE.sub("", text or "")
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip(" \n，,、")
+    return cleaned or "好，这项已从这堂去掉。"
+
+
+def _card_item_from_draft(item: Any, index: int) -> CardItem:
+    if isinstance(item, CardItem):
+        return item
+    title = ""
+    meta: dict[str, Any] = {}
+    subtitle = None
+    selected = True
+    item_id = f"i{index}"
+    if isinstance(item, dict):
+        title = str(item.get("title") or "")
+        meta = dict(item.get("meta") or {})
+        subtitle = item.get("subtitle")
+        selected = bool(item.get("selected", True))
+        item_id = str(item.get("id") or item_id)
+    else:
+        title = str(getattr(item, "title", "") or "")
+        meta = dict(getattr(item, "meta", None) or {})
+        subtitle = getattr(item, "subtitle", None)
+        selected = bool(getattr(item, "selected", True))
+        item_id = str(getattr(item, "id", None) or item_id)
+    return CardItem(
+        id=item_id,
+        title=canonicalize_exercise(title) or title or f"动作{index + 1}",
+        subtitle=subtitle,
+        meta=meta,
+        selected=selected,
+    )
+
+
+def apply_drop_only(
+    blocks: list[Any],
+    intent: Any,
+    draft_items: list[Any] | None,
+    previous_title: str | None = None,
+) -> list[Any]:
+    """只删除：卡片回到上一版去掉被点名的项，不收留模型补上的替代。"""
+    params = getattr(intent, "params", None) or {}
+    if params.get("exclude_mode") != "drop":
+        return blocks
+    excludes = [str(name) for name in (params.get("exclude_exercises") or []) if name]
+    if not excludes:
+        return blocks
+
+    kept_prev = [
+        _card_item_from_draft(item, i)
+        for i, item in enumerate(draft_items or [])
+        if not _matches_exclude(
+            str(item.get("title") if isinstance(item, dict) else getattr(item, "title", "")),
+            excludes,
+        )
+    ]
+    use_previous = bool(draft_items)
+
+    out: list[Any] = []
+    for block in blocks:
+        kind = getattr(block, "kind", None)
+        if kind == "text":
+            text = _scrub_drop_text(getattr(block, "text", "") or "")
+            out.append(block.model_copy(update={"text": text}))
+            continue
+        if kind != "card":
+            out.append(block)
+            continue
+        if use_previous:
+            items = kept_prev
+        else:
+            items = [
+                item
+                for item in (getattr(block, "items", None) or [])
+                if not _matches_exclude(getattr(item, "title", ""), excludes)
+            ]
+        update: dict[str, Any] = {"items": items}
+        if previous_title:
+            update["title"] = previous_title
+        out.append(block.model_copy(update=update))
+    return out
 
 
 def _trim_to_request(blocks: list[Any], intent: Any) -> list[Any]:
@@ -242,13 +359,13 @@ async def run_chat_pipeline(
     session.add(trace)
     session.commit()
     session.refresh(trace)
-    save_exchange(
+    turn_id = save_exchange(
         session,
         user_text,
         [block.model_dump(mode="json") for block in blocks],
         suggestions=[item.model_dump() for item in suggestions],
     )
-    return AgentReply(blocks=blocks, suggestions=suggestions, trace_id=trace.id)
+    return AgentReply(blocks=blocks, suggestions=suggestions, trace_id=trace.id, turn_id=turn_id)
 
 
 def _append_memory_note(blocks: list[Any], note: str) -> list[Any]:

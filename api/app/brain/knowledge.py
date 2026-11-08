@@ -626,9 +626,46 @@ def previous_user_question(history: list[Any] | None, current: str) -> str | Non
     return current
 
 
+_TERM_CUES = (
+    "是什么",
+    "什么是",
+    "什么意思",
+    "这是啥",
+    "啥意思",
+    "没有这个",
+    "没这个",
+    "没有这种",
+    "用不了",
+    "做不了",
+)
+
+
+def _term_question(question: str) -> Grounding | None:
+    """问叫法或说没有这个动作时，不把整句当成动作名，也不列变体。说明交给模型。"""
+    if any(tail in question for tail in ("练哪里", "练哪", "怎么做", "怎么练")):
+        return None
+    if not any(cue in question for cue in _TERM_CUES):
+        return None
+    passage = (
+        f"学员说：「{question}」。\n"
+        "这是在问一个叫法，或在说自己没有这个动作。\n"
+        "用一两句口语说明那个词指什么。不要把整句当成动作名，不要列举动作库里的变体，不要让学员从名单里挑。"
+    )
+    return Grounding(
+        branch="knowledge",
+        reason="term",
+        queried=True,
+        hit=False,
+        passage=passage,
+    )
+
+
 def ground_question(question: str, history: list[Any] | None = None) -> Grounding:
     """只做检索判定。搜索是否真正调用，由上层按 search_mode 填。"""
     ensure_index()
+    term = _term_question(question)
+    if term is not None:
+        return term
     rejected = previous_user_question(history, question)
     if rejected is not None and normalize_exercise_name(question) in _REJECT or question.strip() in _REJECT:
         decided = _search("below_miss", rejected)

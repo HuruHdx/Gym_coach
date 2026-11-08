@@ -9,7 +9,7 @@ export type Profile = {
   weight_kg: number | null;
   height_cm: number | null;
   days_per_week: number;
-  session_minutes: number;
+  session_minutes: number | null;
   injuries: string[];
   preferences: string[];
   /** 聊天里确认后不再排的动作。旧数据可能没有这个字段。 */
@@ -50,6 +50,7 @@ export type AgentReply = {
   blocks: Block[];
   suggestions?: Suggestion[];
   trace_id?: number | null;
+  turn_id?: number | null;
 };
 
 export type ConversationMessage = {

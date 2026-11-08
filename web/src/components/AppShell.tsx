@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { COACH_NAME } from "../lib/brand";
 
 const tabs = [
   { to: "/", label: "今日", end: true },
@@ -29,10 +30,10 @@ export function AppShell() {
       {!onCoach && !onRecap && !onProfileEdit && !onExercise && (
         <NavLink
           to="/coach"
-          className="pressable fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 z-20 grid h-11 w-11 place-items-center rounded-full bg-ink font-display text-micro font-semibold leading-tight text-accent-ink shadow-float"
-          aria-label="打开 AI 教练"
+          className="pressable fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 z-20 grid h-11 w-11 place-items-center rounded-full bg-tint font-display text-meta font-semibold leading-tight text-accent-text shadow-float"
+          aria-label={`打开${COACH_NAME}`}
         >
-          AI
+          燃
         </NavLink>
       )}
 

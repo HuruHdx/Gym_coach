@@ -11,7 +11,9 @@
  *   draft_relation  期望的草稿关系（confirm / revise / fresh），不传不断言
  *   session_target  期望的 session_target（keep / switch / ask）
  *   card          "exists" | "none"
- *   keeps_title  该轮卡片标题应等于上一轮标题（改稿不该改标题）
+ *   keeps_title  该轮卡片标题应等于最近一张卡的标题（中间夹了问答也算改稿）
+ *   idempotent   重复同一句：不出新卡，或标题不变且条目不比上一张多
+ *   weights_kept 跟最近一张卡同名的动作，原来有重量的不能变空
  *   changed_title 该轮卡片标题应不同于上一轮（新开一堂课）
  *   min_items / max_items  卡片条目数范围
  *   items_has / items_not_has  卡片动作名单必须含 / 必须不含（子串匹配）
@@ -40,7 +42,14 @@ module.exports = (output, context) => {
 
   const errs = [];
   const tag = `第${idx + 1}轮`;
-  const prev = turns[idx - 1];
+  // 问答夹在排课中间时，上一句往往没有卡片。标题、条目数、重量都跟最近一张卡比。
+  let prev = null;
+  for (let i = idx - 1; i >= 0; i--) {
+    if (turns[i] && turns[i].card_title) {
+      prev = turns[i];
+      break;
+    }
+  }
   const items = Array.isArray(t.card_items) ? t.card_items : [];
 
   if (c.route !== undefined) {
@@ -162,6 +171,37 @@ module.exports = (output, context) => {
   if (c.drops_none) {
     const hit = c.drops_none.filter((name) => dropped.some((d) => String(d).includes(name)));
     if (hit.length) errs.push(`${tag} 不该 drop 却 drop 了：${hit.join(',')}`);
+  }
+
+  if (c.idempotent && t.card_title) {
+    if (!prev || !prev.card_title) {
+      errs.push(`${tag} 之前没有卡片，无法断言重复指令没有重排`);
+    } else if (t.card_title !== prev.card_title) {
+      errs.push(`${tag} 重复同一句却改了标题：${prev.card_title} → ${t.card_title}`);
+    } else if (t.card_item_count > prev.card_item_count) {
+      errs.push(`${tag} 重复同一句条目变多：${prev.card_item_count} → ${t.card_item_count}`);
+    }
+  }
+
+  if (c.weights_kept) {
+    const prevMeta = (prev && prev.card_items_meta) || [];
+    if (!prev || !prevMeta.length) {
+      errs.push(`${tag} 之前没有带重量的卡片，无法断言重量还在`);
+    } else if (!metas.length) {
+      errs.push(`${tag} 没有 card_items_meta，无法断言重量`);
+    } else {
+      const lost = [];
+      for (const it of metas) {
+        const title = it.title || '';
+        const old = prevMeta.find(
+          (row) => row.title === title && row.meta && row.meta.weight != null && !row.meta.bodyweight,
+        );
+        if (!old) continue;
+        const weight = (it.meta || {}).weight;
+        if (weight == null) lost.push(`${title}（上一张 ${old.meta.weight}kg）`);
+      }
+      if (lost.length) errs.push(`${tag} 改稿丢了重量：${lost.join('，')}`);
+    }
   }
 
   const text = t.text_block || '';

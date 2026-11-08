@@ -55,7 +55,7 @@ class Profile(SQLModel, table=True):
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
     days_per_week: int = 4
-    session_minutes: int = 45
+    session_minutes: Optional[int] = None
     # 器械/场景偏好：目录 category 白名单（器械|自由重量|绳索|自重）
     injuries: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     preferences: list[str] = Field(default_factory=list, sa_column=Column(JSON))

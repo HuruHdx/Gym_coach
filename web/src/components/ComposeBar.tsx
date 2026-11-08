@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../lib/api";
+import { COACH_NAME } from "../lib/brand";
 import type { AgentReply } from "../types";
 
 type Props = {
@@ -10,7 +11,7 @@ type Props = {
 
 export function ComposeBar({
   onReply,
-  placeholder = "询问 AI 教练… 例如「今天练胸」",
+  placeholder = `问${COACH_NAME}，比如「今天练胸」`,
   autoFocus,
 }: Props) {
   const [text, setText] = useState("");

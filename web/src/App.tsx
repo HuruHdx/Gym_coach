@@ -29,9 +29,10 @@ export default function App() {
   });
 
   function enterAuthed() {
-    // 换账号必须清缓存，否则「我的」会闪旧用户的 PR / 训练次数
+    // 换账号必须清缓存，否则「我的」/教练会闪旧用户数据
     try {
       localStorage.removeItem("gym-coach-profile-extras");
+      sessionStorage.removeItem("last_reply");
     } catch {
       /* ignore */
     }

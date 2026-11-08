@@ -128,7 +128,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                             "properties": {
                                 "id": {"type": "string"},
                                 "title": {"type": "string"},
-                                "subtitle": {"type": "string"},
+                                "subtitle": {"type": "string", "description": "留空。不要写做法或要领。"},
                                 "selected": {"type": "boolean"},
                                 "meta": {
                                     "type": "object",

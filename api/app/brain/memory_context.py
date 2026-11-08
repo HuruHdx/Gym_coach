@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlmodel import Session, select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.brain.memory import format_profile_for_llm
 from app.models import ActiveChat, ChatTurn, Profile, utcnow
@@ -185,23 +186,29 @@ def _row_to_dict(row: ChatTurn) -> dict[str, Any]:
 
 
 def _active_chat_q():
+    """按当前用户取活跃段。JWT 用户绝不碰 user_id IS NULL 的旧全局行。"""
     stmt = select(ActiveChat)
     uid = current_user_id()
     if uid is not None:
-        stmt = stmt.where(ActiveChat.user_id == uid)
-    return stmt
+        return stmt.where(ActiveChat.user_id == uid)
+    # 评测 APP_TOKEN：内存库里只有无主行
+    return stmt.where(ActiveChat.user_id == None)  # noqa: E711
 
 
 def load_turns(session: Session) -> list[ChatTurn]:
+    """按当前用户拉流水。缺 uid 时只取 NULL（评测库），绝不回「全表」。"""
     stmt = select(ChatTurn).order_by(ChatTurn.id)
     uid = current_user_id()
     if uid is not None:
         stmt = stmt.where(ChatTurn.user_id == uid)
+    else:
+        stmt = stmt.where(ChatTurn.user_id == None)  # noqa: E711
     return list(session.exec(stmt).all())
 
 
 def get_or_create_active_conversation_id(session: Session) -> str:
     """返回当前活跃 conversation_id；没有则新建，并把今天无归属的旧行挂到新段上。"""
+    uid = current_user_id()
     active = session.exec(_active_chat_q().limit(1)).first()
     if active and active.conversation_id:
         return active.conversation_id
@@ -216,13 +223,14 @@ def get_or_create_active_conversation_id(session: Session) -> str:
     for row in orphan_today:
         row.conversation_id = cid
         session.add(row)
-    session.add(ActiveChat(user_id=current_user_id(), conversation_id=cid, updated_at=utcnow()))
+    session.add(ActiveChat(user_id=uid, conversation_id=cid, updated_at=utcnow()))
     session.commit()
     return cid
 
 
 def start_new_conversation(session: Session) -> str:
     """开新对话段：旧流水保留，活跃指针切到新 id。"""
+    uid = current_user_id()
     cid = str(uuid4())
     active = session.exec(_active_chat_q().limit(1)).first()
     now = utcnow()
@@ -231,7 +239,7 @@ def start_new_conversation(session: Session) -> str:
         active.updated_at = now
         session.add(active)
     else:
-        session.add(ActiveChat(user_id=current_user_id(), conversation_id=cid, updated_at=now))
+        session.add(ActiveChat(user_id=uid, conversation_id=cid, updated_at=now))
     session.commit()
     return cid
 
@@ -396,7 +404,7 @@ def save_exchange(
     blocks: list[Any],
     *,
     suggestions: list[Any] | None = None,
-) -> None:
+) -> int | None:
     """一轮来回追加入当前 conversation，不覆盖旧记录。"""
     today = date.today()
     cid = get_or_create_active_conversation_id(session)
@@ -439,17 +447,39 @@ def save_exchange(
                     "prompt": getattr(tip, "prompt", "") or "",
                 }
             )
-    session.add(
-        ChatTurn(
-            user_id=uid,
-            conversation_id=cid,
-            session_day=today,
-            role="assistant",
-            text=text or "",
-            card_title=card_title,
-            card_items=card_items,
-            card=card_payload,
-            suggestions=tip_rows,
-        )
+    assistant = ChatTurn(
+        user_id=uid,
+        conversation_id=cid,
+        session_day=today,
+        role="assistant",
+        text=text or "",
+        card_title=card_title,
+        card_items=card_items,
+        card=card_payload,
+        suggestions=tip_rows,
     )
+    session.add(assistant)
     session.commit()
+    session.refresh(assistant)
+    return assistant.id
+
+
+def mark_card_adopted(session: Session, turn_id: int, adopted_session_id: int) -> bool:
+    """采纳后把这张卡片标成已采纳，再进教练页不会又出现采纳按钮。"""
+    turn = session.get(ChatTurn, turn_id)
+    if turn is None or turn.role != "assistant" or not isinstance(turn.card, dict):
+        return False
+    uid = current_user_id()
+    if uid is not None and turn.user_id != uid:
+        return False
+    card = dict(turn.card)
+    meta = dict(card.get("meta") or {})
+    meta["adopted_session_id"] = adopted_session_id
+    card["status"] = "confirmed"
+    card["actions"] = []
+    card["meta"] = meta
+    turn.card = card
+    flag_modified(turn, "card")
+    session.add(turn)
+    session.commit()
+    return True

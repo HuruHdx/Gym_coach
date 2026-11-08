@@ -44,9 +44,9 @@ export function Onboarding({ onDone }: Props) {
   const [goal, setGoal] = useState<Goal>("增肌");
   const [experience, setExperience] = useState<Experience>("进阶");
   const [days, setDays] = useState(4);
-  const [minutes, setMinutes] = useState<number>(40);
+  const [minutes, setMinutes] = useState<number | null>(null);
   const [customMinutes, setCustomMinutes] = useState(false);
-  const [customText, setCustomText] = useState("40");
+  const [customText, setCustomText] = useState("");
   const [scene, setScene] = useState<SceneId>("gym");
   const [parts, setParts] = useState<string[]>([]);
   const [injuryNote, setInjuryNote] = useState("");
@@ -241,8 +241,18 @@ export function Onboarding({ onDone }: Props) {
                 ))}
               </div>
 
-              <p className="mt-5 text-[11px] font-semibold tracking-wide text-soft">单次多久</p>
+              <p className="mt-5 text-[11px] font-semibold tracking-wide text-soft">单次多久（可不选）</p>
               <div className="mt-2 flex flex-wrap gap-2">
+                <Pill
+                  selected={!customMinutes && minutes == null}
+                  onClick={() => {
+                    setCustomMinutes(false);
+                    setMinutes(null);
+                    setCustomText("");
+                  }}
+                >
+                  未填
+                </Pill>
                 {SESSION_MINUTE_OPTIONS.map((item) => (
                   <Pill
                     key={item}
@@ -259,12 +269,12 @@ export function Onboarding({ onDone }: Props) {
                   selected={customMinutes}
                   onClick={() => {
                     setCustomMinutes(true);
-                    if ((SESSION_MINUTE_OPTIONS as readonly number[]).includes(minutes)) {
+                    if (minutes != null && (SESSION_MINUTE_OPTIONS as readonly number[]).includes(minutes)) {
                       setCustomText(String(minutes));
                     }
                   }}
                 >
-                  {customMinutes && !(SESSION_MINUTE_OPTIONS as readonly number[]).includes(minutes)
+                  {customMinutes && minutes != null && !(SESSION_MINUTE_OPTIONS as readonly number[]).includes(minutes)
                     ? `${minutes} 分`
                     : "自定义"}
                 </Pill>
@@ -287,8 +297,8 @@ export function Onboarding({ onDone }: Props) {
                     onBlur={() => {
                       const n = Number(customText);
                       if (!Number.isFinite(n) || n < 15 || n > 180) {
-                        setCustomText("40");
-                        setMinutes(40);
+                        setCustomText("");
+                        setMinutes(null);
                       } else {
                         setMinutes(Math.round(n));
                         setCustomText(String(Math.round(n)));
@@ -302,7 +312,7 @@ export function Onboarding({ onDone }: Props) {
               )}
 
               <p className="mt-2.5 text-[11px] leading-relaxed text-muted">
-                {exercisesForMinutes(minutes)} · {sceneTitle}
+                {minutes == null ? "排课时再按你说的时长来" : `${exercisesForMinutes(minutes)} · ${sceneTitle}`}
               </p>
             </Question>
           )}

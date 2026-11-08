@@ -69,6 +69,7 @@ expect('thread 不该出卡却出了', runThread(M([CHEST]), { card: 'none' }), 
 expect('thread 改稿保留标题', runThread(M([CHEST, CHEST_REVISED]), { turn: 2, keeps_title: true }), true);
 expect('thread 改稿被当成新开课', runThread(M([CHEST, CHEST_NEW]), { turn: 2, keeps_title: true }), false);
 expect('thread 没上一张卡不能断言标题不变', runThread(M([CHAT, CHEST]), { turn: 2, keeps_title: true }), false);
+expect('thread 问答夹在中间仍比最近一张卡', runThread(M([CHEST, CHAT, CHEST_REVISED]), { turn: 3, keeps_title: true }), true);
 expect('thread 换部位标题变了', runThread(M([CHEST, CHEST_NEW]), { turn: 2, changed_title: true }), true);
 expect('thread 该换部位却还是旧标题', runThread(M([CHEST, CHEST_REVISED]), { turn: 2, changed_title: true }), false);
 expect('thread 没卡片时 changed_title 不能空过', runThread(M([CHEST, CHAT]), { turn: 2, changed_title: true }), false);
@@ -78,11 +79,29 @@ expect('thread 条目数下限', runThread(M([CHEST_REVISED]), { turn: 1, min_it
 expect('thread 条目数上限', runThread(M([CHEST]), { turn: 1, max_items: 2 }), false);
 expect('thread 不该出现龙门架', runThread(M([CHEST]), { turn: 1, items_not_has: ['龙门架'] }), false);
 expect('thread 换成上斜', runThread(M([CHEST]), { turn: 1, items_has: ['上斜'] }), true);
+const WEIGHTED = T({
+  card_items_meta: ITEMS.map((title, i) => ({ title, selected: true, meta: { sets: 3, weight: 20 + i } })),
+});
+const LOST_WEIGHT = T({
+  card_items: REVISED_ITEMS,
+  card_items_meta: [
+    { title: '哑铃卧推', selected: true, meta: { sets: 4, weight: 20 } },
+    { title: '上斜哑铃卧推', selected: true, meta: { sets: 3 } },
+  ],
+});
+expect('thread 改稿丢掉同名重量', runThread(M([WEIGHTED, LOST_WEIGHT]), { turn: 2, weights_kept: true }), false);
+expect(
+  'thread 改稿留下同名重量',
+  runThread(M([WEIGHTED, T({ card_items: REVISED_ITEMS, card_items_meta: REVISED_ITEMS.map((title, i) => ({ title, selected: true, meta: { sets: 3, weight: 20 + i } })) })]), { turn: 2, weights_kept: true }),
+  true,
+);
 expect('thread 删一项数变少', runThread(M([CHEST, CHEST_REVISED]), { turn: 2, fewer_items_than_prev: true }), true);
 expect('thread 说删却没删', runThread(M([CHEST, T({})]), { turn: 2, fewer_items_than_prev: true }), false);
 expect('thread 第一个动作没被动', runThread(M([CHEST, CHEST_REVISED]), { turn: 2, same_first_item: true }), true);
 expect('thread 第一个动作被动了', runThread(M([CHEST, T({ card_items: ['上斜哑铃卧推', '龙门架夹胸'], card_items_meta: metaFor(['上斜哑铃卧推', '龙门架夹胸'], 3) })]), { turn: 2, same_first_item: true }), false);
 expect('thread 没有上一轮不能比较条目数', runThread(M([CHEST]), { turn: 1, fewer_items_than_prev: true }), false);
+expect('thread 重复指令不出卡也算', runThread(M([CHEST, CHAT]), { turn: 2, idempotent: true }), true);
+expect('thread 重复指令条目变多', runThread(M([CHEST_REVISED, CHEST]), { turn: 2, idempotent: true }), false);
 
 // ---------- thread.js：组数（需要 card_items_meta） ----------
 expect('thread 组数都改成 4', runThread(M([T({ card_items_meta: META(4) })]), { turn: 1, sets_all: 4 }), true);

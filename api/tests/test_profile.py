@@ -25,10 +25,27 @@ def test_build_profile_summary_includes_new_fields():
     assert "档案：" in s
     assert "身高：175cm" in s
     assert "单次约：45分钟" in s
-    assert "器械偏好：自由重量、自重" in s
+    assert "可用器械：自由重量、自重" in s
     assert "伤痛：腰" in s
+    assert "以后避开" not in s
     assert "长期目标：增肌" in s
     assert "有训练基础" in s
+
+
+def test_gym_scene_is_not_listed_as_four_preferences():
+    p = Profile(
+        goal=Goal.BULK,
+        experience=Experience.ADVANCED,
+        preferences=["自由重量", "器械", "绳索", "自重"],
+        injuries=[],
+        avoid_exercises="[]",
+    )
+    s = build_profile_summary(p)
+    assert "可用器械：不限" in s
+    assert "器械偏好" not in s
+    assert "伤痛：未填" in s
+    assert "以后避开" not in s
+    assert "[]" not in s
 
 
 def test_cardio_profile_summary_demotes_long_term_goal():
@@ -185,6 +202,60 @@ def test_apply_profile_defaults_injects_equipment_and_minutes():
     out = apply_profile_defaults(intent, p)
     assert out.params["equipment"] == ["自重"]
     assert out.params["session_minutes"] == 30
+    assert out.params["minutes_source"] == "profile"
+
+
+def test_apply_profile_defaults_overrides_hallucinated_minutes():
+    """意图模型常瞎填 minutes=40；本句没提时长时必须跟画像。"""
+    p = Profile(session_minutes=60, preferences=["自重"])
+    intent = Intent(
+        expert="training",
+        muscles=["胸"],
+        raw="今天练胸",
+        params={"session_minutes": 40},
+    )
+    out = apply_profile_defaults(intent, p)
+    assert out.params["session_minutes"] == 60
+    assert out.params["minutes_source"] == "profile"
+
+
+def test_apply_profile_defaults_keeps_spoken_minutes():
+    p = Profile(session_minutes=60)
+    intent = Intent(
+        expert="training",
+        muscles=["胸"],
+        raw="今天练胸，安排40分钟",
+        params={"session_minutes": 40},
+    )
+    out = apply_profile_defaults(intent, p)
+    assert out.params["session_minutes"] == 40
+    assert out.params["minutes_source"] == "utterance"
+
+
+def test_apply_profile_defaults_unset_when_no_profile_minutes():
+    """画像没填时长 + 本句没提 → 清掉瞎填，标记 unset。"""
+    p = Profile(session_minutes=None, preferences=["自重"])
+    intent = Intent(
+        expert="training",
+        muscles=["胸"],
+        raw="今天练胸",
+        params={"session_minutes": 40},
+    )
+    out = apply_profile_defaults(intent, p)
+    assert "session_minutes" not in out.params
+    assert out.params["minutes_source"] == "unset"
+
+
+def test_apply_profile_defaults_unset_without_profile():
+    intent = Intent(
+        expert="training",
+        muscles=["胸"],
+        raw="今天练胸",
+        params={"session_minutes": 40},
+    )
+    out = apply_profile_defaults(intent, None)
+    assert "session_minutes" not in out.params
+    assert out.params["minutes_source"] == "unset"
 
 
 def test_apply_profile_defaults_skips_full_gym_preferences():

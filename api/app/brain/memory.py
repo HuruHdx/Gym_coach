@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -125,6 +127,31 @@ def _level_phrase(experience: object) -> str:
     return _LEVEL_FOR_PROMPT.get(raw, raw)
 
 
+_ALL_GEAR = frozenset({"自由重量", "器械", "绳索", "自重"})
+
+
+def _as_name_list(value: Any) -> list[str]:
+    """画像列表字段。库里偶发把 JSON 存成字符串 '[]'，不能原样写进提示词。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw or raw in ("[]", "null"):
+            return []
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return [raw]
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text and text not in ("[]", "null"):
+            out.append(text)
+    return out
+
+
 def format_profile_for_llm(
     profile: Profile | None,
     *,
@@ -134,21 +161,28 @@ def format_profile_for_llm(
     del modalities  # 课型不再决定档案里藏哪些字段
     if not profile:
         return "档案：无"
-    injuries = "、".join(profile.injuries) if profile.injuries else "无"
-    prefs = "、".join(profile.preferences) if profile.preferences else "不限"
-    avoid = "、".join(profile.avoid_exercises) if getattr(profile, "avoid_exercises", None) else ""
+    injuries = _as_name_list(profile.injuries)
+    prefs = _as_name_list(profile.preferences)
+    avoid = _as_name_list(getattr(profile, "avoid_exercises", None))
+    # 选「健身房」会存下四类标签，意思是都能用，不是四项偏好
+    if not prefs or _ALL_GEAR <= set(prefs):
+        gear = "不限（选了健身房：四类都能用，不是偏好排序）"
+    else:
+        gear = "、".join(prefs)
+    injury = "、".join(injuries) if injuries else "未填"
     height = f"{profile.height_cm:g}cm" if profile.height_cm else "未填"
     weight = f"{profile.weight_kg:g}kg" if profile.weight_kg is not None else "未填"
-    minutes = getattr(profile, "session_minutes", None) or 45
+    raw_minutes = getattr(profile, "session_minutes", None)
+    minutes = f"{int(raw_minutes)}分钟" if raw_minutes is not None else "未填"
     level = _level_phrase(profile.experience)
     line = (
         f"训练经验：{level}；长期目标：{profile.goal.value}；"
         f"身高：{height}；体重：{weight}；"
-        f"每周：{profile.days_per_week}天；单次约：{minutes}分钟；"
-        f"器械偏好：{prefs}；伤痛：{injuries}"
+        f"每周：{profile.days_per_week}天；单次约：{minutes}；"
+        f"可用器械：{gear}；伤痛：{injury}"
     )
     if avoid:
-        line += f"；以后避开：{avoid}"
+        line += f"；以后避开：{'、'.join(avoid)}"
     return f"档案：{line}"
 
 
@@ -161,18 +195,50 @@ def build_profile_summary(
     return format_profile_for_llm(profile, modalities=modalities)
 
 
+def _utterance_session_minutes(raw: str) -> int | None:
+    """本句是否明示了分钟数。意图模型爱瞎填 40，不能当用户说的。"""
+    hit = re.search(r"(\d{1,3})\s*分钟", raw or "")
+    if not hit:
+        return None
+    minutes = int(hit.group(1))
+    if 15 <= minutes <= 180:
+        return minutes
+    return None
+
+
+def _apply_session_minutes(params: dict[str, Any], raw: str, profile: Profile | None) -> None:
+    """时长优先级：本句明示 > 画像已填 > 未指定（清掉模型瞎填的 40）。"""
+    spoken_minutes = _utterance_session_minutes(raw)
+    if spoken_minutes is not None:
+        params["session_minutes"] = spoken_minutes
+        params["minutes_source"] = "utterance"
+        return
+    profile_minutes = getattr(profile, "session_minutes", None) if profile else None
+    if profile_minutes is not None and 15 <= int(profile_minutes) <= 180:
+        params["session_minutes"] = int(profile_minutes)
+        params["minutes_source"] = "profile"
+        return
+    # 画像未填且本句没提：不要用模型臆造的分钟数
+    params.pop("session_minutes", None)
+    params["minutes_source"] = "unset"
+
+
 def apply_profile_defaults(intent: Intent, profile: Profile | None) -> Intent:
     """画像默认约束：器械偏好、时长；本句没说 goal 时，抗阻课才回落画像目标。"""
-    if not profile:
-        return intent
     params = dict(intent.params or {})
+    _apply_session_minutes(params, intent.raw or "", profile)
+    if not profile:
+        return Intent(
+            expert=intent.expert,
+            muscles=list(intent.muscles),
+            raw=intent.raw,
+            params=params,
+        )
     prefs = [p for p in (profile.preferences or []) if p in ("器械", "自由重量", "绳索", "自重")]
     if prefs and not params.get("equipment"):
         # 四类都勾 ≈ 不限，不写死限制
         if set(prefs) != {"器械", "自由重量", "绳索", "自重"}:
             params["equipment"] = prefs
-    minutes = getattr(profile, "session_minutes", None) or 45
-    params.setdefault("session_minutes", minutes)
 
     spoken = _extract_goal(intent.raw or "")
     if spoken:
@@ -545,6 +611,31 @@ def draft_title_for_intent(intent: Intent) -> str | None:
     return "+".join(muscles)
 
 
+# 排除动作不另开字段。原话里出现替换说法就补同类；只说删掉就不补。
+_REPLACE_CUES = ("换成", "换掉", "换一个", "换个", "没有", "用不了", "做不了", "没法")
+_DROP_CUES = ("去掉", "删掉", "删除", "删了", "拿掉", "不要这个", "不要了", "不做这个", "别排")
+
+
+def classify_exclude_mode(text: str) -> str | None:
+    """原话同时出现「去掉」和「换成」时算替换。都没有就返回 None。"""
+    raw = text or ""
+    if any(cue in raw for cue in _REPLACE_CUES):
+        return "replace"
+    if any(cue in raw for cue in _DROP_CUES):
+        return "drop"
+    return None
+
+
+def stamp_exclude_mode(intent: Intent) -> None:
+    """有排除项时写入 drop / replace，供提示词和校验共用。"""
+    if not (intent.params or {}).get("exclude_exercises"):
+        return
+    mode = intent.params.get("exclude_mode")
+    if mode in ("drop", "replace"):
+        return
+    intent.params["exclude_mode"] = classify_exclude_mode(intent.raw or "") or "replace"
+
+
 def format_intent_for_prompt(intent: Intent, profile: Profile | None = None) -> str:
     """把结构化意图写成模型可读的约束说明（不含路由字段 agent/ready）。"""
     parts: list[str] = []
@@ -585,8 +676,16 @@ def format_intent_for_prompt(intent: Intent, profile: Profile | None = None) -> 
 
     if intent.params.get("intensity") == "low":
         parts.append("强度偏好=低强度恢复(RPE5-6)")
+    elif intent.params.get("intensity_demand") == "heavy":
+        parts.append(
+            "强度=用户坚持加重（尽管有伤）：改成更低次数、更大重量。"
+            "text 只写按你的要求加重了，伤处不适就停。不要改成有氧"
+        )
     elif intent.params.get("intensity") == "high":
-        parts.append("强度偏好=高强度心肺(RPE7-8)")
+        if strength:
+            parts.append("强度=把这堂抗阻练难一点（可加组或略增重量）。不要写成有氧或心肺冲刺")
+        else:
+            parts.append("强度偏好=高强度心肺(RPE7-8)")
 
     title = draft_title_for_intent(intent)
     if intent.params.get("focus_exercises"):
@@ -613,10 +712,23 @@ def format_intent_for_prompt(intent: Intent, profile: Profile | None = None) -> 
     if intent.params.get("equipment"):
         parts.append(f"器械限制={','.join(intent.params['equipment'])}（勿推荐场馆固定器械/绳索）")
     if intent.params.get("session_minutes"):
+        mins = intent.params["session_minutes"]
+        src = intent.params.get("minutes_source")
+        src_note = "来自本句" if src == "utterance" else "来自学员档案"
         if strength:
-            parts.append(f"单次时长≈{intent.params['session_minutes']}分钟（控制动作数量与组数密度）")
+            parts.append(
+                f"单次时长={mins}分钟（{src_note}；只用来控制动作数量与组数，"
+                f"回复里不要硬写「{mins}分钟」。短期记忆里别的分钟数不要拿来改这个时长）"
+            )
         else:
-            parts.append(f"单次时长≈{intent.params['session_minutes']}分钟")
+            parts.append(
+                f"单次时长={mins}分钟（{src_note}；按此时长排，回复里不要硬写分钟数，也不要改成别的默认）"
+            )
+    elif intent.params.get("minutes_source") == "unset":
+        parts.append(
+            "单次时长=未指定（档案未填且本句未提；可按常规单次容量排，"
+            "文案不要硬写「40分钟」；若需要可先问一句想练多久）"
+        )
     if intent.params.get("fatigue"):
         parts.append("状态=疲劳/降阶（勿加重，优先低轴向负荷与控组）")
     if intent.params.get("flexible"):
@@ -624,10 +736,24 @@ def format_intent_for_prompt(intent: Intent, profile: Profile | None = None) -> 
     if intent.params.get("exclusive_focus"):
         parts.append("范围=只排点名动作，不要再加其他动作")
     if intent.params.get("exclude_exercises"):
-        parts.append(
-            "排除动作="
-            + "+".join(intent.params["exclude_exercises"])
-        )
+        stamp_exclude_mode(intent)
+        names = "+".join(intent.params["exclude_exercises"])
+        if intent.params.get("exclude_mode") == "drop":
+            parts.append(
+                f"排除动作={names}（只删除，不要补同类，不要问是不是想少练；课可以变短）"
+            )
+        else:
+            terms = [part for part in str(intent.params.get("explain_term") or "").split("+") if part]
+            gear_note = ""
+            if terms:
+                shown = "、".join(f"「{part}」" for part in terms)
+                gear_note = (
+                    f"；text 先用一句话说明{shown}指什么，不要列举变体；"
+                    f"替代动作的名字不要再带{shown}"
+                )
+            parts.append(
+                f"排除动作={names}（换成同类替代，其余动作、标题和时长保持{gear_note}）"
+            )
 
     # 正向处方；否定规则留给 SYSTEM_PROMPT
     if not strength:

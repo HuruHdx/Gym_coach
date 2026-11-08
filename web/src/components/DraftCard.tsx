@@ -152,7 +152,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
           {(selected.length ? selected : card.items).slice(0, 6).map((it) => (
             <li key={it.id}>
               · {it.title}
-              {it.subtitle ? ` · ${it.subtitle}` : ""}
+              {` · ${rebuildSubtitle(it.meta)}`}
             </li>
           ))}
         </ul>
@@ -249,8 +249,8 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
                     className="mt-1 flex w-full min-w-0 items-start gap-1 pl-[30px] text-left text-xs font-semibold text-muted hover:text-ink"
                     onClick={() => setEditingId(open ? null : it.id)}
                   >
-                    <span className="min-w-0 flex-1 leading-relaxed">
-                      {it.subtitle || rebuildSubtitle(it.meta)}
+                    <span className="num min-w-0 flex-1 leading-relaxed">
+                      {rebuildSubtitle(it.meta)}
                     </span>
                     <span className="shrink-0 whitespace-nowrap text-[10px] text-accent-ink/70">
                       {open ? "▲ 收起" : minutes != null ? "▼ 调时长" : noLoad ? "▼ 调轮数" : "▼ 调重量/组数"}

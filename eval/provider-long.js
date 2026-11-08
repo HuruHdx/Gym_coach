@@ -27,9 +27,16 @@ class GymCoachThreadProvider {
 
   async callApi(prompt, context) {
     const vars = (context && context.vars) || {};
-    const turns = vars.turns || [];
+    // promptfoo 会把 vars 顶层数组笛卡尔展开；turns 必须放在 thread.turns 里。
+    // 兼容旧写法：vars.turns 仍是数组时也能跑。
+    const rawTurns = (vars.thread && vars.thread.turns) || vars.turns || [];
+    const turns = Array.isArray(rawTurns)
+      ? rawTurns
+      : typeof rawTurns === 'string' && rawTurns.trim()
+        ? [rawTurns]
+        : [];
     if (!turns.length) {
-      return { error: '用例缺少 turns' };
+      return { error: '用例缺少 turns（请写在 vars.thread.turns）' };
     }
 
     const body = {

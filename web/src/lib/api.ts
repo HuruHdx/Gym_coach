@@ -15,6 +15,11 @@ export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(AUTH_FLAG);
   localStorage.removeItem(PROFILE_EXTRAS_KEY);
+  try {
+    sessionStorage.removeItem("last_reply");
+  } catch {
+    /* ignore */
+  }
 }
 
 export function markAuthed() {

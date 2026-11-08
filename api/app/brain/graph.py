@@ -22,6 +22,7 @@ from typing_extensions import TypedDict
 from app.tenancy import get_current_profile
 
 from app.brain.intent_rewrite import (
+    bind_rejected_draft_item,
     build_clarification,
     generate_clarification,
     needs_clarification,
@@ -35,14 +36,30 @@ from app.brain.memory import (
     assemble_memory,
     draft_title_for_intent,
     format_intent_for_prompt,
+    stamp_exclude_mode,
 )
 from app.brain.pipeline import (
     _normalize_card_title,
     _select_all_items,
     _trim_to_request,
+    apply_drop_only,
 )
 from app.brain.memory import build_profile_summary
-from app.brain.validate import validate_and_build_blocks
+from app.brain.validate import (
+    apply_heavy_demand_text,
+    apply_injury_insist,
+    carry_forward_weights,
+    injury_advice_suggestions,
+    injury_confirm,
+    intensity_advice,
+    is_intensity_raise,
+    named_banned_exercises,
+    reconcile_requested_injury_drop,
+    title_matches_dropped,
+    user_demands_heavier,
+    user_insists,
+    validate_and_build_blocks,
+)
 from app.config import settings
 from app.models import Profile
 
@@ -150,19 +167,44 @@ async def rewrite_intent_node(state: ChatState) -> dict[str, Any]:
         profile,
         include_profile=False,
     )
-    intent = apply_profile_defaults(
-        await rewrite_intent(
-            state["user_text"],
-            profile=profile,
-            history=state.get("history") or [],
-            context=context,
-            draft_title=state.get("draft_title"),
+    intent = bind_rejected_draft_item(
+        apply_profile_defaults(
+            await rewrite_intent(
+                state["user_text"],
+                profile=profile,
+                history=state.get("history") or [],
+                context=context,
+                draft_title=state.get("draft_title"),
+            ),
+            profile,
         ),
-        profile,
+        state.get("draft_items") or [],
     )
     has_draft = bool(state.get("draft_items"))
+    injuries = list(profile.injuries) if profile else []
+    raw_text = intent.raw or state["user_text"]
+    if injuries and user_demands_heavier(raw_text, state.get("history")):
+        intent.params["intensity_demand"] = "heavy"
     formatted = format_intent_for_prompt(intent, profile=profile)
     route = _pick_route(intent, has_draft=has_draft)
+    named = named_banned_exercises(raw_text, list(intent.params.get("focus_exercises") or []), injuries)
+    if route == "plan" and named and not user_insists(raw_text, state.get("history"), named):
+        route = "clarify"
+        intent.params["injury_confirm"] = injury_confirm(
+            injuries,
+            named,
+            intent.raw or state["user_text"],
+            list(intent.params.get("focus_exercises") or []),
+            state.get("draft_title"),
+        )
+    elif (
+        route == "plan"
+        and injuries
+        and is_intensity_raise(raw_text)
+        and not intent.params.get("intensity_demand")
+    ):
+        route = "clarify"
+        intent.params["intensity_advice"] = intensity_advice(injuries)
     payload = {
         "expert": intent.expert,
         "muscles": list(intent.muscles),
@@ -188,6 +230,21 @@ async def rewrite_intent_node(state: ChatState) -> dict[str, Any]:
 async def clarify_node(state: ChatState) -> dict[str, Any]:
     started = time.perf_counter()
     intent = _intent(state["intent"])
+    confirm = intent.params.get("injury_confirm") or intent.params.get("intensity_advice")
+    if isinstance(confirm, dict) and str(confirm.get("text") or "").strip():
+        text = str(confirm["text"]).strip()
+        options = list(confirm.get("suggestions") or [])
+        suggestions = [{"label": o["label"], "prompt": o["prompt"]} for o in options if o.get("label") and o.get("prompt")]
+        return {
+            "suggestions": suggestions,
+            "blocks": [{"kind": "text", "text": text}],
+            **_step(
+                "clarify",
+                started,
+                text=text,
+                suggestions=[s["label"] for s in suggestions],
+            ),
+        }
     text, options = build_clarification(intent)
     # 意图空白：话术由模型按原话写，不走写死文案
     if not text:
@@ -483,14 +540,61 @@ async def nutrition_reply_node(state: ChatState) -> dict[str, Any]:
 async def validate_node(state: ChatState) -> dict[str, Any]:
     started = time.perf_counter()
     intent = _intent(state["intent"])
-    blocks = validate_and_build_blocks(state.get("raw") or {}, state.get("injuries") or [])
+    stamp_exclude_mode(intent)
+    injuries = list(state.get("injuries") or [])
+    raw_text = intent.raw or state.get("user_text") or ""
+    focus = list(intent.params.get("focus_exercises") or [])
+    named = named_banned_exercises(raw_text, focus, injuries)
+    insist = user_insists(raw_text, state.get("history"), named)
+    blocks = validate_and_build_blocks(
+        state.get("raw") or {},
+        injuries,
+        allow=named if insist else None,
+    )
+    suggestions: list[dict[str, str]] = []
+    if named and insist:
+        muscle = intent.muscles[0] if len(intent.muscles) == 1 else "全身"
+        blocks = apply_injury_insist(
+            blocks,
+            names=named,
+            injuries=injuries,
+            raw=raw_text,
+            focus=focus,
+            muscle=muscle,
+        )
+    elif named:
+        blocks = reconcile_requested_injury_drop(
+            blocks,
+            raw=raw_text,
+            focus=focus,
+            injuries=injuries,
+            previous_title=state.get("draft_title"),
+            names=named,
+        )
+        suggestions = injury_advice_suggestions(named, raw_text, focus)
     titled = draft_title_for_intent(intent)
-    # 改草稿换掉不可用动作时，保留模型沿用的原标题，不要用排除项当标题
-    if titled and not intent.params.get("exclude_exercises"):
+    dropped_names = [
+        str(name)
+        for block in blocks
+        if getattr(block, "kind", None) == "card"
+        for name in ((block.meta or {}).get("dropped") or [])
+    ]
+    # 改草稿换掉不可用动作时，保留模型沿用的原标题，不要用排除项当标题。
+    # 点名动作已被伤痛拿掉时，也不要把课名改成这个动作。
+    if titled and not intent.params.get("exclude_exercises") and not title_matches_dropped(titled, dropped_names):
         blocks = [
             block.model_copy(update={"title": titled}) if getattr(block, "kind", None) == "card" else block
             for block in blocks
         ]
+    blocks = apply_drop_only(
+        blocks,
+        intent,
+        state.get("draft_items") or [],
+        previous_title=state.get("draft_title"),
+    )
+    blocks = carry_forward_weights(blocks, state.get("draft_items") or [])
+    if intent.params.get("intensity_demand") == "heavy":
+        blocks = apply_heavy_demand_text(blocks, injuries)
     blocks = [_normalize_card_title(block) for block in blocks]
     blocks = [_select_all_items(block) for block in blocks]
     # 仅「只要点名这几个」时裁草稿；普通侧重/部位课交给 LLM 从候选库选，避免误匹配裁空
@@ -504,6 +608,7 @@ async def validate_node(state: ChatState) -> dict[str, Any]:
     titles = [b.get("title") for b in dumped if b.get("kind") == "card"]
     return {
         "blocks": dumped,
+        "suggestions": suggestions,
         **_step("validate", started, titles=titles, blocks=len(dumped)),
     }
 
