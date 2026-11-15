@@ -86,6 +86,53 @@ def issue_access_token(user_id: int) -> str:
     return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALG)
 
 
+def issue_admin_token(admin_name: str = "admin") -> str:
+    """签发 gym-admin 工作台 JWT。"""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": admin_name,
+        "iat": now,
+        "exp": now + timedelta(days=max(1, settings.jwt_expire_days)),
+        "typ": "admin",
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALG)
+
+
+def decode_admin_token(token: str) -> str:
+    try:
+        payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALG])
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=401, detail="Token expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
+    if payload.get("typ") != "admin":
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    sub = str(payload.get("sub") or "").strip()
+    if not sub:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    return sub
+
+
+def require_admin(
+    creds: HTTPAuthorizationCredentials | None = Security(_bearer),
+) -> AuthContext:
+    """后台鉴权：admin JWT 或 APP_TOKEN。"""
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = creds.credentials
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    if token == settings.app_token:
+        return AuthContext(token=token, user_id=None)
+    decode_admin_token(token)
+    return AuthContext(token=token, user_id=None)
+
+
+def verify_admin_password(password: str) -> bool:
+    expected = (settings.admin_password or "").strip() or settings.app_token
+    return bool(password) and password == expected
+
+
 def decode_access_token(token: str) -> int:
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALG])

@@ -66,6 +66,62 @@ class MockLLM(LLMClient):
         temperature: float = TEMPERATURE_COPY,
     ) -> dict[str, Any]:
         # 意图改写槽：与规则解析对齐，便于本地 hybrid 稳定可测；接真模型后走真实语义
+        if "【ADMIN_EXERCISE_DRAFT】" in system:
+            fields: dict[str, str] = {}
+            for line in user.splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    fields[key.strip()] = value.strip()
+            name = fields.get("name_zh") or "该动作"
+            blob = f"{name} {fields.get('name_en') or ''}".lower()
+            muscle = fields.get("muscle") or ""
+            sub = fields.get("sub_region") or ""
+            pattern = fields.get("movement_pattern") or ""
+            gear = fields.get("gear") or ""
+            modality = fields.get("modality") or "抗阻"
+            note = None
+            if any(k in blob for k in ("侧平举", "lateral raise", "y字", "y-raise", "y raise")):
+                muscle = muscle or "肩"
+                if not sub:
+                    sub = "肩中束、肩后束" if ("y" in blob or "y字" in blob) else "肩中束"
+                    note = "侧平举类主练中束；Y 字轨迹通常兼后束，已建议多选"
+                pattern = pattern or "肩孤立(平举)"
+                gear = gear or ("绳索" if "绳" in blob or "cable" in blob else gear or "自由重量")
+            elif not muscle:
+                muscle = "肩" if "肩" in blob else "全身"
+            if not sub:
+                sub = "肩部整体" if muscle == "肩" else sub
+                note = note or "靶区不确定，先给整体建议，请人工确认"
+            if not pattern:
+                pattern = "肩孤立(平举)" if muscle == "肩" else "全身心肺/综合"
+            if not gear:
+                gear = "自由重量"
+            return {
+                "aliases": [name, f"{name}标准做法"],
+                "instructions_zh": [
+                    f"准备起始姿势，稳定站位，核心收紧，准备做{name}。",
+                    "按动作模式进入离心或向心阶段，保持关节轨迹干净。",
+                    "到目标幅度后短暂停顿，感受目标肌群发力。",
+                    "控制回到起始位，不要借力晃动，再进入下一次重复。",
+                ],
+                "cues_zh": ["核心绷住，肋骨下压", "末端不要甩惯性"],
+                "common_mistakes_zh": ["借力甩动导致轨迹跑偏", "关节超伸或塌陷代偿"],
+                "joint_stress": {
+                    "waist": "low",
+                    "knee": "low",
+                    "shoulder": "medium" if muscle == "肩" else "low",
+                    "wrist": "low",
+                    "elbow": "low",
+                },
+                "muscle": muscle,
+                "sub_region": sub,
+                "movement_pattern": pattern,
+                "gear": gear,
+                "modality": modality,
+                "needs_review": True,
+                "confidence_note": note,
+            }
+
         if "【SESSION_SUMMARY】" in system:
             return {"text": "按你写下的备注和这次的重量来看，下次同一动作先用这次的最高重量。"}
 

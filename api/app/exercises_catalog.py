@@ -20,7 +20,10 @@ from app.taxonomy import canonicalize_exercise
 Modality = Literal["抗阻", "有氧", "HIIT", "灵活性"]
 MODALITIES: tuple[Modality, ...] = ("抗阻", "有氧", "HIIT", "灵活性")
 
-_ASSETS_JSON = Path(__file__).resolve().parent.parent / "assets" / "opengym" / "opengym_exercises_with_media.json"
+_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "opengym"
+_ENRICHED_JSON = _ASSETS_DIR / "opengym_exercises_enriched.json"
+_LEGACY_JSON = _ASSETS_DIR / "opengym_exercises_with_media.json"
+_ASSETS_JSON = _ENRICHED_JSON if _ENRICHED_JSON.exists() else _LEGACY_JSON
 
 # 已停用口语热词表：点名/排除交给意图模型；排课从库检索候选再由 PLAN 模型选，保留定制感与随机性。
 SPOKEN_EXERCISE_ALIASES: list[tuple[str, str]] = []
@@ -157,15 +160,32 @@ def _to_detail(enriched: dict[str, Any]) -> ExerciseDetail:
 
 
 def _load_from_json() -> list[ExerciseDetail]:
-    if not _ASSETS_JSON.exists():
+    path = _ENRICHED_JSON if _ENRICHED_JSON.exists() else _LEGACY_JSON
+    if not path.exists():
         return []
-    raw = json.loads(_ASSETS_JSON.read_text(encoding="utf-8"))
+    raw = json.loads(path.read_text(encoding="utf-8"))
     out: list[ExerciseDetail] = []
     for row in raw:
         if not isinstance(row, dict):
             continue
-        out.append(_to_detail(enrich_raw(row)))
+        # Enriched rows already carry muscle/gear/modality; enrich_raw stays safe as fallback.
+        if row.get("muscle") and row.get("gear") and row.get("modality"):
+            detail = _to_detail(row)
+        else:
+            detail = _to_detail(enrich_raw(row))
+        out.append(detail)
     return out
+
+
+def _prefer_detail(existing: ExerciseDetail | None, candidate: ExerciseDetail) -> ExerciseDetail:
+    """Same display name: keep coach_core, then smaller id."""
+    if existing is None:
+        return candidate
+    if bool(candidate.get("coach_core")) and not bool(existing.get("coach_core")):
+        return candidate
+    if bool(existing.get("coach_core")) and not bool(candidate.get("coach_core")):
+        return existing
+    return existing if str(existing.get("id") or "") <= str(candidate.get("id") or "") else candidate
 
 
 # Mutated in place so `from app.exercises_catalog import EXERCISE_BY_NAME` keeps working.
@@ -181,7 +201,11 @@ def ensure_loaded() -> None:
         if _loaded:
             return
         _rows = _load_from_json()
-        _by_name = {canonicalize_exercise(it["name"]): it for it in _rows}
+        by_name: dict[str, ExerciseDetail] = {}
+        for it in _rows:
+            key = canonicalize_exercise(it["name"])
+            by_name[key] = _prefer_detail(by_name.get(key), it)
+        _by_name = by_name
         # 不再用热词/全库扫用户句；点名由意图模型给出。
         _match_needles = []
         EXERCISES_DATABASE.clear()
@@ -196,6 +220,18 @@ def reload_catalog() -> None:
     with _lock:
         _loaded = False
     ensure_loaded()
+
+
+def reload_all() -> None:
+    """Hot-reload catalog + knowledge index after admin edits."""
+    reload_catalog()
+    try:
+        from app.brain import knowledge as knowledge_mod
+
+        knowledge_mod.reload_index()
+    except Exception:
+        # Knowledge is optional during early boot / unit isolation.
+        pass
 
 
 def _get_rows() -> list[ExerciseDetail]:
@@ -456,4 +492,5 @@ __all__ = [
     "suggest_weight_from_stats",
     "ensure_loaded",
     "reload_catalog",
+    "reload_all",
 ]

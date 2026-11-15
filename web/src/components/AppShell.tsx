@@ -13,7 +13,8 @@ export function AppShell() {
   const onCoach = pathname.startsWith("/coach");
   const onRecap = pathname.startsWith("/recap");
   const onProfileEdit = pathname.startsWith("/me/edit") || pathname.startsWith("/me/settings");
-  const onExercise = pathname.startsWith("/training/exercise");
+  const onExercise =
+    pathname.startsWith("/training/exercise") || pathname.startsWith("/exercises/");
 
   return (
     <div className="noise mx-auto flex h-dvh max-w-md flex-col bg-bg">

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import type { AlternativesResponse } from "../types";
 
@@ -20,6 +21,7 @@ export function SwapExerciseModal({
   onClose,
   onSelect,
 }: Props) {
+  const navigate = useNavigate();
   const [data, setData] = useState<AlternativesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeCategory, setActiveCategory] = useState("全部");
@@ -153,18 +155,22 @@ export function SwapExerciseModal({
 
           {!loading &&
             filteredItems.map((item) => (
-              <button
+              <div
                 key={item.name}
-                type="button"
-                onClick={() => {
-                  onSelect(item.name, item.category);
-                  onClose();
-                }}
-                className="pressable flex w-full cursor-pointer items-center justify-between py-3 text-left hover:bg-bg/50"
+                className="flex w-full items-center gap-3 py-3"
               >
-                <div className="min-w-0 flex-1 pr-3">
+                <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-line bg-bg">
+                  {item.thumb_url ? (
+                    <img src={item.thumb_url} alt="" className="h-full w-full object-contain" />
+                  ) : (
+                    <div className="grid h-full place-items-center text-[9px] font-bold text-muted">
+                      无图
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-ink">{item.name}</span>
+                    <span className="truncate text-sm font-semibold text-ink">{item.name}</span>
                     <span className="rounded bg-line/60 px-1.5 py-0.5 text-[10px] font-medium text-muted">
                       {item.category}
                     </span>
@@ -172,11 +178,33 @@ export function SwapExerciseModal({
                   {item.tips && (
                     <p className="mt-0.5 line-clamp-1 text-xs text-muted">{item.tips}</p>
                   )}
+                  <div className="mt-2 flex gap-2">
+                    {item.id ? (
+                      <button
+                        type="button"
+                        className="pressable rounded-md border border-line bg-bg px-2.5 py-1 text-xs font-bold text-muted"
+                        onClick={() => {
+                          navigate(`/exercises/${encodeURIComponent(item.id!)}`, {
+                            state: { from: "coach" },
+                          });
+                        }}
+                      >
+                        详情
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="pressable rounded-md bg-accent/25 px-2.5 py-1 text-xs font-bold text-accent-ink"
+                      onClick={() => {
+                        onSelect(item.name, item.category);
+                        onClose();
+                      }}
+                    >
+                      替换
+                    </button>
+                  </div>
                 </div>
-                <span className="shrink-0 rounded-md bg-accent/25 px-2.5 py-1 text-xs font-bold text-accent-ink">
-                  替换
-                </span>
-              </button>
+              </div>
             ))}
         </div>
       </div>

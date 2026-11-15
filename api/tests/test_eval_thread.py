@@ -207,7 +207,7 @@ def test_eval_thread_endpoint_smoke(monkeypatch):
     import app.brain.graph as graph_mod
     from fastapi.testclient import TestClient
 
-    from app.auth import require_token
+    from app.auth import AuthContext, bind_auth
     from app.main import app
 
     seen: list[dict] = []
@@ -238,7 +238,7 @@ def test_eval_thread_endpoint_smoke(monkeypatch):
         return _state(route="chat", blocks=[{"kind": "text", "text": "手腕别塌"}], topic="qa")
 
     monkeypatch.setattr(graph_mod, "invoke_chat_graph", fake_invoke)
-    app.dependency_overrides[require_token] = lambda: "test-token"
+    app.dependency_overrides[bind_auth] = lambda: AuthContext(token="test-token", user_id=None)
 
     client = TestClient(app)
     res = client.post(
@@ -269,14 +269,14 @@ def test_eval_thread_reports_round_failure(monkeypatch):
     import app.brain.graph as graph_mod
     from fastapi.testclient import TestClient
 
-    from app.auth import require_token
+    from app.auth import AuthContext, bind_auth
     from app.main import app
 
     async def boom(*args, **kwargs):
         raise RuntimeError("graph exploded")
 
     monkeypatch.setattr(graph_mod, "invoke_chat_graph", boom)
-    app.dependency_overrides[require_token] = lambda: "t"
+    app.dependency_overrides[bind_auth] = lambda: AuthContext(token="t", user_id=None)
 
     client = TestClient(app)
     res = client.post(
@@ -324,7 +324,7 @@ def test_eval_thread_full_plan_produces_card_and_adopts(monkeypatch):
     """
     from fastapi.testclient import TestClient
 
-    from app.auth import require_token
+    from app.auth import AuthContext, bind_auth
     from app.main import app
 
     _patch_plan(
@@ -336,7 +336,7 @@ def test_eval_thread_full_plan_produces_card_and_adopts(monkeypatch):
             {"id": "c4", "title": "绳索下压", "meta": {"sets": 3, "reps": "12", "muscle": "臂"}},
         ],
     )
-    app.dependency_overrides[require_token] = lambda: "t"
+    app.dependency_overrides[bind_auth] = lambda: AuthContext(token="t", user_id=None)
     client = TestClient(app)
     res = client.post(
         "/api/eval/thread",
@@ -370,11 +370,11 @@ def test_eval_thread_short_circuit_produces_no_card(monkeypatch):
     """显式短路（short_circuit=True）只回路由说明：能验 route，但不出卡。"""
     from fastapi.testclient import TestClient
 
-    from app.auth import require_token
+    from app.auth import AuthContext, bind_auth
     from app.main import app
 
     _patch_plan(monkeypatch, [])
-    app.dependency_overrides[require_token] = lambda: "t"
+    app.dependency_overrides[bind_auth] = lambda: AuthContext(token="t", user_id=None)
     client = TestClient(app)
     res = client.post(
         "/api/eval/thread",
@@ -395,11 +395,11 @@ def test_eval_thread_reports_missing_draft_when_adopting(monkeypatch):
     """指定了采纳却没有草稿时要说清楚，而不是静默返回 adopted=None。"""
     from fastapi.testclient import TestClient
 
-    from app.auth import require_token
+    from app.auth import AuthContext, bind_auth
     from app.main import app
 
     _patch_plan(monkeypatch, [])
-    app.dependency_overrides[require_token] = lambda: "t"
+    app.dependency_overrides[bind_auth] = lambda: AuthContext(token="t", user_id=None)
     client = TestClient(app)
     res = client.post(
         "/api/eval/thread",

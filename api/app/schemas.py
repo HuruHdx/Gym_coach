@@ -123,6 +123,7 @@ class CardType(str, Enum):
     MEAL_DRAFT = "meal_draft"
     PROFILE_CONFIRM = "profile_confirm"
     WEEKLY_REPORT = "weekly_report"
+    EXERCISE_REF = "exercise_ref"
 
 
 class CardItem(BaseModel):
@@ -414,6 +415,8 @@ class ExerciseOption(BaseModel):
     muscle: str
     category: str = "自由重量"
     tips: Optional[str] = None
+    id: Optional[str] = None
+    thumb_url: Optional[str] = None
 
 
 class AlternativesOut(BaseModel):
@@ -421,6 +424,14 @@ class AlternativesOut(BaseModel):
     options: list[str]
     items: list[ExerciseOption] = Field(default_factory=list)
     banned_injuries: list[str] = Field(default_factory=list)
+
+
+class AddExerciseRequest(BaseModel):
+    exercise_id: Optional[str] = None
+    name: Optional[str] = None
+    sets: int = Field(default=3, ge=1, le=12)
+    reps: str = "8-12"
+    weight: Optional[float] = Field(default=None, ge=0, le=500)
 
 
 # ---------- Training dashboard (deterministic analytics) ----------

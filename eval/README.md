@@ -8,7 +8,7 @@
 | **意图门禁** | `cases-intent.yaml` / `promptfooconfig-intent.yaml` | 35 | 改提示词时防 topic 回归 |
 | **长对话** | `cases-long.yaml` / `promptfooconfig-long.yaml` | 23 | 一条对话链（1~4 轮）走下来，每步有没有走歪 |
 
-设计说明：`../评测集-v0.4.md`、`../评测集-长对话.md`。
+设计说明：[`../docs/eval/评测集-v0.4.md`](../docs/eval/评测集-v0.4.md)、[`../docs/eval/评测集-长对话.md`](../docs/eval/评测集-长对话.md)。
 
 **三者的分工**：意图测「分类对不对」，整体测「答得好不好」，长对话测「流程会不会走着走着散掉」。
 改提示词后的推荐顺序：意图（30 秒）→ 长对话（十几分钟，跑真实排课）→ 整体（最慢）。

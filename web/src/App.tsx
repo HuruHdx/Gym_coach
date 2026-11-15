@@ -12,6 +12,8 @@ import { TrainingPage } from "./pages/TrainingPage";
 import { TrainingRecordsPage } from "./pages/TrainingRecordsPage";
 import { TrainingLiftsPage } from "./pages/TrainingLiftsPage";
 import { ExerciseTrendPage } from "./pages/ExerciseTrendPage";
+import { ExercisesPage } from "./pages/ExercisesPage";
+import { ExerciseDetailPage } from "./pages/ExerciseDetailPage";
 import { MePage } from "./pages/MePage";
 import { ProfileEditPage } from "./pages/ProfileEditPage";
 import { RecapPage } from "./pages/RecapPage";
@@ -107,6 +109,8 @@ export default function App() {
         <Route path="/training/records" element={<TrainingRecordsPage />} />
         <Route path="/training/lifts" element={<TrainingLiftsPage />} />
         <Route path="/training/exercise/:name" element={<ExerciseTrendPage />} />
+        <Route path="/exercises" element={<ExercisesPage />} />
+        <Route path="/exercises/:id" element={<ExerciseDetailPage />} />
         <Route path="/recap" element={<RecapPage />} />
         <Route
           path="/me"

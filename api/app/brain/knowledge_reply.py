@@ -189,6 +189,106 @@ def collect_training_stats(session: Any, intent: Any, question: str, stats_fixtu
     return stats_text, payload
 
 
+def build_exercise_ref_card(
+    session: Any,
+    grounding: dict[str, Any],
+    intent: Any,
+    *,
+    limit: int = 3,
+) -> dict[str, Any] | None:
+    """知识问答命中动作时，挂可点进详情的动作卡（无命中则不挂）。"""
+    from app.services.public_catalog import resolve_by_names, thumbs_by_ids
+
+    candidates: list[tuple[str, str | None]] = []  # (name, id?)
+    kb = grounding.get("kb") or {}
+    # 消歧时 hits/near_miss 都挂上，方便用户直接点进示范
+    for hit in list(kb.get("hits") or []) + list(kb.get("near_miss") or []):
+        name = str(hit.get("name") or "").strip()
+        eid = str(hit.get("id") or "").strip() or None
+        if name:
+            candidates.append((name, eid))
+        if len(candidates) >= limit * 2:
+            break
+
+    focus = [str(n).strip() for n in (intent.params.get("focus_exercises") or []) if str(n).strip()]
+    for name in focus:
+        if not any(c[0] == name for c in candidates):
+            candidates.append((name, None))
+
+    if not candidates:
+        return None
+
+    need_resolve = [name for name, eid in candidates if not eid]
+    resolved = resolve_by_names(session, need_resolve) if need_resolve else {}
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for name, eid in candidates:
+        hit = resolved.get(name) if not eid else None
+        exercise_id = eid or (str(hit["id"]) if hit else None)
+        if not exercise_id or exercise_id in seen_ids:
+            continue
+        seen_ids.add(exercise_id)
+        rows.append(
+            {
+                "id": exercise_id,
+                "name_zh": (hit or {}).get("name_zh") or name,
+                "thumb_url": (hit or {}).get("thumb_url"),
+            }
+        )
+        if len(rows) >= limit:
+            break
+
+    if not rows:
+        return None
+
+    # 补齐仅有 id、尚未取缩略图的条目
+    missing_thumb_ids = [r["id"] for r in rows if not r.get("thumb_url")]
+    if missing_thumb_ids:
+        thumbs = thumbs_by_ids(session, missing_thumb_ids)
+        for row in rows:
+            if not row.get("thumb_url"):
+                row["thumb_url"] = thumbs.get(row["id"])
+
+    items = [
+        {
+            "id": f"ex-{row['id']}",
+            "title": row["name_zh"],
+            "subtitle": "查看示范与要领",
+            "selected": True,
+            "meta": {
+                "exercise_id": row["id"],
+                "thumb_url": row.get("thumb_url"),
+            },
+        }
+        for row in rows
+    ]
+    title = rows[0]["name_zh"] if len(rows) == 1 else f"{len(rows)} 个相关动作"
+    return {
+        "kind": "card",
+        "card_type": "exercise_ref",
+        "title": title,
+        "status": "draft",
+        "items": items,
+        "actions": [],
+        "meta": {"source": "knowledge"},
+    }
+
+
+def _with_exercise_card(
+    result: dict[str, Any],
+    session: Any,
+    grounding: dict[str, Any],
+    intent: Any,
+) -> dict[str, Any]:
+    card = build_exercise_ref_card(session, grounding, intent)
+    if not card:
+        return result
+    blocks = list(result.get("blocks") or [])
+    blocks.append(card)
+    result["blocks"] = blocks
+    return result
+
+
 def knowledge_extra(grounding: dict[str, Any], *, injured: bool) -> str:
     branch = grounding.get("branch")
     passage = str(grounding.get("passage") or "").strip()
@@ -239,25 +339,10 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
     branch = grounding.get("branch")
     question = state.get("user_text") or ""
 
-    if branch == "ask":
-        text = str(grounding.get("answer") or "").strip() or "你说的是哪一个动作？"
-        return _finish_reply(
-            started,
-            grounding,
-            text,
-            suggestions=list(grounding.get("suggestions") or []),
-            node="knowledge_reply",
-        )
-
-    # kb「练哪里」也走模型：库只供 passage，不再回固定句。
-    # search 无摘要时同样走模型（knowledge_extra 已写明按教练知识答），不回 NO_SOURCE。
-
     from app.brain.memory import Intent, build_profile_summary
     from app.brain.memory_context import build_worker_context
 
     session = _session()
-    profile = get_current_profile(session)
-    profile_text = build_profile_summary(profile)
     raw_intent = state.get("intent") or {}
     intent = Intent(
         expert=raw_intent.get("expert") or "chat",
@@ -265,6 +350,28 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
         raw=raw_intent.get("raw") or question,
         params=dict(raw_intent.get("params") or {}),
     )
+
+    if branch == "ask":
+        text = str(grounding.get("answer") or "").strip() or "你说的是哪一个动作？"
+        # 消歧阶段若已有候选命中，也挂上动作卡方便点选查看
+        return _with_exercise_card(
+            _finish_reply(
+                started,
+                grounding,
+                text,
+                suggestions=list(grounding.get("suggestions") or []),
+                node="knowledge_reply",
+            ),
+            session,
+            grounding,
+            intent,
+        )
+
+    # kb「练哪里」也走模型：库只供 passage，不再回固定句。
+    # search 无摘要时同样走模型（knowledge_extra 已写明按教练知识答），不回 NO_SOURCE。
+
+    profile = get_current_profile(session)
+    profile_text = build_profile_summary(profile)
     stats_text, _stats = collect_training_stats(
         session,
         intent,
@@ -291,17 +398,22 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
             error = str(exc)
             text = f"这句我暂时答不上来：{exc}"
             raw = {"basis": [], "text": text}
-        return _finish_reply(
-            started,
+        return _with_exercise_card(
+            _finish_reply(
+                started,
+                grounding,
+                text,
+                model_called=True,
+                prompt=prompt,
+                raw=raw if parse_ok else {"text": text},
+                parse_ok=parse_ok,
+                error=error,
+                profile_text=profile_text,
+                node="knowledge_reply",
+            ),
+            session,
             grounding,
-            text,
-            model_called=True,
-            prompt=prompt,
-            raw=raw if parse_ok else {"text": text},
-            parse_ok=parse_ok,
-            error=error,
-            profile_text=profile_text,
-            node="knowledge_reply",
+            intent,
         )
 
     injured = bool(profile is not None and profile.injuries)
@@ -335,15 +447,20 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
             letters = len([ch for ch in text if ("A" <= ch <= "Z") or ("a" <= ch <= "z")])
             if letters > 40 or ("怎么" in question and "垫" in zh and "垫" not in text):
                 text = zh[:220]
-    return _finish_reply(
-        started,
+    return _with_exercise_card(
+        _finish_reply(
+            started,
+            grounding,
+            text,
+            model_called=True,
+            prompt=prompt,
+            raw=raw if parse_ok else {"text": text},
+            parse_ok=parse_ok,
+            error=error,
+            profile_text=profile_text,
+            node="knowledge_reply",
+        ),
+        session,
         grounding,
-        text,
-        model_called=True,
-        prompt=prompt,
-        raw=raw if parse_ok else {"text": text},
-        parse_ok=parse_ok,
-        error=error,
-        profile_text=profile_text,
-        node="knowledge_reply",
+        intent,
     )

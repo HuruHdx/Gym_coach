@@ -181,6 +181,105 @@ def today_has_done(session: Session, day: date | None = None) -> bool:
     return row is not None
 
 
+def add_exercise_to_today(
+    session: Session,
+    *,
+    exercise_id: str | None = None,
+    name: str | None = None,
+    sets: int = 3,
+    reps: str = "8-12",
+    weight: float | None = None,
+) -> SessionOut:
+    """把单个动作追加到今日 active 场次；没有则新建。今日已完成则 409。"""
+    from app.models import Exercise
+    from app.services.public_catalog import resolve_by_names
+
+    day = date.today()
+    if today_has_done(session, day):
+        # 若最新一场是 active，仍允许追加；仅当今日只有 done、无 active 时拒绝
+        active = session.exec(
+            _sessions_q()
+            .where(TrainingSession.session_date == day)
+            .where(TrainingSession.status == "active")
+            .order_by(col(TrainingSession.id).desc())
+        ).first()
+        if not active:
+            raise HTTPException(
+                status_code=409,
+                detail="今日训练已完成。如需再练，请到教练页重新采纳计划。",
+            )
+
+    ex: Exercise | None = None
+    if exercise_id:
+        ex = session.get(Exercise, exercise_id)
+        if ex and not ex.is_valid_exercise:
+            ex = None
+    if not ex and name:
+        hit = resolve_by_names(session, [name]).get(name.strip())
+        if hit:
+            ex = session.get(Exercise, hit["id"])
+    if not ex:
+        raise HTTPException(status_code=404, detail="动作不存在")
+
+    exercise_name = canonicalize_exercise(ex.name_zh) or ex.name_zh
+    muscle = ex.muscle or "全身"
+    n_sets = max(1, min(int(sets or 3), 12))
+    target_reps = (reps or "8-12").strip() or "8-12"
+
+    sess = session.exec(
+        _sessions_q()
+        .where(TrainingSession.session_date == day)
+        .where(TrainingSession.status == "active")
+        .order_by(col(TrainingSession.id).desc())
+    ).first()
+
+    if not sess:
+        sess = TrainingSession(
+            user_id=current_user_id(),
+            session_date=day,
+            split_label="加练",
+            source="adopted",
+            status="active",
+        )
+        session.add(sess)
+        session.commit()
+        session.refresh(sess)
+        next_order = 1
+        existing_sets: list[TrainingSetLog] = []
+    else:
+        existing_sets = list(
+            session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == sess.id)).all()
+        )
+        next_order = max((s.exercise_order or 0 for s in existing_sets), default=0) + 1
+
+    existing_mine = session.exec(select(MyExercise).where(MyExercise.name == exercise_name)).first()
+    if not existing_mine:
+        session.add(MyExercise(name=exercise_name, muscle=muscle))
+
+    new_rows: list[TrainingSetLog] = []
+    for i in range(1, n_sets + 1):
+        row = TrainingSetLog(
+            session_id=sess.id or 0,
+            exercise_name=exercise_name,
+            muscle=muscle,
+            exercise_order=next_order,
+            set_index=i,
+            target_reps=target_reps,
+            target_weight=weight,
+            actual_weight=weight,
+        )
+        session.add(row)
+        new_rows.append(row)
+    session.commit()
+    for row in new_rows:
+        session.refresh(row)
+    session.refresh(sess)
+    all_sets = existing_sets + new_rows if existing_sets else new_rows
+    # re-fetch to include any concurrent rows
+    all_sets = list(session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == sess.id)).all())
+    return session_to_out(sess, all_sets)
+
+
 def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
     day = date.today()
     selected = [it for it in body.items if it.selected]

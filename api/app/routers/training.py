@@ -11,6 +11,7 @@ from app.exercises_catalog import alternatives, alternatives_rich
 from app.models import DebugTrace, ExerciseStats, MyExercise, TrainingSession, TrainingSetLog
 from app.tenancy import get_current_profile
 from app.schemas import (
+    AddExerciseRequest,
     AdoptRequest,
     AlternativesOut,
     ExerciseOption,
@@ -23,6 +24,7 @@ from app.schemas import (
     CompleteRequest,
     TrainingDashboardOut,
 )
+from app.services.public_catalog import thumbs_by_ids
 from app.services import session_service as svc
 from app.services.analytics_service import build_dashboard, recent_top_weights
 
@@ -46,6 +48,24 @@ def adopt(
     _: AuthContext = Depends(bind_auth),
 ):
     return svc.adopt_draft(session, body)
+
+
+@router.post("/today/add-exercise", response_model=SessionOut)
+def add_exercise_today(
+    body: AddExerciseRequest,
+    session: Session = Depends(get_session),
+    _: AuthContext = Depends(bind_auth),
+):
+    if not (body.exercise_id or body.name):
+        raise HTTPException(status_code=400, detail="需要 exercise_id 或 name")
+    return svc.add_exercise_to_today(
+        session,
+        exercise_id=body.exercise_id,
+        name=body.name,
+        sets=body.sets,
+        reps=body.reps,
+        weight=body.weight,
+    )
 
 
 @router.post("/sessions/{session_id}/reorder", response_model=SessionOut)
@@ -270,12 +290,16 @@ def get_alternatives(
     injuries = profile.injuries if profile else []
     rich = alternatives_rich(muscle, exclude=exclude, injuries=injuries)
     names = [r["name"] for r in rich]
+    ids = [str(r.get("id") or "") for r in rich]
+    thumbs = thumbs_by_ids(session, ids)
     items = [
         ExerciseOption(
             name=r["name"],
             muscle=r["muscle"],
             category=r["category"],
             tips=r.get("tips"),
+            id=str(r.get("id") or "") or None,
+            thumb_url=thumbs.get(str(r.get("id") or "")) if r.get("id") else None,
         )
         for r in rich
     ]

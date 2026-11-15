@@ -200,6 +200,8 @@ export type ExerciseOption = {
   muscle: string;
   category: string;
   tips?: string | null;
+  id?: string | null;
+  thumb_url?: string | null;
 };
 
 export type AlternativesResponse = {

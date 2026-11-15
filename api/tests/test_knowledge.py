@@ -129,7 +129,9 @@ def test_smith_seated_row_corrects_to_smith_rows():
     assert labels
     assert all("划船" in name for name in labels)
     assert all("提踵" not in name for name in labels)
-    assert "没有「史密斯坐姿划船」这个叫法" in g.direct_answer
+    assert "没有「史密斯坐姿划船」这个叫法" not in g.direct_answer
+    assert "你指的是哪一个" in g.direct_answer
+    assert "史密斯坐姿划船" in g.direct_answer
     assert "背" in g.direct_answer
 
 

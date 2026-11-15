@@ -4,6 +4,11 @@ api/data/
 api/.env
 api/static/exercises/
 api/assets/opengym/_*.txt
+api/assets/opengym/_llm_enrich_cache.json
+# 一次性调试 / 分析脚本目录，不进仓
+_tri/
+# 一次性数据探针脚本
+api/scripts/_probe_*.py
 web/node_modules/
 web/dist/
 web/tsconfig.tsbuildinfo

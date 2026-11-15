@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.db import init_db
 from app.exercises_catalog import ensure_loaded
-from app.routers import auth, brain, profile, training
+from app.routers import admin, auth, brain, catalog, profile, training
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -37,6 +37,8 @@ app.include_router(auth.router)
 app.include_router(profile.router)
 app.include_router(brain.router)
 app.include_router(training.router)
+app.include_router(catalog.router)
+app.include_router(admin.router)
 
 # Exercise demo images (openGym / free-exercise-db); unused by UI this phase.
 _exercises_dir = _STATIC_DIR / "exercises"

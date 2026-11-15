@@ -5,7 +5,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 from sqlalchemy import event, text
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
 
@@ -78,7 +78,11 @@ def _ensure_columns() -> None:
         ("trainingsession", "duration_source", "VARCHAR"),
         ("trainingsession", "duration_seconds", "INTEGER"),
         ("trainingsession", "timer_started_at", "TIMESTAMP"),
+        ("trainingsession", "plan_template_id", "VARCHAR"),
+        ("trainingsession", "plan_block_id", "INTEGER"),
+        ("trainingsession", "plan_type", "VARCHAR"),
         ("trainingsetlog", "exercise_order", "INTEGER"),
+        ("trainingsetlog", "is_warmup", "BOOLEAN"),
         ("profile", "height_cm", "REAL"),
         ("profile", "session_minutes", "INTEGER DEFAULT 45"),
         ("profile", "avoid_exercises", "TEXT"),
@@ -91,18 +95,48 @@ def _ensure_columns() -> None:
         ("chatturn", "conversation_id", "VARCHAR"),
         ("chatturn", "card", "TEXT"),
         ("chatturn", "suggestions", "TEXT"),
+        # A0 enriched exercise columns
+        ("exercises", "sub_region", "VARCHAR"),
+        ("exercises", "movement_pattern", "VARCHAR"),
+        ("exercises", "joint_stress", "TEXT"),
+        ("exercises", "cues_zh", "TEXT"),
+        ("exercises", "common_mistakes_zh", "TEXT"),
+        ("exercises", "is_valid_exercise", "BOOLEAN"),
+        ("exercises", "needs_review", "BOOLEAN"),
+        ("exercises", "updated_at", "TIMESTAMP"),
+        # 计划槽位角色（与 roles 肌群列表独立）
+        ("exercises", "slot_roles", "TEXT"),
     ]
     url = settings.database_url
+
+    def _patch_type(table: str, column: str, coltype: str) -> str:
+        if column == "is_warmup":
+            # SQLite 用 0；Postgres 必须用 FALSE，不能写 DEFAULT 0
+            return "BOOLEAN DEFAULT 0" if url.startswith("sqlite") else "BOOLEAN DEFAULT FALSE"
+        if not url.startswith("sqlite") and (table, column) in {
+            ("chatturn", "card"),
+            ("chatturn", "suggestions"),
+            ("exercises", "joint_stress"),
+            ("exercises", "cues_zh"),
+            ("exercises", "common_mistakes_zh"),
+            ("exercises", "slot_roles"),
+        }:
+            return "JSONB"
+        return coltype
+
     with engine.begin() as conn:
         if url.startswith("sqlite"):
             for table, column, coltype in patches:
                 rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
                 existing = {r[1] for r in rows}
                 if column not in existing and rows:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"))
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {table} ADD COLUMN {column} {_patch_type(table, column, coltype)}"
+                        )
+                    )
             return
         # Postgres：已有库补列；表还不存在时跳过（create_all 会带上新字段）
-        jsonb_columns = {("chatturn", "card"), ("chatturn", "suggestions")}
         for table, column, coltype in patches:
             exists = conn.execute(
                 text("SELECT to_regclass(:name)"),
@@ -110,10 +144,10 @@ def _ensure_columns() -> None:
             ).scalar()
             if not exists:
                 continue
-            if (table, column) in jsonb_columns:
-                coltype = "JSONB"
             conn.execute(
-                text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {coltype}")
+                text(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {_patch_type(table, column, coltype)}"
+                )
             )
         # 身高体重/单次时长可空：引导未选时不写死默认值
         if conn.execute(text("SELECT to_regclass(:name)"), {"name": "profile"}).scalar():
@@ -123,9 +157,39 @@ def _ensure_columns() -> None:
         _promote_text_to_jsonb(conn)
 
 
+def _backfill_slot_roles() -> None:
+    """只给空的 slot_roles 预填启发式默认值，不覆盖后台已编辑内容。"""
+    from app.models import Exercise
+    from app.slot_roles import infer_slot_roles, normalize_slot_roles
+
+    with Session(engine) as session:
+        rows = session.exec(select(Exercise)).all()
+        changed = 0
+        for ex in rows:
+            if normalize_slot_roles(ex.slot_roles):
+                continue
+            inferred = infer_slot_roles(
+                movement_pattern=ex.movement_pattern,
+                gear=ex.gear,
+                modality=ex.modality,
+                coach_core=bool(ex.coach_core),
+            )
+            if not inferred:
+                continue
+            ex.slot_roles = inferred
+            session.add(ex)
+            changed += 1
+        if changed:
+            session.commit()
+
+
 def init_db() -> None:
+    # Register all SQLModel tables on metadata before create_all.
+    from app import models as _models  # noqa: F401
+
     SQLModel.metadata.create_all(engine)
     _ensure_columns()
+    _backfill_slot_roles()
 
 
 def get_session() -> Generator[Session, None, None]:

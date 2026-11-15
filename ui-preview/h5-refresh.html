@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="lavender">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Gym Coach · H5 Refresh</title>
+  <link rel="stylesheet" href="../gym-ui/tokens.css" />
+  <link rel="stylesheet" href="../gym-ui/base.css" />
+  <link rel="stylesheet" href="../gym-ui/components.css" />
+  <style>
+    body {
+      min-height: 100dvh;
+      overflow-y: auto;
+      background: var(--text-1);
+      font-family: var(--font-sans);
+      color: var(--text-1);
+    }
+    .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+    .gallery-head {
+      display: flex;
+      max-width: 1180px;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin: 0 auto;
+      padding: var(--sp-6) var(--sp-4);
+      color: var(--accent-ink);
+    }
+    .gallery-head h1 { margin: 0; font-size: var(--fs-display); font-weight: var(--fw-strong); }
+    .gallery-head p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+    .theme-switch { display: flex; gap: var(--sp-2); }
+    .theme-switch button {
+      border: var(--hairline) solid var(--line-strong);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      padding: var(--sp-2) var(--sp-3);
+      color: var(--text-1);
+      cursor: pointer;
+      font-size: var(--fs-label);
+      transition: transform var(--dur-press) var(--ease-out), opacity var(--dur-state) var(--ease-out);
+    }
+    .theme-switch button:active { transform: scale(.97); }
+    .phones {
+      display: grid;
+      max-width: 1180px;
+      grid-template-columns: repeat(3, minmax(300px, 360px));
+      justify-content: center;
+      gap: var(--sp-6);
+      margin: 0 auto;
+      padding: 0 var(--sp-4) var(--sp-8);
+    }
+    .phone-wrap { min-width: 0; }
+    .phone-label { margin: 0 0 var(--sp-2) var(--sp-2); color: var(--text-3); font-size: var(--fs-label); }
+    .phone {
+      height: 740px;
+      overflow: hidden;
+      border: var(--hairline) solid var(--line-strong);
+      border-radius: var(--r-xl);
+      background: var(--bg);
+      box-shadow: var(--shadow-float);
+    }
+    .phone .screen { height: 100%; min-height: 0; }
+    .phone-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+    .phone-scroll::-webkit-scrollbar { display: none; }
+    .appbar-tools { display: flex; gap: var(--sp-2); align-items: center; }
+    .icon-btn {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: var(--hairline) solid var(--line);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      color: var(--text-2);
+    }
+    .icon-btn svg { width: 17px; height: 17px; }
+    .today-hero {
+      position: relative;
+      overflow: hidden;
+      margin: var(--sp-3) var(--page-x);
+      border-radius: var(--r-xl);
+      background: var(--surface);
+      box-shadow: var(--shadow-card);
+      padding: var(--sp-5);
+    }
+    .today-hero::after {
+      position: absolute;
+      right: -46px;
+      top: -54px;
+      width: 138px;
+      height: 138px;
+      border: 22px solid var(--accent-soft);
+      border-radius: 50%;
+      content: "";
+      opacity: .9;
+    }
+    .hero-kicker { color: var(--accent-text); font-size: var(--fs-label); font-weight: var(--fw-medium); }
+    .hero-title {
+      position: relative;
+      z-index: 1;
+      max-width: 10ch;
+      margin-top: var(--sp-2);
+      font-size: var(--fs-display);
+      font-weight: var(--fw-strong);
+      letter-spacing: -.04em;
+      line-height: 1.15;
+    }
+    .hero-meta { margin-top: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+    .hero-progress { margin-top: var(--sp-4); }
+    .hero-progress .bar > i { transform: scaleX(.42); }
+    .plan-card { padding: 0; overflow: hidden; }
+    .plan-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sp-4);
+      border-bottom: var(--hairline) solid var(--line);
+    }
+    .plan-head strong { font-size: var(--fs-title); font-weight: var(--fw-medium); }
+    .plan-head span { color: var(--text-3); font-size: var(--fs-label); }
+    .move-row {
+      display: grid;
+      grid-template-columns: 42px 1fr auto;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-4);
+      border-bottom: var(--hairline) solid var(--line);
+    }
+    .move-row:last-child { border-bottom: 0; }
+    .move-row.done { background: var(--done-bg); }
+    .move-index {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: var(--r-md);
+      background: var(--tint);
+      color: var(--accent-text);
+      font-size: var(--fs-meta);
+      font-weight: var(--fw-strong);
+    }
+    .move-row.done .move-index { background: var(--done); color: var(--done-ink); }
+    .move-name { font-size: var(--fs-body); font-weight: var(--fw-medium); }
+    .move-meta { margin-top: 3px; color: var(--text-3); font-size: var(--fs-micro); }
+    .move-load { text-align: right; }
+    .move-load b { display: block; font-size: var(--fs-title); font-weight: var(--fw-strong); }
+    .move-load span { color: var(--text-3); font-size: var(--fs-micro); }
+    .bottom-action { padding: var(--sp-3) var(--page-x); }
+    .search-field {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      margin: var(--sp-3) var(--page-x);
+      border: var(--hairline) solid var(--line-strong);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      padding: 0 var(--sp-3);
+    }
+    .search-field svg { width: 18px; height: 18px; color: var(--text-3); }
+    .search-field input {
+      min-width: 0;
+      flex: 1;
+      height: 46px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text-1);
+      font-size: 16px;
+    }
+    .exercise-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--page-x) var(--sp-6);
+    }
+    .exercise-card {
+      overflow: hidden;
+      border-radius: var(--r-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow-card);
+    }
+    .exercise-media {
+      display: grid;
+      height: 118px;
+      place-items: center;
+      background: var(--tint);
+      color: var(--accent-text);
+    }
+    .exercise-media svg { width: 66px; height: 66px; opacity: .75; }
+    .exercise-body { padding: var(--sp-3); }
+    .exercise-name { font-size: var(--fs-body); font-weight: var(--fw-medium); }
+    .exercise-sub { margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
+    .exercise-tags { display: flex; gap: var(--sp-1); margin-top: var(--sp-2); }
+    .exercise-tags span {
+      border-radius: var(--r-sm);
+      background: var(--accent-soft);
+      padding: 3px 5px;
+      color: var(--accent-text);
+      font-size: var(--fs-micro);
+    }
+    .media-stage {
+      position: relative;
+      display: grid;
+      height: 248px;
+      place-items: center;
+      margin: var(--sp-3) var(--page-x);
+      overflow: hidden;
+      border-radius: var(--r-xl);
+      background: var(--surface);
+      color: var(--accent-text);
+      box-shadow: var(--shadow-card);
+    }
+    .media-stage::before {
+      position: absolute;
+      width: 174px;
+      height: 174px;
+      border-radius: 50%;
+      background: var(--tint);
+      content: "";
+    }
+    .media-stage svg { position: relative; width: 126px; height: 126px; }
+    .media-status {
+      position: absolute;
+      right: var(--sp-3);
+      top: var(--sp-3);
+      border-radius: var(--r-sm);
+      background: var(--accent);
+      padding: 5px 7px;
+      color: var(--accent-ink);
+      font-size: var(--fs-micro);
+      font-weight: var(--fw-medium);
+    }
+    .detail-title { padding: var(--sp-1) var(--page-x) var(--sp-3); }
+    .detail-title h2 { margin: 0; font-size: var(--fs-title); }
+    .detail-title p { margin: var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+    .cue-card {
+      border-left: 3px solid var(--accent);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      padding: var(--sp-3);
+      margin: var(--sp-2) var(--page-x);
+    }
+    .cue-card strong { font-size: var(--fs-meta); font-weight: var(--fw-medium); }
+    .cue-card p { margin: var(--sp-1) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; }
+    .step-row {
+      display: grid;
+      grid-template-columns: 26px 1fr;
+      gap: var(--sp-2);
+      padding: var(--sp-3) var(--page-x);
+      border-bottom: var(--hairline) solid var(--line);
+    }
+    .step-no {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: var(--r-sm);
+      background: var(--tint);
+      color: var(--accent-text);
+      font-size: var(--fs-micro);
+      font-weight: var(--fw-strong);
+    }
+    .step-row p { margin: 2px 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+    .coach-hero { padding: var(--sp-6) var(--page-x) var(--sp-4); }
+    .coach-mark {
+      display: grid;
+      width: 48px;
+      height: 48px;
+      place-items: center;
+      border-radius: var(--r-lg);
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-size: var(--fs-title);
+      font-weight: var(--fw-strong);
+      transform: rotate(-4deg);
+    }
+    .coach-hero h2 { margin: var(--sp-4) 0 var(--sp-2); font-size: var(--fs-display); line-height: 1.15; }
+    .coach-hero p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
+    .prompt-list { display: grid; gap: var(--sp-2); padding: 0 var(--page-x); }
+    .prompt {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 48px;
+      border: var(--hairline) solid var(--line);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      padding: 0 var(--sp-3);
+      color: var(--text-1);
+      font-size: var(--fs-meta);
+    }
+    .prompt span { color: var(--accent-text); }
+    .answer-card { padding: 0; overflow: hidden; }
+    .answer-head { padding: var(--sp-3) var(--sp-4); background: var(--tint); color: var(--accent-text); font-size: var(--fs-label); font-weight: var(--fw-medium); }
+    .answer-body { padding: var(--sp-4); }
+    .answer-body h3 { margin: 0; font-size: var(--fs-title); }
+    .answer-body p { margin: var(--sp-2) 0 var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
+    .compose {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: var(--sp-2);
+      padding: var(--sp-3) var(--page-x);
+      border-top: var(--hairline) solid var(--line);
+      background: var(--surface);
+    }
+    .compose input { min-width: 0; height: 42px; border: 0; outline: 0; background: transparent; color: var(--text-1); font-size: 16px; }
+    .compose button { width: 42px; height: 42px; border: 0; border-radius: var(--r-md); background: var(--accent); color: var(--accent-ink); }
+    .week-chart { padding: var(--sp-4); }
+    .week-bars { display: grid; height: 116px; grid-template-columns: repeat(7, 1fr); align-items: end; gap: var(--sp-2); border-bottom: var(--hairline) solid var(--line); }
+    .week-col { display: grid; justify-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+    .week-col i { display: block; width: 18px; border-radius: var(--r-sm) var(--r-sm) 0 0; background: var(--line-strong); transform-origin: bottom; }
+    .week-col.on i { background: var(--accent); }
+    .bar-1 { height: 34px; } .bar-2 { height: 68px; } .bar-3 { height: 48px; } .bar-4 { height: 92px; } .bar-5 { height: 56px; }
+    .record-row {
+      display: grid;
+      grid-template-columns: 42px 1fr auto;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--page-x);
+      border-bottom: var(--hairline) solid var(--line);
+    }
+    .record-day { color: var(--accent-text); font-size: var(--fs-title); font-weight: var(--fw-strong); }
+    .record-name { font-size: var(--fs-body); font-weight: var(--fw-medium); }
+    .record-meta { margin-top: 3px; color: var(--text-3); font-size: var(--fs-micro); }
+    .record-volume { color: var(--text-2); font-size: var(--fs-meta); text-align: right; }
+    .profile-hero { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--page-x); }
+    .profile-avatar {
+      display: grid;
+      width: 58px;
+      height: 58px;
+      place-items: center;
+      border-radius: var(--r-lg);
+      background: var(--text-1);
+      color: var(--accent);
+      font-size: var(--fs-title);
+      font-weight: var(--fw-strong);
+    }
+    .profile-hero h2 { margin: 0; font-size: var(--fs-title); }
+    .profile-hero p { margin: var(--sp-1) 0 0; color: var(--text-2); font-size: var(--fs-meta); }
+    .report-card {
+      position: relative;
+      overflow: hidden;
+      background: var(--text-1);
+      color: var(--surface);
+    }
+    .report-card::after {
+      position: absolute;
+      right: -42px;
+      bottom: -58px;
+      width: 146px;
+      height: 146px;
+      border-radius: 50%;
+      background: var(--accent);
+      content: "";
+      opacity: .9;
+    }
+    .report-card .card-title { color: var(--text-3); }
+    .report-card h3 { position: relative; z-index: 1; max-width: 12ch; margin: 0; font-size: var(--fs-display); line-height: 1.12; }
+    .report-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); margin-top: var(--sp-5); }
+    .report-stats b { display: block; color: var(--accent); font-size: var(--fs-title); }
+    .report-stats span { color: var(--text-3); font-size: var(--fs-micro); }
+    .settings-card { padding: 0; }
+    .brand-screen { position: relative; overflow: hidden; background: var(--text-1); color: var(--surface); }
+    .brand-screen::after {
+      position: absolute;
+      right: -86px;
+      top: 78px;
+      width: 240px;
+      height: 240px;
+      border: 26px solid var(--accent);
+      border-radius: 50%;
+      content: "";
+      opacity: .82;
+    }
+    .brand-content { position: relative; z-index: 1; display: flex; min-height: 100%; flex-direction: column; padding: var(--sp-6); }
+    .brand-word { color: var(--accent); font-size: var(--fs-label); font-weight: var(--fw-strong); letter-spacing: .12em; }
+    .brand-content h2 { max-width: 8ch; margin: 132px 0 var(--sp-4); font-size: calc(var(--fs-display) + var(--sp-4)); line-height: .98; letter-spacing: -.05em; }
+    .brand-content p { max-width: 22ch; margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
+    .brand-choice { display: grid; gap: var(--sp-2); margin-top: auto; }
+    .brand-choice button {
+      min-height: 52px;
+      border: var(--hairline) solid var(--line-strong);
+      border-radius: var(--r-md);
+      background: transparent;
+      color: var(--surface);
+      text-align: left;
+      padding: 0 var(--sp-4);
+      font-size: var(--fs-body);
+    }
+    .brand-choice button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+    .brand-next { margin-top: var(--sp-3); }
+    @media (hover: hover) and (pointer: fine) {
+      .theme-switch button:hover, .exercise-card:hover { opacity: .82; }
+    }
+    @media (max-width: 1000px) {
+      .phones { grid-template-columns: minmax(300px, 360px); }
+      .gallery-head { max-width: 392px; align-items: flex-start; flex-direction: column; gap: var(--sp-4); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="gallery-head">
+    <div><h1>H5 · 训练工具精修方向</h1><p>保留克制与单手效率，强化动作内容和训练状态的视觉层级。</p></div>
+    <div class="theme-switch"><button data-theme="lavender">淡紫</button><button data-theme="mint">薄荷</button><button data-theme="dark">深色</button></div>
+  </header>
+  <main class="phones">
+    <section class="phone-wrap">
+      <div class="phone-label">01 · 今日训练</div>
+      <div class="phone">
+        <div class="screen">
+          <header class="appbar"><div><h1>周二 · 推</h1><div class="sub">11 月 10 日 · 预计 48 分钟</div></div><button class="pill">调整计划</button></header>
+          <div class="phone-scroll">
+            <div class="today-hero">
+              <div class="hero-kicker">进行中 · 第 2 个动作</div>
+              <div class="hero-title">今天把卧推稳住</div>
+              <div class="hero-meta num">已完成 5 / 12 组</div>
+              <div class="hero-progress"><div class="bar"><i></i></div></div>
+            </div>
+            <div class="statrow">
+              <div><span class="k">训练容量</span><span class="v num">2,840 kg</span></div>
+              <div><span class="k">当前动作</span><span class="v num">2 / 4</span></div>
+              <div><span class="k">已用时</span><span class="v num">21 min</span></div>
+            </div>
+            <div class="card plan-card">
+              <div class="plan-head"><strong>今日动作</strong><span class="num">12 组</span></div>
+              <div class="move-row done"><span class="move-index">✓</span><div><div class="move-name">杠铃卧推</div><div class="move-meta num">4 × 8 · 全部完成</div></div><div class="move-load"><b class="num">60</b><span>kg</span></div></div>
+              <div class="move-row"><span class="move-index num">02</span><div><div class="move-name">上斜哑铃卧推</div><div class="move-meta num">1 / 3 组 · 上次 22.5kg</div></div><div class="move-load"><b class="num">24</b><span>kg</span></div></div>
+              <div class="move-row"><span class="move-index num">03</span><div><div class="move-name">器械夹胸</div><div class="move-meta num">3 × 12 · 待开始</div></div><div class="move-load"><b class="num">40</b><span>kg</span></div></div>
+            </div>
+          </div>
+          <div class="bottom-action"><button class="btn primary block">继续 · 上斜哑铃卧推</button></div>
+          <nav class="tabbar"><button class="tab on">今日</button><button class="tab">教练</button><button class="tab">训练</button><button class="tab">我的</button></nav>
+        </div>
+      </div>
+    </section>
+
+    <section class="phone-wrap">
+      <div class="phone-label">02 · 动作库</div>
+      <div class="phone">
+        <div class="screen">
+          <header class="appbar"><div><h1>动作库</h1><div class="sub num">5,632 个动作 · 286 个主力</div></div><button class="pill">筛选</button></header>
+          <div class="phone-scroll">
+            <label class="search-field">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+              <input placeholder="搜索动作、别名或器械" />
+            </label>
+            <div class="chipbar"><button class="chip" aria-pressed="true">练过的</button><button class="chip">胸</button><button class="chip">背</button><button class="chip">腿</button><button class="chip">肩</button></div>
+            <div class="sec-label"><span>为你优先</span><span>练过 → 主力 → 有素材</span></div>
+            <div class="exercise-grid">
+              <article class="exercise-card"><div class="exercise-media"><svg fill="none" stroke="currentColor" viewBox="0 0 80 80"><circle cx="40" cy="16" r="7"/><path d="M26 31h28M31 31l-8 16m26-16 8 16M34 32l-2 30m14-30 2 30M20 47h40"/></svg></div><div class="exercise-body"><div class="exercise-name">杠铃卧推</div><div class="exercise-sub">上次 60kg × 8</div><div class="exercise-tags"><span>中胸</span><span>主力</span></div></div></article>
+              <article class="exercise-card"><div class="exercise-media"><svg fill="none" stroke="currentColor" viewBox="0 0 80 80"><circle cx="40" cy="15" r="7"/><path d="M40 23v22M27 30l13 8 13-8M33 45l-8 19m22-19 8 19M20 26h40"/></svg></div><div class="exercise-body"><div class="exercise-name">高位下拉</div><div class="exercise-sub">背阔肌 · 器械</div><div class="exercise-tags"><span>视频</span><span>主力</span></div></div></article>
+              <article class="exercise-card"><div class="exercise-media"><svg fill="none" stroke="currentColor" viewBox="0 0 80 80"><circle cx="40" cy="14" r="7"/><path d="M40 22v24M26 29l14 9 14-9M40 46 27 64m13-18 13 18M22 64h36"/></svg></div><div class="exercise-body"><div class="exercise-name">保加利亚分腿蹲</div><div class="exercise-sub">臀部 · 自由重量</div><div class="exercise-tags"><span>练过</span><span>动图</span></div></div></article>
+              <article class="exercise-card"><div class="exercise-media"><svg fill="none" stroke="currentColor" viewBox="0 0 80 80"><circle cx="40" cy="14" r="7"/><path d="M40 22v25M25 29l15 8 15-8M40 47 31 65m9-18 9 18M20 28h40"/></svg></div><div class="exercise-body"><div class="exercise-name">哑铃侧平举</div><div class="exercise-sub">肩中束 · 自由重量</div><div class="exercise-tags"><span>主力</span><span>纠错</span></div></div></article>
+            </div>
+          </div>
+          <nav class="tabbar"><button class="tab">今日</button><button class="tab">教练</button><button class="tab on">训练</button><button class="tab">我的</button></nav>
+        </div>
+      </div>
+    </section>
+
+    <section class="phone-wrap">
+      <div class="phone-label">03 · 动作详情</div>
+      <div class="phone">
+        <div class="screen">
+          <header class="appbar"><div><h1>动作详情</h1><div class="sub">中胸 · 水平推 · 自由重量</div></div><div class="appbar-tools"><button class="icon-btn" aria-label="收藏"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="m12 4 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8L12 4Z"/></svg></button></div></header>
+          <div class="phone-scroll">
+            <div class="media-stage">
+              <span class="media-status">动态演示</span>
+              <svg fill="none" stroke="currentColor" viewBox="0 0 120 120"><circle cx="60" cy="22" r="10"/><path d="M38 48h44M44 48l-12 25m44-25 12 25M51 50l-4 45m22-45 4 45M25 73h70M18 66v14m84-14v14"/></svg>
+            </div>
+            <div class="detail-title"><h2>杠铃卧推</h2><p>Barbell Bench Press · 肩关节压力：中</p></div>
+            <div class="cue-card"><strong>发力提示</strong><p>肩胛向后下夹紧，想象把杠铃向两边掰开。</p></div>
+            <div class="sec-label"><span>4 步完成动作</span><span></span></div>
+            <div class="step-row"><span class="step-no num">1</span><p>双脚踩稳，眼睛位于杠铃正下方，肩胛收紧贴凳。</p></div>
+            <div class="step-row"><span class="step-no num">2</span><p>握距略宽于肩，手腕保持中立，将杠铃移至胸口上方。</p></div>
+            <div class="step-row"><span class="step-no num">3</span><p>控制下降至胸骨下缘，前臂从正面看保持垂直。</p></div>
+            <div class="step-row"><span class="step-no num">4</span><p>呼气推起，保持肩胛固定，不要让肩膀向前跑。</p></div>
+          </div>
+          <div class="bottom-action"><button class="btn primary block">加入今日训练</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="phone-wrap">
+      <div class="phone-label">04 · AI 教练</div>
+      <div class="phone">
+        <div class="screen">
+          <header class="appbar"><div><h1>教练</h1><div class="sub">建议会落成可执行的训练卡片</div></div><button class="pill">历史</button></header>
+          <div class="phone-scroll">
+            <div class="coach-hero"><div class="coach-mark">燃</div><h2>今天想解决什么？</h2><p>可以直接说目标、状态或疼痛，我会结合你的训练记录回答。</p></div>
+            <div class="prompt-list"><button class="prompt">今天练胸怎么安排？<span>→</span></button><button class="prompt">看看最近卧推有没有进步<span>→</span></button><button class="prompt">左膝不舒服，腿日怎么换？<span>→</span></button></div>
+            <div class="sec-label"><span>最近建议</span><span>刚刚</span></div>
+            <div class="card answer-card"><div class="answer-head">根据上次推日记录生成</div><div class="answer-body"><h3>卧推保持 60kg，先稳住完成度</h3><p>上次最后一组只完成 6 次，今天不急着加重。肩前束疲劳偏高，飞鸟改为器械夹胸。</p><button class="btn primary block">应用到今日计划</button></div></div>
+          </div>
+          <div class="compose"><input placeholder="说一句，例如：今天练胸" /><button aria-label="发送">↑</button></div>
+          <nav class="tabbar"><button class="tab">今日</button><button class="tab on">教练</button><button class="tab">训练</button><button class="tab">我的</button></nav>
+        </div>
+      </div>
+    </section>
+
+    <section class="phone-wrap">
+      <div class="phone-label">05 · 训练趋势</div>
+      <div class="phone">
+        <div class="screen">
+          <header class="appbar"><div><h1>训练</h1><div class="sub">11 月 · 已完成 9 次</div></div><button class="pill">动作趋势</button></header>
+          <div class="phone-scroll">
+            <div class="statrow"><div><span class="k">本周训练</span><span class="v num">4 次</span></div><div><span class="k">完成组</span><span class="v num">38 组</span></div><div><span class="k">总容量</span><span class="v num">12.8t</span></div></div>
+            <div class="card week-chart"><div class="plan-head"><strong>近 7 天训练量</strong><span class="num">+12%</span></div><div class="week-bars"><div class="week-col on"><i class="bar-2"></i><span>一</span></div><div class="week-col"><i class="bar-1"></i><span>二</span></div><div class="week-col on"><i class="bar-4"></i><span>三</span></div><div class="week-col"><i class="bar-1"></i><span>四</span></div><div class="week-col on"><i class="bar-3"></i><span>五</span></div><div class="week-col on"><i class="bar-5"></i><span>六</span></div><div class="week-col"><i class="bar-1"></i><span>日</span></div></div></div>
+            <div class="sec-label"><span>最近训练</span><span>查看日历</span></div>
+            <div class="record-row"><div class="record-day num">10</div><div><div class="record-name">推 · 胸肩三头</div><div class="record-meta num">4 动作 · 12 组 · 48 min</div></div><div class="record-volume num">3.6t<br>完成</div></div>
+            <div class="record-row"><div class="record-day num">08</div><div><div class="record-name">拉 · 背与二头</div><div class="record-meta num">5 动作 · 14 组 · 55 min</div></div><div class="record-volume num">4.1t<br>完成</div></div>
+            <div class="record-row"><div class="record-day num">06</div><div><div class="record-name">腿 · 臀腿后侧</div><div class="record-meta num">4 动作 · 12 组 · 52 min</div></div><div class="record-volume num">5.1t<br>完成</div></div>
+          </div>
+          <nav class="tabbar"><button class="tab">今日</button><button class="tab">教练</button><button class="tab on">训练</button><button class="tab">我的</button></nav>
+        </div>
+      </div>
+    </section>
+
+    <section class="phone-wrap">
+      <div class="phone-label">06 · 我的 / 周报</div>
+      <div class="phone">
+        <div class="screen">
+          <header class="appbar"><div><h1>我的</h1><div class="sub">训练画像与本周总结</div></div><button class="pill">设置</button></header>
+          <div class="phone-scroll">
+            <div class="profile-hero"><div class="profile-avatar">H</div><div><h2>Huru</h2><p>增肌 · 进阶 · 每周 4 练</p></div></div>
+            <div class="statrow"><div><span class="k">连续训练</span><span class="v num">6 周</span></div><div><span class="k">本月训练</span><span class="v num">9 次</span></div><div><span class="k">体重</span><span class="v num">72.4kg</span></div></div>
+            <div class="card report-card"><div class="card-title">WEEK 45 · 周报</div><h3>强度稳定，卧推正在上涨</h3><div class="report-stats"><div><b class="num">4</b><span>训练日</span></div><div><b class="num">38</b><span>完成组</span></div><div><b class="num">+2.5</b><span>卧推 kg</span></div></div></div>
+            <div class="card settings-card"><div class="row"><span class="k">训练目标</span><span class="v">增肌 ›</span></div><div class="row"><span class="k">伤痛与限制</span><span class="v warn">左膝 ›</span></div><div class="row"><span class="k">器械条件</span><span class="v">商业健身房 ›</span></div></div>
+            <div class="bottom-action"><button class="btn primary block">生成本周训练海报</button></div>
+          </div>
+          <nav class="tabbar"><button class="tab">今日</button><button class="tab">教练</button><button class="tab">训练</button><button class="tab on">我的</button></nav>
+        </div>
+      </div>
+    </section>
+
+    <section class="phone-wrap">
+      <div class="phone-label">07 · 品牌引导</div>
+      <div class="phone">
+        <div class="screen brand-screen">
+          <div class="brand-content">
+            <div class="brand-word">GYM COACH</div>
+            <h2>记录一次，下次更懂你。</h2>
+            <p>从目标开始，建立一份会随着训练持续更新的个人计划。</p>
+            <div class="brand-choice"><button class="on">增肌 · 力量与围度</button><button>减脂 · 保住肌肉</button><button>提升力量 · 主项优先</button></div>
+            <button class="btn primary block brand-next">下一步 · 训练经验</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    document.querySelectorAll("[data-theme]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.documentElement.dataset.theme = button.dataset.theme;
+      });
+    });
+  </script>
+</body>
+</html>

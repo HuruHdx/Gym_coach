@@ -18,7 +18,8 @@ from app.taxonomy import normalize_exercise_name
 QA_CANONICAL: dict[str, str] = {
     "深蹲": "杠铃深蹲",
     "硬拉": "杠铃硬拉",
-    "卧推": "杠铃卧推",
+    # enriched 后正式名改为「平板杠铃卧推」；旧名「杠铃卧推」仍作别名索引
+    "卧推": "平板杠铃卧推",
 }
 
 TARGET_ZH: dict[str, str] = {
@@ -133,6 +134,7 @@ _lock = threading.Lock()
 _ready = False
 _docs: list["Doc"] = []
 _by_norm: dict[str, list["Doc"]] = {}
+_by_alias: dict[str, list["Doc"]] = {}
 _by_en: dict[str, list["Doc"]] = {}
 _substrings: set[str] = set()
 
@@ -252,6 +254,15 @@ def _passage(row: dict[str, Any], target_zh: str) -> str:
     return "\n".join(lines)
 
 
+def _assets_json() -> "Path":
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "assets" / "opengym"
+    enriched = root / "opengym_exercises_enriched.json"
+    legacy = root / "opengym_exercises_with_media.json"
+    return enriched if enriched.exists() else legacy
+
+
 def ensure_index() -> None:
     global _ready
     if _ready:
@@ -259,21 +270,33 @@ def ensure_index() -> None:
     with _lock:
         if _ready:
             return
-        from pathlib import Path
-
-        path = Path(__file__).resolve().parents[2] / "assets" / "opengym" / "opengym_exercises_with_media.json"
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(_assets_json().read_text(encoding="utf-8"))
         docs: list[Doc] = []
         by_norm: dict[str, list[Doc]] = {}
+        by_alias: dict[str, list[Doc]] = {}
         by_en: dict[str, list[Doc]] = {}
         subs: set[str] = set()
+
+        def _add_substrings(norm: str) -> None:
+            upper = min(len(norm), 12)
+            for length in range(2, upper + 1):
+                for i in range(0, len(norm) - length + 1):
+                    subs.add(norm[i : i + length])
+
+        def _index_alias(surface: str, doc: Doc) -> None:
+            norm = normalize_exercise_name(surface)
+            if not norm or norm == doc.norm:
+                return
+            bucket = by_alias.setdefault(norm, [])
+            if doc not in bucket:
+                bucket.append(doc)
+
         for row in raw:
             if not isinstance(row, dict):
                 continue
             name = str(row.get("name_zh") or "").strip()
             if not name:
                 continue
-            norm = normalize_exercise_name(name)
             en = str(row.get("name_en") or "").strip().lower()
             target_en = str(row.get("target") or "")
             tz = _target_zh(target_en)
@@ -281,30 +304,53 @@ def ensure_index() -> None:
                 id=str(row.get("id") or ""),
                 name_zh=name,
                 name_en=en,
-                norm=norm,
+                norm=normalize_exercise_name(name),
                 norm_en=normalize_exercise_name(en),
                 target_en=target_en,
                 target_zh=tz,
                 passage=_passage(row, tz),
             )
             docs.append(doc)
-            by_norm.setdefault(norm, []).append(doc)
+            by_norm.setdefault(doc.norm, []).append(doc)
+            _add_substrings(doc.norm)
             if doc.norm_en:
                 by_en.setdefault(doc.norm_en, []).append(doc)
-            upper = min(len(norm), 12)
-            for length in range(2, upper + 1):
-                for i in range(0, len(norm) - length + 1):
-                    subs.add(norm[i : i + length])
+            for alias in row.get("aliases") or []:
+                alias_text = str(alias or "").strip()
+                if alias_text:
+                    _index_alias(alias_text, doc)
+            # 兼容旧正式名（清洗后改名）
+            if name == "平板杠铃卧推":
+                _index_alias("杠铃卧推", doc)
+            if name == "徒手深蹲":
+                _index_alias("深蹲", doc)
         for bucket in by_norm.values():
+            bucket.sort(key=lambda d: d.id)
+        for bucket in by_alias.values():
             bucket.sort(key=lambda d: d.id)
         _docs[:] = docs
         _by_norm.clear()
         _by_norm.update(by_norm)
+        _by_alias.clear()
+        _by_alias.update(by_alias)
         _by_en.clear()
         _by_en.update(by_en)
         _substrings.clear()
         _substrings.update(subs)
         _ready = True
+
+
+def reload_index() -> None:
+    """Drop in-memory KB so the next query rebuilds from enriched JSON / aliases."""
+    global _ready
+    with _lock:
+        _ready = False
+        _docs.clear()
+        _by_norm.clear()
+        _by_alias.clear()
+        _by_en.clear()
+        _substrings.clear()
+    ensure_index()
 
 
 def _core(question: str) -> str:
@@ -418,8 +464,13 @@ def _similar_docs(core: str) -> list[Doc]:
     ]
 
 
-def _pick(docs: list[Doc]) -> Doc:
-    return sorted(docs, key=lambda d: d.id)[0]
+def _pick(docs: list[Doc], preferred_norm: str | None = None) -> Doc:
+    pool = docs
+    if preferred_norm:
+        exact = [d for d in docs if d.norm == preferred_norm]
+        if exact:
+            pool = exact
+    return sorted(pool, key=lambda d: d.id)[0]
 
 
 def _margin(scores: list[float]) -> float:
@@ -446,6 +497,29 @@ def _choice_key(phrase: str, doc: Doc) -> tuple:
     return (-bonus, -overlap, len(name), doc.norm, doc.id)
 
 
+def _short_ask_phrase(phrase: str) -> str:
+    """反问里只留动作名，去掉「怎么做啊」整句，避免读起来像否定用户。"""
+    text = (phrase or "").strip().strip("？?。！!～~")
+    for suffix in (
+        "怎么做啊",
+        "怎么做呀",
+        "怎么做呢",
+        "怎么做的",
+        "怎么做",
+        "怎么练啊",
+        "怎么练呀",
+        "怎么练",
+        "练哪里",
+        "练哪儿",
+        "练什么地方",
+        "是什么",
+    ):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip("，,。 ")
+            break
+    return text or (phrase or "").strip()
+
+
 def _ask(phrase: str, docs: list[Doc], *, missing_name: bool) -> Grounding:
     # 同一针的分数放在同一档，分差为 0，调低阈值也不能升成命中
     score = 0.72
@@ -458,7 +532,11 @@ def _ask(phrase: str, docs: list[Doc], *, missing_name: bool) -> Grounding:
     chosen = ranked[:4]
     near = [_pick([d for d in docs if d.norm == item.norm]).hit(score) for item in chosen]
     labels = [item.name_zh for item in chosen]
-    suggestions = [{"label": name, "prompt": f"{name}练哪里"} for name in labels]
+    short = _short_ask_phrase(phrase)
+    # 用户在问做法时，点选项继续问「怎么做」，别一律改成「练哪里」
+    ask_how = any(k in (phrase or "") for k in ("怎么做", "怎么练", "要领", "步骤"))
+    follow = "怎么做" if ask_how else "练哪里"
+    suggestions = [{"label": name, "prompt": f"{name}{follow}"} for name in labels]
     suggestions.append({"label": "都不是", "prompt": "都不是"})
     options = "、".join(labels)
     # 反问时顺带告诉用户这些候选练的部位，不让用户纯猜
@@ -471,10 +549,16 @@ def _ask(phrase: str, docs: list[Doc], *, missing_name: bool) -> Grounding:
     else:
         muscle_hint = ""
     if missing_name:
-        # 用户的叫法对不上正式名：纠正几个相近的，并先回答练哪里。
-        answer = f"没有「{phrase}」这个叫法。按你说的动作，比较接近：{options}。{muscle_hint}要是都不是，我按你原来的问法去查。"
+        # 口语名对不上单一正式名：礼貌确认是哪一种，不说「没有这个叫法」
+        answer = (
+            f"「{short}」我这边对应到好几种，你指的是哪一个？"
+            f"{options}。{muscle_hint}点下面选一个就行；都不是的话再说一声。"
+        )
     else:
-        answer = f"「{phrase}」有好几种，你指的是哪一个？{options}。{muscle_hint}都不是的话，我按你原来的问法去查。"
+        answer = (
+            f"「{short}」有好几种，你指的是哪一个？"
+            f"{options}。{muscle_hint}点下面选一个就行；都不是的话再说一声。"
+        )
     return Grounding(
         branch="ask",
         reason="ambiguous",
@@ -482,7 +566,7 @@ def _ask(phrase: str, docs: list[Doc], *, missing_name: bool) -> Grounding:
         hit=False,
         top_score=score,
         margin=0.0 if len(ranked) > 1 else 1.0,
-        hits=near[:1],
+        hits=near,
         near_miss=near,
         suggestions=suggestions,
         answer=answer,
@@ -490,8 +574,13 @@ def _ask(phrase: str, docs: list[Doc], *, missing_name: bool) -> Grounding:
     )
 
 
-def _kb(docs: list[Doc], reason: str, spoken: str | None = None) -> Grounding:
-    doc = _pick(docs)
+def _kb(
+    docs: list[Doc],
+    reason: str,
+    spoken: str | None = None,
+    preferred_norm: str | None = None,
+) -> Grounding:
+    doc = _pick(docs, preferred_norm=preferred_norm)
     label = spoken or doc.name_zh
     answer = f"{label}主要练{doc.target_zh}。"
     hit = doc.hit(1.0)
@@ -507,6 +596,13 @@ def _kb(docs: list[Doc], reason: str, spoken: str | None = None) -> Grounding:
         direct_answer=answer,
         passage=doc.passage,
     )
+
+
+def _alias_docs(surface: str) -> list[Doc]:
+    norm = normalize_exercise_name(surface)
+    if not norm:
+        return []
+    return [d for d in (_by_alias.get(norm) or []) if looks_like_exercise_name(d.name_zh)]
 
 
 def _search(reason: str, query: str) -> Grounding:
@@ -696,15 +792,15 @@ def ground_question(question: str, history: list[Any] | None = None) -> Groundin
         name = names[0]
         if name in QA_CANONICAL:
             target = normalize_exercise_name(QA_CANONICAL[name])
-            return _kb(_by_norm[target], "canonical", spoken=name)
+            return _kb(_by_norm[target], "canonical", spoken=name, preferred_norm=target)
         docs = _by_norm[name]
         if not looks_like_exercise_name(docs[0].name_zh):
             return _search("anatomy", question)
-        return _kb(docs, "exact_name")
+        return _kb(docs, "exact_name", preferred_norm=name)
 
     if core in QA_CANONICAL:
         target = normalize_exercise_name(QA_CANONICAL[core])
-        return _kb(_by_norm[target], "canonical", spoken=core)
+        return _kb(_by_norm[target], "canonical", spoken=core, preferred_norm=target)
 
     folded = qnorm.replace("座", "坐")
     if folded != qnorm:
@@ -719,7 +815,7 @@ def ground_question(question: str, history: list[Any] | None = None) -> Groundin
         target = normalize_exercise_name(QA_CANONICAL[keys[0]])
         docs = _by_norm.get(target) or []
         if docs:
-            return _kb(docs, "canonical", spoken=keys[0])
+            return _kb(docs, "canonical", spoken=keys[0], preferred_norm=target)
 
     if core and not looks_like_exercise_name(core) and core in _by_norm:
         return _search("anatomy", question)
@@ -730,6 +826,10 @@ def ground_question(question: str, history: list[Any] | None = None) -> Groundin
     similar = _similar_docs(core) if core else []
     if similar:
         return _ask(core or question, similar, missing_name=True)
+    # 别名精确命中放在家族名/相似反问之后，避免「坐姿划船」这类泛称被单个别名锁死
+    alias_hits = _alias_docs(core) if core else []
+    if len(alias_hits) == 1 or (alias_hits and len({d.norm for d in alias_hits}) == 1):
+        return _kb(alias_hits, "alias", spoken=core)
     if needle:
         moves = _move_words(core)
         # 只剩动作词对得上，或最长片段把动作词切掉了：没有相似正式名，交给模型。

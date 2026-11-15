@@ -15,6 +15,7 @@ import { api } from "../lib/api";
 import { COACH_NAME } from "../lib/brand";
 import { CoachMark } from "../components/CoachMark";
 import { DraftCard } from "../components/DraftCard";
+import { ExerciseRefCards } from "../components/ExerciseRefCards";
 import { MessageFeedback } from "../components/MessageFeedback";
 import type {
   AgentReply,
@@ -321,7 +322,14 @@ export function CoachPage({ profile }: Props) {
       const textBlock = reply.blocks.find(
         (b): b is Extract<Block, { kind: "text" }> => b.kind === "text",
       );
-      const cardBlock = reply.blocks.find((b): b is CardBlock => b.kind === "card");
+      const draftCard = reply.blocks.find(
+        (b): b is CardBlock => b.kind === "card" && b.card_type === "training_draft",
+      );
+      const exerciseCard = reply.blocks.find(
+        (b): b is CardBlock => b.kind === "card" && b.card_type === "exercise_ref",
+      );
+      // 排课草稿优先；否则挂知识问答动作卡
+      const cardBlock = draftCard || exerciseCard;
 
       clearInterval(timer);
 
@@ -336,7 +344,8 @@ export function CoachPage({ profile }: Props) {
                   ? { ...cardBlock, status: cardBlock.status || "draft" }
                   : undefined,
                 suggestions: reply.suggestions,
-                awaitingConfirm: Boolean(reply.suggestions?.length) && !cardBlock,
+                awaitingConfirm:
+                  Boolean(reply.suggestions?.length) && !draftCard,
                 elapsedSec: totalElapsed,
                 traceId: reply.trace_id,
                 turnId: reply.turn_id,
@@ -545,7 +554,7 @@ export function CoachPage({ profile }: Props) {
                       <div className="rounded-lg rounded-tl-sm border border-line bg-elevated p-3.5 shadow-card">
                         {m.elapsedSec != null && (
                           <div className="mb-1 text-micro font-medium text-muted">
-                            {m.card
+                            {m.card?.card_type === "training_draft"
                               ? `已按画像排好 · ${m.elapsedSec}s`
                               : m.awaitingConfirm
                                 ? `先跟你确认 · ${m.elapsedSec}s`
@@ -588,6 +597,10 @@ export function CoachPage({ profile }: Props) {
                             }
                           />
                         </div>
+                      )}
+
+                      {m.card && m.card.card_type === "exercise_ref" && (
+                        <ExerciseRefCards card={m.card} />
                       )}
 
                       {m.traceId != null && (

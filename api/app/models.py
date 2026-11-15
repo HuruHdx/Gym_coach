@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from pydantic import NaiveDatetime
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, ForeignKey, Integer, JSON, String
 from sqlmodel import Field, SQLModel
 
 
@@ -112,10 +112,69 @@ class Exercise(SQLModel, table=True):
     variant_of: Optional[str] = None
     # Derived coach fields
     muscle: str = Field(default="全身", index=True)
+    # 可归属的中文肌群列表（如硬拉 ["背","腿","全身"]）；AI 排课按部位过滤用，勿改语义
     roles: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    # 计划槽位角色：main / assist / isolation / warmup（与 roles 肌群语义独立）
+    slot_roles: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
     modality: str = Field(default="抗阻", index=True)
     gear: str = Field(default="器械", index=True)
     coach_core: bool = Field(default=False, index=True)
+    # Enriched / admin fields (additive only)
+    sub_region: Optional[str] = Field(default=None, index=True)
+    movement_pattern: Optional[str] = Field(default=None, index=True)
+    joint_stress: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    cues_zh: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    common_mistakes_zh: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    is_valid_exercise: bool = Field(default=True, index=True)
+    needs_review: bool = Field(default=False, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
+class ExerciseMedia(SQLModel, table=True):
+    """Per-slot media for an exercise. Same exercise+role keeps at most one published row."""
+
+    __tablename__ = "exercise_media"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    exercise_id: str = Field(index=True, max_length=32)
+    role: str = Field(index=True, max_length=32)  # start|end|demo|highlight_video|tip
+    url: str = Field(max_length=512)
+    status: str = Field(default="published", index=True, max_length=16)  # draft|published|archived
+    source: str = Field(default="seed", max_length=32)  # seed|upload|video_studio
+    meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
+class ExerciseAlias(SQLModel, table=True):
+    """Spoken / alternate names mapped to an exercise SKU."""
+
+    __tablename__ = "exercise_aliases"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    exercise_id: str = Field(index=True, max_length=32)
+    alias: str = Field(index=True, max_length=120)
+    status: str = Field(default="published", index=True, max_length=16)  # draft|published
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
+class MediaUnmatchedPool(SQLModel, table=True):
+    """A3：批量上传未自动匹配到动作的素材池。"""
+
+    __tablename__ = "media_unmatched_pool"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    filename: str = Field(max_length=260)
+    relative_path: Optional[str] = Field(default=None, max_length=512)
+    stored_path: str = Field(max_length=512)
+    file_type: str = Field(default="image", max_length=32)  # image|gif|video|other
+    size_bytes: int = Field(default=0)
+    guessed_role: Optional[str] = Field(default=None, max_length=32)
+    candidates: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    status: str = Field(default="pending", index=True, max_length=16)  # pending|bound|ignored
+    bound_exercise_id: Optional[str] = Field(default=None, index=True, max_length=32)
+    bound_media_id: Optional[int] = Field(default=None)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class TrainingSession(SQLModel, table=True):
@@ -133,6 +192,10 @@ class TrainingSession(SQLModel, table=True):
     timer_started_at: Optional[NaiveDatetime] = None
     duration_minutes: Optional[int] = None
     duration_source: Optional[str] = None  # timer | manual
+    # 计划模板溯源（采纳模板板块时写入；AI/自定义可空）
+    plan_template_id: Optional[str] = Field(default=None, index=True, max_length=32)
+    plan_block_id: Optional[int] = Field(default=None, index=True)
+    plan_type: Optional[str] = Field(default=None, max_length=16)  # custom | framework | fixed
     created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
@@ -150,6 +213,7 @@ class TrainingSetLog(SQLModel, table=True):
     completed: bool = False
     feeling: Optional[str] = None  # 轻松 | 合适 | 力竭
     note: Optional[str] = None
+    is_warmup: bool = False  # 热身组不计入 1RM / 有效容量（旧数据默认 False）
 
 
 class ExerciseStats(SQLModel, table=True):
@@ -229,3 +293,96 @@ class FeedbackEvent(SQLModel, table=True):
     answer: str = ""
     snapshot: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     export_status: str = Field(default="pending", index=True)  # pending | exported | discarded
+
+
+# ---------- Plan templates（后台配置 → H5 展开成今日草稿） ----------
+
+# 计划封面器械标签约定（中文枚举；映射到 Exercise.equipment / gear 见后续 expand 服务）
+PLAN_GEAR_TAGS = (
+    "杠铃",
+    "哑铃",
+    "壶铃",
+    "绳索",
+    "史密斯",
+    "固定器械",
+    "自重",
+    "弹力带",
+)
+
+# 动作槽位角色（存 Exercise.slot_roles / PlanExercise.role）
+PLAN_SLOT_ROLES = ("main", "assist", "isolation", "warmup")
+
+
+class PlanTemplate(SQLModel, table=True):
+    """可上下架的训练计划模板主表。"""
+
+    __tablename__ = "plan_templates"
+
+    id: str = Field(primary_key=True, max_length=32)  # slug，如 three-split-chest-back-legs
+    title: str = Field(max_length=80)
+    subtitle: Optional[str] = Field(default=None, max_length=160)
+    author: Optional[str] = Field(default=None, max_length=80)  # 详情署名，如「凯圣王 × 谭成义」
+    badge_label: Optional[str] = Field(default=None, max_length=40)  # 卡片角标，如「谭成义」「加强版·新手勿练」
+    template_type: str = Field(default="framework", max_length=16, index=True)  # framework | fixed
+    level: Optional[str] = Field(default=None, max_length=16)  # beginner | intermediate | advanced
+    days_per_week: int = Field(default=3, ge=1, le=7)
+    minutes_min: Optional[int] = Field(default=None, ge=1, le=300)
+    minutes_max: Optional[int] = Field(default=None, ge=1, le=300)
+    muscle_tags: list[Any] = Field(default_factory=list, sa_column=Column(JSON))  # 筛选用：胸/背/腿…
+    split_summary: Optional[str] = Field(default=None, max_length=80)  # 卡片副文案：胸 · 背 · 腿
+    gear_tags: list[Any] = Field(default_factory=list, sa_column=Column(JSON))  # 见 PLAN_GEAR_TAGS
+    description: Optional[str] = None
+    cover_url: Optional[str] = Field(default=None, max_length=512)
+    is_published: bool = Field(default=False, index=True)
+    sort_order: int = Field(default=0, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
+class PlanBlock(SQLModel, table=True):
+    """模板内一个训练日 / 板块（如「胸肩三头」）。"""
+
+    __tablename__ = "plan_blocks"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    template_id: str = Field(
+        sa_column=Column(
+            String(32),
+            ForeignKey("plan_templates.id", ondelete="CASCADE"),
+            index=True,
+            nullable=False,
+        )
+    )
+    order_index: int = Field(default=0, index=True)
+    title: str = Field(max_length=80)
+    muscles: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    minutes_min: Optional[int] = Field(default=None, ge=1, le=300)
+    minutes_max: Optional[int] = Field(default=None, ge=1, le=300)
+    cover_url: Optional[str] = Field(default=None, max_length=512)
+    note: Optional[str] = None
+
+
+class PlanExercise(SQLModel, table=True):
+    """板块内一行动作：成品型挂 SKU；框架型可留槽位。"""
+
+    __tablename__ = "plan_exercises"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    block_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("plan_blocks.id", ondelete="CASCADE"),
+            index=True,
+            nullable=False,
+        )
+    )
+    order_index: int = Field(default=0, index=True)
+    exercise_id: Optional[str] = Field(default=None, index=True, max_length=32)
+    exercise_name: Optional[str] = Field(default=None, max_length=120)
+    role: str = Field(default="main", max_length=16)  # main | assist | isolation | warmup
+    lock_level: str = Field(default="slot", max_length=16)  # fixed | slot
+    target_sets: Optional[int] = Field(default=None, ge=1, le=20)
+    target_reps: Optional[str] = Field(default=None, max_length=32)  # 如 8-12 / 10
+    warmup_sets: int = Field(default=0, ge=0, le=10)  # 正式组前的热身组数；独立热身动作用 role=warmup
+    alternatives: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    note: Optional[str] = None

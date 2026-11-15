@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import type { CardBlock, CardItem, TrainingSession } from "../types";
 import { MUSCLE_OPTIONS, rebuildSubtitle } from "../types";
 import { ReorderItem, ReorderList } from "./ReorderList";
 import { WeightStepper } from "./WeightStepper";
 import { SwapExerciseModal } from "./SwapExerciseModal";
+
+type ResolvedThumb = { id: string; name_zh: string; thumb_url: string | null };
 
 type Props = {
   card: CardBlock;
@@ -19,16 +22,51 @@ function isLocked(status: string | undefined) {
 }
 
 export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Props) {
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newMuscle, setNewMuscle] = useState<string>("胸");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [thumbs, setThumbs] = useState<Record<string, ResolvedThumb>>({});
   const locked = isLocked(card.status);
   const todayDone = todayStatus === "done";
 
   // 替换动作弹窗状态
   const [swapTarget, setSwapTarget] = useState<CardItem | null>(null);
+
+  const titleKey = useMemo(
+    () => card.items.map((it) => it.title.trim()).filter(Boolean).join("|"),
+    [card.items],
+  );
+
+  useEffect(() => {
+    const titles = card.items.map((it) => it.title.trim()).filter(Boolean);
+    if (!titles.length) {
+      setThumbs({});
+      return;
+    }
+    let alive = true;
+    const params = new URLSearchParams();
+    params.set("names", titles.join(","));
+    api<{ items: Record<string, ResolvedThumb> }>(`/api/exercises/resolve?${params}`)
+      .then((res) => {
+        if (alive) setThumbs(res.items || {});
+      })
+      .catch(() => {
+        if (alive) setThumbs({});
+      });
+    return () => {
+      alive = false;
+    };
+    // titleKey 变化即重拉
+  }, [titleKey, card.items]);
+
+  function openDetail(title: string) {
+    const hit = thumbs[title];
+    if (!hit?.id) return;
+    navigate(`/exercises/${encodeURIComponent(hit.id)}`, { state: { from: "coach" } });
+  }
 
   function updateItem(id: string, patch: Partial<CardItem>) {
     onChange({
@@ -214,9 +252,39 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
                       {it.selected ? "✓" : ""}
                     </button>
 
+                    <button
+                      type="button"
+                      className="pressable mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-line bg-bg"
+                      onClick={() => openDetail(it.title)}
+                      title={thumbs[it.title]?.id ? "查看动作详情" : "暂无动作库匹配"}
+                      disabled={!thumbs[it.title]?.id}
+                    >
+                      {thumbs[it.title]?.thumb_url ? (
+                        <img
+                          src={thumbs[it.title].thumb_url!}
+                          alt=""
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <span className="grid h-full place-items-center text-[9px] font-bold text-muted">
+                          无图
+                        </span>
+                      )}
+                    </button>
+
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate font-display text-sm font-bold text-ink">{it.title}</span>
+                        {thumbs[it.title]?.id ? (
+                          <button
+                            type="button"
+                            className="pressable truncate text-left font-display text-sm font-bold text-ink underline-offset-2 hover:underline"
+                            onClick={() => openDetail(it.title)}
+                          >
+                            {it.title}
+                          </button>
+                        ) : (
+                          <span className="truncate font-display text-sm font-bold text-ink">{it.title}</span>
+                        )}
                         <span className="shrink-0 rounded bg-bg px-1.5 py-0.5 text-[10px] text-muted">
                           {String(it.meta.muscle || "常用")}
                         </span>

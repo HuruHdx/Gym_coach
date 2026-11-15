@@ -1,6 +1,11 @@
 # Gym Coach
 
-个人训练 / 饮食记录 + AI 建议。方案见 `架构方案.md`；验收见 `阶段0-验收.md`、`阶段1-验收.md`。
+个人训练 / 饮食记录 + AI 建议。方案见 [`docs/architecture/架构方案.md`](./docs/architecture/架构方案.md)；历史验收见 [`docs/archive/`](./docs/archive/)。
+
+## 后台 Admin（桌面另仓）
+
+- 后台前端工程：`C:\Users\Huru Huru\Desktop\gym-admin`
+- 后台方案与主进度以 `gym-admin/docs/`（01–05 路线图）为准，本仓不再保留副本
 
 ## 本地启动
 
@@ -48,13 +53,13 @@ LLM_MODEL=gpt-4o-mini
 | `api/` | FastAPI + SQLite + AI 内核骨架 |
 | `web/` | React H5（Court/Cobalt/Ember 换肤） |
 | `ui-preview/` | 静态 UI 画廊 |
-| `架构方案.md` | 定稿架构 |
-| `设计系统.md` | UI token |
-| `阶段0-验收.md` | 地基验收 |
-| `阶段1-验收.md` | 训练闭环验收 |
-| `项目演进与架构思考.md` | 阶段演进历程、工程细节与架构哲学沉淀 |
+| `docs/architecture/` | 定稿架构、设计系统、演进思考 |
+| `docs/contracts/` | 意图路由契约、工单、知识问答方案 |
+| `docs/eval/` | 评测架构与评测集说明 |
+| `docs/archive/` | 已完成阶段的验收记录 |
+| `docs/plan/` | 进行中的功能工单与方案 |
 
 ## 当前进度
 
 **阶段 1**：四 Tab（今日 / 教练 / 训练 / 我的）、草稿可编辑与采纳、按组打卡、动作沉淀与上次重量回流。  
-按 `阶段1-验收.md` 勾完即可。下一步可选阶段 2（饮食）或部署自用。
+按 [`docs/archive/阶段1-验收.md`](./docs/archive/阶段1-验收.md) 勾完即可。下一步可选阶段 2（饮食）或部署自用。

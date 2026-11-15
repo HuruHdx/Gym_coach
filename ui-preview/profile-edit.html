@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Gym Coach · 编辑资料</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#F2F3EE; --bg-elevated:#FFFFFF; --ink:#12140F; --ink-muted:#6B7164;
+  --line:#D8DBD0; --accent:#C8F000; --accent-ink:#1A2200;
+  --danger:#E23D2D; --ok:#2F6B3A;
+  --radius-sm:6px; --radius-md:10px; --radius-lg:14px;
+  --shadow:0 12px 40px rgba(18,20,15,.12);
+  --font-display:"Syne",system-ui,sans-serif;
+  --font-body:"Public Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-body);background:#1a1c18;color:var(--ink);display:grid;place-items:center;min-height:100%;padding:24px 12px}
+.stage{
+  width:min(390px,100%);height:min(844px,94vh);
+  background:var(--bg);border-radius:28px;overflow:hidden;position:relative;
+  box-shadow:0 30px 80px rgba(0,0,0,.45);
+  display:flex;flex-direction:column;isolation:isolate;
+}
+.stage::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.04;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index:0;
+}
+.screen{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;min-height:0}
+
+/* topbar */
+.topbar{
+  padding:8px 12px 12px;display:flex;justify-content:space-between;align-items:center;
+}
+.back-btn{
+  border:1px solid var(--line);background:var(--bg-elevated);
+  width:36px;height:36px;border-radius:var(--radius-sm);
+  display:grid;place-items:center;cursor:pointer;color:var(--ink);font-size:18px;
+}
+.page-title{font-family:var(--font-display);font-weight:800;font-size:18px;letter-spacing:-.01em}
+.topbar .spacer{width:36px}
+
+/* scroll */
+.scroll{flex:1;overflow-y:auto;padding:0 16px 120px;scrollbar-width:none}
+.scroll::-webkit-scrollbar{display:none}
+
+/* avatar edit */
+.avatar-edit{
+  display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 0 20px;
+}
+.avatar-big{
+  width:84px;height:84px;border-radius:22px;background:var(--ink);color:var(--accent);
+  display:grid;place-items:center;font-family:var(--font-display);font-weight:800;font-size:34px;
+}
+.change-avatar{
+  border:1px solid var(--line);background:var(--bg-elevated);
+  padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;color:var(--ink);cursor:pointer;
+}
+
+/* section */
+.section-title{
+  font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-muted);margin:16px 4px 8px;
+}
+.card{background:var(--bg-elevated);border:1px solid var(--line);border-radius:var(--radius-md);padding:14px;margin-bottom:8px}
+
+/* choice groups */
+.choice-label{font-size:13px;font-weight:700;margin-bottom:8px}
+.choice-row{display:flex;gap:6px;flex-wrap:wrap}
+.choice{
+  border:1px solid var(--line);background:transparent;border-radius:999px;
+  padding:8px 16px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;
+}
+.choice.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+
+/* scene */
+.scene-row{display:flex;flex-direction:column;gap:8px}
+.scene{
+  border:1px solid var(--line);background:var(--bg);border-radius:var(--radius-md);
+  padding:12px 14px;text-align:left;cursor:pointer;font-family:var(--font-body);
+}
+.scene b{display:block;font-size:14px;font-weight:700;color:var(--ink)}
+.scene span{display:block;font-size:12px;color:var(--ink-muted);margin-top:2px}
+.scene.on{background:var(--accent);border-color:var(--accent)}
+.scene.on b{color:var(--accent-ink)}
+.scene.on span{color:rgba(26,34,0,.7)}
+
+/* input rows */
+.input-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 0;border-bottom:1px solid var(--line);
+}
+.input-row:last-child{border-bottom:none}
+.input-row .k{font-size:13px;color:var(--ink-muted)}
+.input-row .v{display:flex;align-items:center;gap:8px}
+.input-row input{
+  width:80px;border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:8px 10px;font-family:var(--font-body);font-size:14px;font-weight:600;
+  text-align:right;outline:none;background:var(--bg);
+}
+.input-row .unit{font-size:12px;color:var(--ink-muted)}
+.chev{color:var(--ink-muted);font-size:14px}
+
+/* save */
+.save{
+  width:100%;border:none;background:var(--accent);color:var(--accent-ink);
+  font-family:var(--font-display);font-weight:800;font-size:16px;
+  padding:16px;border-radius:var(--radius-md);cursor:pointer;margin-top:20px;
+}
+.save:active{transform:scale(.98)}
+
+.footnote{text-align:center;font-size:10px;color:var(--ink-muted);opacity:.7;padding:12px 0 4px}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="screen">
+    <div class="status" style="display:flex;justify-content:space-between;padding:12px 20px 4px;font-size:12px;font-weight:600"><span>9:41</span><span>5G</span></div>
+
+    <div class="topbar">
+      <button class="back-btn">←</button>
+      <div class="page-title">编辑资料</div>
+      <div class="spacer"></div>
+    </div>
+
+    <div class="scroll">
+      <!-- 头像 -->
+      <div class="avatar-edit">
+        <div class="avatar-big">H</div>
+        <button class="change-avatar">更换头像</button>
+      </div>
+
+      <!-- 目标 -->
+      <div class="section-title">训练目标</div>
+      <div class="card">
+        <div class="choice-label">目标</div>
+        <div class="choice-row">
+          <button class="choice on">增肌</button>
+          <button class="choice">减脂</button>
+          <button class="choice">力量</button>
+          <button class="choice">塑形</button>
+        </div>
+      </div>
+
+      <!-- 经验 -->
+      <div class="card">
+        <div class="choice-label">经验</div>
+        <div class="choice-row">
+          <button class="choice">新手</button>
+          <button class="choice on">进阶</button>
+          <button class="choice">熟手</button>
+        </div>
+      </div>
+
+      <!-- 频率时长 -->
+      <div class="card">
+        <div class="choice-label">每周练几天</div>
+        <div class="choice-row">
+          <button class="choice">2</button>
+          <button class="choice">3</button>
+          <button class="choice on">4</button>
+          <button class="choice">5</button>
+          <button class="choice">6</button>
+          <button class="choice">7</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="choice-label">单次时长</div>
+        <div class="choice-row">
+          <button class="choice">45</button>
+          <button class="choice on">60</button>
+          <button class="choice">90</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <span style="font-size:12px;color:var(--ink-muted)">自定义</span>
+          <input type="number" value="" placeholder="输入分钟" style="flex:1;border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 12px;font-size:14px;font-weight:600;outline:none;background:var(--bg);text-align:left" />
+          <span style="font-size:12px;color:var(--ink-muted)">分钟</span>
+        </div>
+      </div>
+
+      <!-- 场景 -->
+      <div class="card">
+        <div class="choice-label">训练场景</div>
+        <div class="scene-row">
+          <button class="scene on"><b>健身房</b><span>器械齐全 · 杠铃哑铃都有</span></button>
+          <button class="scene"><b>居家</b><span>哑铃 / 弹力带 / 单杠</span></button>
+          <button class="scene"><b>纯徒手</b><span>无器械 · 自重为主</span></button>
+        </div>
+      </div>
+
+      <!-- 伤病 -->
+      <div class="card">
+        <div class="choice-label">要避开的部位</div>
+        <div class="choice-row">
+          <button class="choice">肩</button>
+          <button class="choice">腰</button>
+          <button class="choice on">膝</button>
+          <button class="choice">腕</button>
+          <button class="choice">肘</button>
+        </div>
+        <div style="margin-top:10px">
+          <input type="text" placeholder="说明一下（可选）" style="width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;outline:none;background:var(--bg)" />
+        </div>
+      </div>
+
+      <!-- 身体 -->
+      <div class="section-title">身体数据</div>
+      <div class="card">
+        <div class="input-row">
+          <div class="k">体重</div>
+          <div class="v"><input type="number" value="72.4" /><span class="unit">kg</span></div>
+        </div>
+        <div class="input-row">
+          <div class="k">身高</div>
+          <div class="v"><input type="number" value="172" /><span class="unit">cm</span></div>
+        </div>
+        <div class="input-row">
+          <div class="k">性别</div>
+          <div class="v"><span style="font-size:14px;font-weight:600">男</span><span class="chev">›</span></div>
+        </div>
+        <div class="input-row">
+          <div class="k">出生年</div>
+          <div class="v"><span style="font-size:14px;font-weight:600">1998</span><span class="chev">›</span></div>
+        </div>
+      </div>
+
+      <button class="save">保存</button>
+      <div class="footnote">这些信息只用于生成安全的训练计划</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

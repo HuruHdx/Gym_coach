@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     intent_rewrite_mode: str = "llm"  # rules | llm | hybrid（暂默认纯模型，避开规则误命中）
     intent_rewrite_provider: str = "same"  # same | off（后续可加独立 openai_compatible）
     memory_token_budget: int = 1800
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174"
+    )
+    # 后台 gym-admin 登录口令；空则回落到 app_token
+    admin_password: str = ""
     # 配了 key 才把同一张图送到 LangSmith；本地 Debug 轨迹始终写库
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""
