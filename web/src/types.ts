@@ -95,8 +95,75 @@ export type TrainingSession = {
   duration_seconds?: number;
   timer_started_at?: string | null;
   duration_minutes?: number | null;
+  plan_template_id?: string | null;
+  plan_block_id?: number | null;
+  plan_type?: "custom" | "framework" | "fixed" | string | null;
   sets: SetLog[];
   progress: { done: number; total: number };
+};
+
+export type PlanTemplateCard = {
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  author?: string | null;
+  badge_label?: string | null;
+  template_type: "framework" | "fixed" | string;
+  level?: string | null;
+  level_label?: string | null;
+  days_per_week: number;
+  minutes_min?: number | null;
+  minutes_max?: number | null;
+  minutes_label?: string | null;
+  muscle_tags: string[];
+  split_summary?: string | null;
+  gear_tags: string[];
+  cover_url?: string | null;
+  description?: string | null;
+  block_count?: number;
+};
+
+export type PlanExerciseRow = {
+  id: number;
+  order_index: number;
+  exercise_id?: string | null;
+  exercise_name?: string | null;
+  role: string;
+  role_label?: string;
+  lock_level: string;
+  target_sets?: number | null;
+  target_reps?: string | null;
+  warmup_sets?: number;
+  alternatives?: string[];
+  note?: string | null;
+  thumb_url?: string | null;
+  pending?: boolean;
+};
+
+export type PlanBlockDetail = {
+  id: number;
+  order_index: number;
+  title: string;
+  muscles: string[];
+  minutes_min?: number | null;
+  minutes_max?: number | null;
+  minutes_label?: string | null;
+  cover_url?: string | null;
+  note?: string | null;
+  exercises: PlanExerciseRow[];
+};
+
+export type PlanDetail = PlanTemplateCard & {
+  blocks: PlanBlockDetail[];
+};
+
+export type PlanListResponse = {
+  items: PlanTemplateCard[];
+  total: number;
+};
+
+export type PlanExpandResponse = {
+  card: CardBlock;
 };
 
 export type ExerciseStat = {

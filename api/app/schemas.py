@@ -338,6 +338,10 @@ class AdoptRequest(BaseModel):
     replace_today: bool = True
     # 今日已完成后再次采纳需显式确认，避免悄悄覆盖已结算场次
     force_replace_done: bool = False
+    # 计划模板溯源（H5 从模板展开采纳时写入）
+    plan_template_id: Optional[str] = Field(default=None, max_length=32)
+    plan_block_id: Optional[int] = None
+    plan_type: Optional[str] = Field(default=None, max_length=16)  # custom | framework | fixed
 
 
 class ReorderRequest(BaseModel):
@@ -392,6 +396,9 @@ class SessionOut(BaseModel):
     duration_seconds: int = 0
     timer_started_at: Optional[str] = None
     duration_minutes: Optional[int] = None
+    plan_template_id: Optional[str] = None
+    plan_block_id: Optional[int] = None
+    plan_type: Optional[str] = None
     sets: list[SetOut] = Field(default_factory=list)
     progress: dict[str, int] = Field(default_factory=dict)
 

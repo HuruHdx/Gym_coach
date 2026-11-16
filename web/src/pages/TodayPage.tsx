@@ -188,14 +188,22 @@ export function TodayPage() {
             还没开始
           </h2>
           <p className="relative mt-3 max-w-[28ch] text-sm leading-relaxed text-muted">
-            去教练页定制一版草稿，采纳后回到这里专心打卡。
+            去浏览计划选一场，或让教练定制草稿，采纳后回到这里打卡。
           </p>
-          <Link
-            to="/coach"
-            className="pressable relative mt-auto inline-flex w-full items-center justify-center rounded-md bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink"
-          >
-            让{COACH_NAME}定制
-          </Link>
+          <div className="relative mt-auto space-y-2">
+            <Link
+              to="/plans"
+              className="pressable inline-flex w-full items-center justify-center rounded-md bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink"
+            >
+              浏览计划
+            </Link>
+            <Link
+              to="/coach"
+              className="pressable inline-flex w-full items-center justify-center rounded-md border border-line bg-elevated py-3 text-sm font-bold text-ink"
+            >
+              让{COACH_NAME}定制
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -208,6 +216,20 @@ export function TodayPage() {
   const isDone = local.status === "done";
   const locked = isDone && !revising;
   const seconds = elapsedSeconds(local, now);
+  const exerciseCount = groups.length;
+  const planTypeLabel =
+    local.plan_type === "framework"
+      ? "框架计划"
+      : local.plan_type === "fixed"
+        ? "成品计划"
+        : local.plan_type === "custom"
+          ? "自定义"
+          : "今日计划";
+  const muscleSummary = [
+    ...new Set(groups.map((g) => g.sets[0]?.muscle).filter(Boolean) as string[]),
+  ]
+    .slice(0, 4)
+    .join(" · ");
 
   async function regenerateSummary() {
     if (!local || regenBusy) return;
@@ -236,36 +258,51 @@ export function TodayPage() {
         Gym Coach
       </p>
       <div className="flex items-end justify-between gap-3">
-        <h1 className="font-display text-[26px] font-bold tracking-tight">
-          今日
-          <em className="ml-2 text-base font-semibold not-italic text-muted">
-            {local.split_label || "训练"}
-          </em>
-        </h1>
-        <span
-          className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
-            isDone ? "bg-ok/15 text-ok" : "bg-accent/40 text-accent-ink"
-          }`}
-        >
-          {isDone ? "已完成" : "执行中"}
-        </span>
+        <h1 className="font-display text-[26px] font-bold tracking-tight">今日</h1>
+        <Link to="/plans" className="text-[12px] font-bold text-accent-text">
+          浏览计划
+        </Link>
       </div>
 
-      <div className="bar-track mt-3">
-        <i style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />
-      </div>
-      <p className="mt-1.5 text-xs text-muted">
-        {local.progress.done}/{local.progress.total} 组 · {pct}%
-        {isDone && !revising ? " · 已锁定，展开可回看" : ""}
-        {revising ? " · 修正中，改完请重新生成总结" : ""}
-      </p>
+      <div className="mt-3 rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-elevated to-elevated p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold tracking-wide text-muted">{planTypeLabel}</p>
+            <h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight">
+              {local.split_label || "训练"}
+            </h2>
+            <p className="mt-1 text-[12px] text-muted">
+              <span className="num">
+                {exerciseCount} 动作 · {local.progress.total} 组
+              </span>
+              {muscleSummary ? ` · ${muscleSummary}` : ""}
+            </p>
+          </div>
+          <span
+            className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
+              isDone ? "bg-ok/15 text-ok" : "bg-accent/40 text-accent-ink"
+            }`}
+          >
+            {isDone ? "已完成" : "执行中"}
+          </span>
+        </div>
 
-      {!isDone && (
-        <div className="mt-4 rounded-xl border border-line bg-elevated px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
+        <div className="bar-track mt-3">
+          <i style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />
+        </div>
+        <p className="mt-1.5 text-xs text-muted">
+          {local.progress.done}/{local.progress.total} 组 · {pct}%
+          {isDone && !revising ? " · 已锁定，展开可回看" : ""}
+          {revising ? " · 修正中，改完请重新生成总结" : ""}
+        </p>
+
+        {!isDone && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-line bg-bg/70 px-3 py-2.5">
             <div>
               <p className="text-[11px] font-bold tracking-wide text-muted">训练计时</p>
-              <p className="font-display text-3xl font-extrabold tabular-nums">{formatClock(seconds)}</p>
+              <p className="font-display text-2xl font-extrabold tabular-nums num">
+                {formatClock(seconds)}
+              </p>
             </div>
             {!running ? (
               <button
@@ -280,9 +317,8 @@ export function TodayPage() {
               <span className="rounded-md bg-ok/15 px-3 py-1.5 text-xs font-bold text-ok">计时中</span>
             )}
           </div>
-          <p className="mt-1 text-xs text-muted">点开始就计时，点完成结束。组间休息不用管。</p>
-        </div>
-      )}
+        )}
+      </div>
 
       {isDone && (
         <p className="mt-3 text-xs text-muted">

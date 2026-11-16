@@ -382,6 +382,7 @@ def get_exercise_detail(session: Session, exercise_id: str) -> dict[str, Any] | 
         "gear": ex.gear,
         "modality": ex.modality,
         "roles": ex.roles or [],
+        "slot_roles": list(ex.slot_roles or []),
         "coach_core": ex.coach_core,
         "needs_review": bool(ex.needs_review),
         "is_valid_exercise": bool(ex.is_valid_exercise),

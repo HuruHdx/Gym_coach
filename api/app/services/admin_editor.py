@@ -350,6 +350,10 @@ def update_exercise(session: Session, exercise_id: str, payload: dict[str, Any])
         ex.common_mistakes_zh = _clean_list(payload["common_mistakes_zh"], limit=8)
     if "joint_stress" in payload and payload["joint_stress"] is not None:
         ex.joint_stress = _clean_joint_stress(payload["joint_stress"])
+    if "slot_roles" in payload and payload["slot_roles"] is not None:
+        from app.slot_roles import normalize_slot_roles
+
+        ex.slot_roles = normalize_slot_roles(payload["slot_roles"])
 
     if "aliases" in payload and payload["aliases"] is not None:
         wanted = _clean_list(payload["aliases"], limit=20)

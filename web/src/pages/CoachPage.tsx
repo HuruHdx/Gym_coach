@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
   BarChart3,
+  ClipboardList,
   Dumbbell,
   PersonStanding,
   RefreshCw,
@@ -181,6 +182,14 @@ function buildActions(injuries: string[], sessionMinutes: number | null): CoachA
       icon: <Zap className={iconCls} strokeWidth={1.75} />,
       kind: "prompt",
       prompt: "随便来一套全身循环，30分钟",
+    },
+    {
+      id: "plans",
+      title: "浏览计划",
+      sub: "三分化 / 成品课，选板块开练",
+      icon: <ClipboardList className={iconCls} strokeWidth={1.75} />,
+      kind: "nav",
+      to: "/plans",
     },
     {
       id: "weight",

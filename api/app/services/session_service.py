@@ -29,6 +29,15 @@ def _sets_for_item(item: DraftItemIn) -> int:
     return max(1, min(n, 12))
 
 
+def _warmup_sets_for_item(item: DraftItemIn) -> int:
+    raw = item.meta.get("warmup_sets", 0)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 0
+    return max(0, min(n, 6))
+
+
 def _weight_for_item(item: DraftItemIn) -> float | None:
     w = item.meta.get("weight")
     if w is None:
@@ -120,6 +129,9 @@ def session_to_out(sess: TrainingSession, sets: list[TrainingSetLog]) -> Session
         duration_seconds=int(sess.duration_seconds or 0),
         timer_started_at=_utc_iso(sess.timer_started_at),
         duration_minutes=sess.duration_minutes,
+        plan_template_id=sess.plan_template_id,
+        plan_block_id=sess.plan_block_id,
+        plan_type=sess.plan_type,
         sets=[set_to_out(s) for s in ordered_sets(sets)],
         progress={"done": done, "total": len(sets)},
     )
@@ -301,12 +313,18 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
     if not split and "·" in body.title:
         split = body.title.split("·", 1)[-1].strip()
 
+    plan_type = body.plan_type
+    if not plan_type and body.plan_template_id:
+        plan_type = "framework"
     sess = TrainingSession(
         user_id=current_user_id(),
         session_date=day,
         split_label=split,
         source="adopted",
         status="active",
+        plan_template_id=body.plan_template_id,
+        plan_block_id=body.plan_block_id,
+        plan_type=plan_type,
     )
     session.add(sess)
     session.commit()
@@ -317,25 +335,44 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
         name = canonicalize_exercise(item.title)
         muscle = _muscle_for_item(item)
         n_sets = _sets_for_item(item)
+        warmup_n = _warmup_sets_for_item(item)
         weight = _weight_for_item(item)
         reps = _reps_for_item(item)
         # seed MyExercise
         existing = session.exec(select(MyExercise).where(MyExercise.name == name)).first()
         if not existing:
             session.add(MyExercise(name=name, muscle=muscle or "全身"))
-        for i in range(1, n_sets + 1):
+        set_index = 1
+        for _ in range(warmup_n):
             row = TrainingSetLog(
                 session_id=sess.id or 0,
                 exercise_name=name,
                 muscle=muscle,
                 exercise_order=order,
-                set_index=i,
+                set_index=set_index,
                 target_reps=reps,
                 target_weight=weight,
                 actual_weight=weight,
+                is_warmup=True,
             )
             session.add(row)
             set_rows.append(row)
+            set_index += 1
+        for _ in range(n_sets):
+            row = TrainingSetLog(
+                session_id=sess.id or 0,
+                exercise_name=name,
+                muscle=muscle,
+                exercise_order=order,
+                set_index=set_index,
+                target_reps=reps,
+                target_weight=weight,
+                actual_weight=weight,
+                is_warmup=False,
+            )
+            session.add(row)
+            set_rows.append(row)
+            set_index += 1
 
     session.commit()
     for r in set_rows:

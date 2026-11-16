@@ -186,10 +186,13 @@ def _backfill_slot_roles() -> None:
 def init_db() -> None:
     # Register all SQLModel tables on metadata before create_all.
     from app import models as _models  # noqa: F401
+    from app.services.plan_seed import ensure_plan_seeds
 
     SQLModel.metadata.create_all(engine)
     _ensure_columns()
     _backfill_slot_roles()
+    with Session(engine) as session:
+        ensure_plan_seeds(session)
 
 
 def get_session() -> Generator[Session, None, None]:

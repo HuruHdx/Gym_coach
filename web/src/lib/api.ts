@@ -1,3 +1,5 @@
+import type { PlanDetail, PlanExpandResponse, PlanListResponse } from "../types";
+
 const TOKEN_KEY = "gym-app-token";
 const AUTH_FLAG = "gym-authed";
 /** 与 profileView 里本机性别/生日 key 对齐，登出时清掉避免串号 */
@@ -55,4 +57,30 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+export type PlanListQuery = {
+  type?: "framework" | "fixed" | "";
+  muscle?: string;
+  level?: string;
+};
+
+export function fetchPlans(query: PlanListQuery = {}) {
+  const params = new URLSearchParams();
+  if (query.type) params.set("type", query.type);
+  if (query.muscle && query.muscle !== "全部") params.set("muscle", query.muscle);
+  if (query.level && query.level !== "全部") params.set("level", query.level);
+  const qs = params.toString();
+  return api<PlanListResponse>(`/api/plans${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchPlanDetail(id: string) {
+  return api<PlanDetail>(`/api/plans/${encodeURIComponent(id)}`);
+}
+
+export function expandPlan(id: string, blockId: number) {
+  return api<PlanExpandResponse>(`/api/plans/${encodeURIComponent(id)}/expand`, {
+    method: "POST",
+    body: JSON.stringify({ block_id: blockId }),
+  });
 }

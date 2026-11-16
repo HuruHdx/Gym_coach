@@ -144,16 +144,28 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
     }
     setBusy(true);
     try {
+      const planTemplateId =
+        typeof card.meta?.plan_template_id === "string" ? card.meta.plan_template_id : null;
+      const planBlockId =
+        typeof card.meta?.plan_block_id === "number" ? card.meta.plan_block_id : null;
+      const planType = typeof card.meta?.plan_type === "string" ? card.meta.plan_type : null;
+      const splitFromMeta =
+        typeof card.meta?.split_label === "string" ? card.meta.split_label : null;
       const session = await api<TrainingSession>("/api/training/adopt", {
         method: "POST",
         body: JSON.stringify({
           title: card.title,
-          split_label: card.title.includes("·")
-            ? card.title.split("·").pop()?.trim()
-            : card.title.replace(/训$/, "") || null,
+          split_label:
+            splitFromMeta ||
+            (card.title.includes("·")
+              ? card.title.split("·").pop()?.trim()
+              : card.title.replace(/训$/, "") || null),
           items: selected,
           replace_today: true,
           force_replace_done: forceReplaceDone,
+          plan_template_id: planTemplateId,
+          plan_block_id: planBlockId,
+          plan_type: planType,
         }),
       });
       sessionStorage.removeItem("last_reply");
