@@ -64,6 +64,9 @@ class Profile(SQLModel, table=True):
     avoid_foods: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     protein_target_g: Optional[float] = None
     calorie_target: Optional[float] = None
+    # 正在跟练的计划模板（周进度由本周 TrainingSession 推算，不另建进度表）
+    active_plan_id: Optional[str] = Field(default=None, index=True, max_length=32)
+    active_plan_started_at: Optional[NaiveDatetime] = Field(default=None)
     created_at: NaiveDatetime = Field(default_factory=utcnow)
     updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
@@ -333,6 +336,8 @@ class PlanTemplate(SQLModel, table=True):
     gear_tags: list[Any] = Field(default_factory=list, sa_column=Column(JSON))  # 见 PLAN_GEAR_TAGS
     description: Optional[str] = None
     cover_url: Optional[str] = Field(default=None, max_length=512)
+    # H5 人话筛选：三分化|四分化|五分化|博主同款|单部位专项|新手入门（可空，列表可兜底派生）
+    scene_tag: Optional[str] = Field(default=None, index=True, max_length=32)
     is_published: bool = Field(default=False, index=True)
     sort_order: int = Field(default=0, index=True)
     created_at: NaiveDatetime = Field(default_factory=utcnow)
@@ -385,4 +390,42 @@ class PlanExercise(SQLModel, table=True):
     target_reps: Optional[str] = Field(default=None, max_length=32)  # 如 8-12 / 10
     warmup_sets: int = Field(default=0, ge=0, le=10)  # 正式组前的热身组数；独立热身动作用 role=warmup
     alternatives: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
-    note: Optional[str] = None
+    note: Optional[str] = None  # 给人看的训练提示；禁止塞拆解 JSON
+    # 单行目标肌群（胸/背/肩/腿/臂/核心）；框架配课与换动作按此检索，勿与板块 muscles 混抽
+    target_muscle: Optional[str] = Field(default=None, index=True, max_length=16)
+    # 内容工坊拆解溯源（独立列，勿写进 note）
+    source_kind: Optional[str] = Field(default=None, max_length=16)  # spoken|visual|manual|missing
+    match_confidence: Optional[float] = Field(default=None)
+    source_snippet: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+
+
+class StudioTask(SQLModel, table=True):
+    """内容工坊异步任务：下载/字幕/拆计划/动作素材。"""
+
+    __tablename__ = "studio_tasks"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    batch_id: Optional[str] = Field(default=None, index=True, max_length=32)
+    batch_order: int = Field(default=0)
+    source_type: str = Field(default="link", max_length=16)  # link | upload
+    source_text: Optional[str] = None  # 原始分享口令
+    source_url: Optional[str] = Field(default=None, max_length=1024)
+    stored_path: Optional[str] = Field(default=None, max_length=512)
+    mode: str = Field(
+        default="plan_single", max_length=24, index=True
+    )  # plan_single | plan_merge | exercise_only
+    domain: str = Field(default="training", max_length=16)  # training | nutrition | general
+    status: str = Field(
+        default="queued", max_length=32, index=True
+    )  # queued|downloading|transcribing|parsing|done|needs_manual_upload|failed|canceled
+    progress: int = Field(default=0, ge=0, le=100)
+    transcript_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    draft_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    score: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    review_state: str = Field(
+        default="needs_review", max_length=24, index=True
+    )  # auto_pass | needs_review | ignored
+    result_ref: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    error: Optional[str] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)

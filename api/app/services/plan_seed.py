@@ -1,8 +1,8 @@
-"""Seed two published plan templates for H5 / expand 联调（空库才写入）。"""
+"""Seed two published plan templates for H5 / expand 联调；已有库则补字段与文案。"""
 
 from __future__ import annotations
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.models import PlanBlock, PlanExercise, PlanTemplate, utcnow
 
@@ -10,8 +10,7 @@ from app.models import PlanBlock, PlanExercise, PlanTemplate, utcnow
 def ensure_plan_seeds(session: Session) -> None:
     existing = session.exec(select(PlanTemplate.id).limit(1)).first()
     if existing:
-        # 已有库：把旧文案里的「槽位」改成用户能懂的说法
-        _patch_framework_copy(session)
+        _patch_existing_plans(session)
         return
 
     now = utcnow()
@@ -29,7 +28,11 @@ def ensure_plan_seeds(session: Session) -> None:
         muscle_tags=["胸", "背", "肩", "腿", "臂"],
         split_summary="胸肩 · 背臂 · 腿臀",
         gear_tags=["杠铃", "哑铃", "绳索", "固定器械"],
-        description="经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；点「练这场」可再按伤病与偏好微调，动作均可换。",
+        description=(
+            "经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；"
+            "点「练这场」可再按伤病与偏好微调，动作均可换。"
+        ),
+        scene_tag="三分化",
         is_published=True,
         sort_order=10,
         created_at=now,
@@ -50,6 +53,7 @@ def ensure_plan_seeds(session: Session) -> None:
         split_summary="胸 · 肩 · 三头",
         gear_tags=["杠铃", "哑铃", "绳索"],
         description="动作与组次锁定的推日成品课，适合直接开练；伤病或缺器械时会尝试备选。",
+        scene_tag="单部位专项",
         is_published=True,
         sort_order=20,
         created_at=now,
@@ -90,6 +94,7 @@ def ensure_plan_seeds(session: Session) -> None:
                     warmup_sets=slot.get("warmup_sets", 0),
                     alternatives=[],
                     note=slot.get("note"),
+                    target_muscle=slot.get("target_muscle"),
                 )
             )
 
@@ -118,52 +123,240 @@ def ensure_plan_seeds(session: Session) -> None:
                 warmup_sets=row.get("warmup_sets", 0),
                 alternatives=row.get("alternatives", []),
                 note=row.get("note"),
+                target_muscle=row.get("target_muscle"),
             )
         )
     session.commit()
 
 
-def _patch_framework_copy(session: Session) -> None:
-    tpl = session.get(PlanTemplate, "three-split-classic")
-    if not tpl:
-        return
+def _patch_existing_plans(session: Session) -> None:
+    """已有库：文案去「槽位」、补 scene_tag、动作行补 target_muscle。"""
     dirty = False
-    if tpl.subtitle and "槽位" in tpl.subtitle:
-        tpl.subtitle = "胸肩 · 背臂 · 腿臀，进页即自动搭配动作"
+
+    fw = session.get(PlanTemplate, "three-split-classic")
+    if fw:
+        if fw.subtitle and "槽位" in fw.subtitle:
+            fw.subtitle = "胸肩 · 背臂 · 腿臀，进页即自动搭配动作"
+            dirty = True
+        if fw.description and "槽位" in fw.description:
+            fw.description = (
+                "经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；"
+                "点「练这场」可再按伤病与偏好微调，动作均可换。"
+            )
+            dirty = True
+        if not fw.scene_tag:
+            fw.scene_tag = "三分化"
+            dirty = True
+        if dirty:
+            fw.updated_at = utcnow()
+            session.add(fw)
+
+    fixed = session.get(PlanTemplate, "fixed-push-strength")
+    if fixed and not fixed.scene_tag:
+        fixed.scene_tag = "单部位专项"
+        fixed.updated_at = utcnow()
+        session.add(fixed)
         dirty = True
-    if tpl.description and "槽位" in tpl.description:
-        tpl.description = (
-            "经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；"
-            "点「练这场」可再按伤病与偏好微调，动作均可换。"
-        )
+
+    # 其它已发布模板：空 scene_tag 时按规则兜底
+    for tpl in session.exec(select(PlanTemplate).where(col(PlanTemplate.scene_tag).is_(None))).all():
+        derived = _derive_scene_tag(session, tpl)
+        if derived:
+            tpl.scene_tag = derived
+            tpl.updated_at = utcnow()
+            session.add(tpl)
+            dirty = True
+
+    if _backfill_target_muscles(session):
         dirty = True
+
     if dirty:
-        tpl.updated_at = utcnow()
-        session.add(tpl)
         session.commit()
+
+
+def _derive_scene_tag(session: Session, tpl: PlanTemplate) -> str | None:
+    if tpl.scene_tag:
+        return tpl.scene_tag
+    author = (tpl.author or "").strip()
+    if author and author not in ("Gym Coach", "GymCoach"):
+        return "博主同款"
+    if tpl.level == "beginner":
+        return "新手入门"
+    blocks = session.exec(select(PlanBlock).where(PlanBlock.template_id == tpl.id)).all()
+    n = len(blocks)
+    if n == 1:
+        return "单部位专项"
+    if tpl.days_per_week == 3 and n >= 3:
+        return "三分化"
+    if tpl.days_per_week == 4 and n >= 4:
+        return "四分化"
+    if tpl.days_per_week == 5 and n >= 5:
+        return "五分化"
+    return None
+
+
+def _backfill_target_muscles(session: Session) -> bool:
+    """按板块标题 + 行序给空 target_muscle 补齐（不覆盖已有值）。"""
+    changed = False
+    blocks = session.exec(select(PlanBlock)).all()
+    for block in blocks:
+        expected = _expected_muscles_for_block(block.title)
+        if not expected:
+            continue
+        rows = session.exec(
+            select(PlanExercise)
+            .where(PlanExercise.block_id == block.id)
+            .order_by(col(PlanExercise.order_index), col(PlanExercise.id))
+        ).all()
+        for idx, row in enumerate(rows):
+            if row.target_muscle:
+                continue
+            muscle = expected[idx] if idx < len(expected) else expected[-1]
+            # 成品课：有动作名时也可按名兜底
+            if not muscle and row.exercise_name:
+                muscle = _guess_muscle_from_name(row.exercise_name)
+            if not muscle:
+                continue
+            row.target_muscle = muscle
+            session.add(row)
+            changed = True
+    return changed
+
+
+def _expected_muscles_for_block(title: str) -> list[str]:
+    if "胸" in title:
+        return ["胸", "肩", "胸", "胸", "臂"]
+    if "背" in title:
+        return ["背", "背", "背", "臂"]
+    if "腿" in title:
+        return ["腿", "腿", "腿", "腿"]
+    if "推" in title:
+        return ["胸", "胸", "肩", "胸", "臂"]
+    return []
+
+
+def _guess_muscle_from_name(name: str) -> str | None:
+    n = name or ""
+    if any(k in n for k in ("卧推", "夹胸", "飞鸟", "俯卧撑")):
+        return "胸"
+    if any(k in n for k in ("推举", "侧平举", "前平举", "面拉")):
+        return "肩"
+    if any(k in n for k in ("下压", "臂屈伸", "三头", "窄距")):
+        return "臂"
+    if any(k in n for k in ("弯举", "二头", "锤式")):
+        return "臂"
+    if any(k in n for k in ("划船", "下拉", "引体", "硬拉")):
+        return "背"
+    if any(k in n for k in ("深蹲", "腿举", "腿屈伸", "腿弯举", "臀桥", "箭步")):
+        return "腿"
+    return None
 
 
 def _framework_slots(block_title: str) -> list[dict]:
     if "胸" in block_title:
         return [
-            {"role": "main", "sets": 4, "reps": "6-8", "warmup_sets": 2, "note": "胸复合主项"},
-            {"role": "main", "sets": 3, "reps": "8-10", "warmup_sets": 1, "note": "肩复合主项"},
-            {"role": "assist", "sets": 3, "reps": "8-12", "note": "胸辅助，换器械面"},
-            {"role": "isolation", "sets": 3, "reps": "10-15", "note": "胸孤立"},
-            {"role": "isolation", "sets": 3, "reps": "10-15", "note": "三头孤立"},
+            {
+                "role": "main",
+                "target_muscle": "胸",
+                "sets": 4,
+                "reps": "6-8",
+                "warmup_sets": 2,
+                "note": "胸复合主项",
+            },
+            {
+                "role": "main",
+                "target_muscle": "肩",
+                "sets": 3,
+                "reps": "8-10",
+                "warmup_sets": 1,
+                "note": "肩复合主项",
+            },
+            {
+                "role": "assist",
+                "target_muscle": "胸",
+                "sets": 3,
+                "reps": "8-12",
+                "note": "胸辅助，换器械面",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "胸",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "胸孤立",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "臂",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "三头孤立",
+            },
         ]
     if "背" in block_title:
         return [
-            {"role": "main", "sets": 4, "reps": "6-8", "warmup_sets": 2, "note": "背垂直或水平拉"},
-            {"role": "main", "sets": 3, "reps": "8-10", "warmup_sets": 1, "note": "互补拉向"},
-            {"role": "assist", "sets": 3, "reps": "8-12", "note": "背辅助"},
-            {"role": "isolation", "sets": 3, "reps": "10-15", "note": "二头孤立"},
+            {
+                "role": "main",
+                "target_muscle": "背",
+                "sets": 4,
+                "reps": "6-8",
+                "warmup_sets": 2,
+                "note": "背垂直或水平拉",
+            },
+            {
+                "role": "main",
+                "target_muscle": "背",
+                "sets": 3,
+                "reps": "8-10",
+                "warmup_sets": 1,
+                "note": "互补拉向",
+            },
+            {
+                "role": "assist",
+                "target_muscle": "背",
+                "sets": 3,
+                "reps": "8-12",
+                "note": "背辅助",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "臂",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "二头孤立",
+            },
         ]
     return [
-        {"role": "main", "sets": 4, "reps": "6-8", "warmup_sets": 2, "note": "腿复合主项"},
-        {"role": "main", "sets": 3, "reps": "8-10", "warmup_sets": 1, "note": "髋主导互补"},
-        {"role": "assist", "sets": 3, "reps": "8-12", "note": "单侧或器械辅助"},
-        {"role": "isolation", "sets": 3, "reps": "10-15", "note": "腘绳 / 小腿"},
+        {
+            "role": "main",
+            "target_muscle": "腿",
+            "sets": 4,
+            "reps": "6-8",
+            "warmup_sets": 2,
+            "note": "腿复合主项",
+        },
+        {
+            "role": "main",
+            "target_muscle": "腿",
+            "sets": 3,
+            "reps": "8-10",
+            "warmup_sets": 1,
+            "note": "髋主导互补",
+        },
+        {
+            "role": "assist",
+            "target_muscle": "腿",
+            "sets": 3,
+            "reps": "8-12",
+            "note": "单侧或器械辅助",
+        },
+        {
+            "role": "isolation",
+            "target_muscle": "腿",
+            "sets": 3,
+            "reps": "10-15",
+            "note": "腘绳 / 小腿",
+        },
     ]
 
 
@@ -172,6 +365,7 @@ def _fixed_push_rows() -> list[dict]:
         {
             "name": "杠铃卧推",
             "role": "main",
+            "target_muscle": "胸",
             "sets": 4,
             "reps": "5-8",
             "warmup_sets": 2,
@@ -180,6 +374,7 @@ def _fixed_push_rows() -> list[dict]:
         {
             "name": "哑铃上斜卧推",
             "role": "assist",
+            "target_muscle": "胸",
             "sets": 3,
             "reps": "8-12",
             "warmup_sets": 1,
@@ -188,6 +383,7 @@ def _fixed_push_rows() -> list[dict]:
         {
             "name": "坐姿哑铃推举",
             "role": "main",
+            "target_muscle": "肩",
             "sets": 3,
             "reps": "8-10",
             "warmup_sets": 1,
@@ -196,6 +392,7 @@ def _fixed_push_rows() -> list[dict]:
         {
             "name": "绳索夹胸",
             "role": "isolation",
+            "target_muscle": "胸",
             "sets": 3,
             "reps": "12-15",
             "alternatives": ["哑铃飞鸟", "器械夹胸"],
@@ -203,6 +400,7 @@ def _fixed_push_rows() -> list[dict]:
         {
             "name": "绳索下压",
             "role": "isolation",
+            "target_muscle": "臂",
             "sets": 3,
             "reps": "10-15",
             "alternatives": ["哑铃颈后臂屈伸", "窄距卧推"],

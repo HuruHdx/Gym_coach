@@ -106,6 +106,14 @@ def _ensure_columns() -> None:
         ("exercises", "updated_at", "TIMESTAMP"),
         # 计划槽位角色（与 roles 肌群列表独立）
         ("exercises", "slot_roles", "TEXT"),
+        # 周跟练 + 计划场景标签 + 动作行目标肌群 / 拆解溯源
+        ("profile", "active_plan_id", "VARCHAR"),
+        ("profile", "active_plan_started_at", "TIMESTAMP"),
+        ("plan_templates", "scene_tag", "VARCHAR"),
+        ("plan_exercises", "target_muscle", "VARCHAR"),
+        ("plan_exercises", "source_kind", "VARCHAR"),
+        ("plan_exercises", "match_confidence", "REAL"),
+        ("plan_exercises", "source_snippet", "TEXT"),
     ]
     url = settings.database_url
 
@@ -120,6 +128,11 @@ def _ensure_columns() -> None:
             ("exercises", "cues_zh"),
             ("exercises", "common_mistakes_zh"),
             ("exercises", "slot_roles"),
+            ("plan_exercises", "source_snippet"),
+            ("studio_tasks", "transcript_json"),
+            ("studio_tasks", "draft_json"),
+            ("studio_tasks", "score"),
+            ("studio_tasks", "result_ref"),
         }:
             return "JSONB"
         return coltype
