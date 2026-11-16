@@ -79,11 +79,17 @@ def test_expand_framework_fills_slots():
         headers = _auth_headers(client)
         detail = client.get("/api/plans/three-split-classic", headers=headers)
         assert detail.status_code == 200
-        block_id = detail.json()["blocks"][0]["id"]
+        plan = detail.json()
+        block = plan["blocks"][0]
+        # 详情预览就应配好动作名，不能甩空「槽位·主项」
+        preview_named = [ex for ex in block["exercises"] if ex.get("exercise_name")]
+        assert len(preview_named) >= 1
+        assert any(ex.get("preview_filled") for ex in block["exercises"])
+
         expanded = client.post(
             "/api/plans/three-split-classic/expand",
             headers=headers,
-            json={"block_id": block_id},
+            json={"block_id": block["id"]},
         )
         assert expanded.status_code == 200
         items = expanded.json()["card"]["items"]

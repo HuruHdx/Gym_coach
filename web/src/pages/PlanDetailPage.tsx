@@ -155,7 +155,7 @@ export function PlanDetailPage() {
                 <p className="mt-0.5 text-[11px] text-muted">
                   {(block.muscles || []).join(" · ") || "—"}
                   {block.minutes_label ? ` · ${block.minutes_label}` : ""}
-                  {` · ${block.exercises.length} 个动作位`}
+                  {` · ${block.exercises.length} 个动作`}
                 </p>
               </div>
               <button
@@ -180,12 +180,12 @@ export function PlanDetailPage() {
                     {ex.thumb_url ? (
                       <img src={ex.thumb_url} alt="" className="h-full w-full object-cover" />
                     ) : (
-                      ex.role_label?.slice(0, 2) || "动"
+                      (ex.exercise_name || ex.role_label || "动").slice(0, 2)
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-bold text-ink">
-                      {ex.exercise_name || (ex.pending ? `槽位 · ${ex.role_label || ex.role}` : "未命名")}
+                      {ex.exercise_name || "待补充"}
                     </p>
                     <p className="mt-0.5 text-[11px] text-muted">
                       {ex.role_label || ex.role}

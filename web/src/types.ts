@@ -138,6 +138,8 @@ export type PlanExerciseRow = {
   note?: string | null;
   thumb_url?: string | null;
   pending?: boolean;
+  /** 详情预览时由空槽自动配上的动作，非模板落库名 */
+  preview_filled?: boolean;
 };
 
 export type PlanBlockDetail = {

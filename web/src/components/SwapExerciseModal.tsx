@@ -79,7 +79,7 @@ export function SwapExerciseModal({
       >
         <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" />
 
-        <div className="flex items-center justify-between px-5">
+        <div className="flex shrink-0 items-center justify-between px-5">
           <div>
             <h3 className="text-lg font-semibold">替换动作</h3>
             <p className="mt-0.5 text-xs text-muted">
@@ -89,38 +89,36 @@ export function SwapExerciseModal({
           <button
             type="button"
             onClick={onClose}
-            className="pressable rounded-md px-2 py-1 text-sm font-semibold text-muted hover:text-ink"
+            className="pressable rounded-md px-2 py-1 text-sm font-semibold text-muted"
           >
             ✕
           </button>
         </div>
 
         {data?.banned_injuries && data.banned_injuries.length > 0 && (
-          <div className="mx-5 mt-3 rounded-lg bg-accent/15 px-3 py-1.5 text-[11px] font-medium text-accent-ink">
+          <div className="mx-5 mt-3 shrink-0 rounded-lg bg-tint px-3 py-1.5 text-[11px] font-medium text-accent-text">
             伤痛防护：已按「{data.banned_injuries.join("、")}」剔除高风险动作
           </div>
         )}
 
-        <div className="px-5 pt-3">
+        <div className="shrink-0 px-5 pt-3">
           <input
             type="text"
-            className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none placeholder:text-muted focus:border-ink"
+            className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-ink"
             placeholder={`搜索${muscle}部替代动作，或输入新动作名…`}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
 
-        <div className="no-scrollbar flex gap-1.5 overflow-x-auto px-5 py-2.5">
+        {/* shrink-0：弹层 flex 列里否则会被列表挤扁成一条线 */}
+        <div className="chipbar shrink-0 py-2.5">
           {CATEGORIES.map((cat) => (
             <button
               key={cat}
               type="button"
-              className={`pressable shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                activeCategory === cat
-                  ? "bg-ink text-bg"
-                  : "border border-line bg-bg text-muted"
-              }`}
+              className="chip"
+              aria-pressed={activeCategory === cat}
               onClick={() => setActiveCategory(cat)}
             >
               {cat}

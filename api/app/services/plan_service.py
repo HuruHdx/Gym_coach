@@ -104,10 +104,15 @@ def list_published_plans(
 
 
 def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
+    """详情预览：空槽位当场按部位+角色配好动作名，不把「槽位·主项」甩给用户。"""
     tpl = session.get(PlanTemplate, plan_id)
     if not tpl or not tpl.is_published:
         raise HTTPException(status_code=404, detail="计划不存在或未发布")
     detail = _template_card(tpl)
+    profile = get_current_profile(session)
+    injuries = list(getattr(profile, "injuries", None) or []) if profile else []
+    avoid = list(getattr(profile, "avoid_exercises", None) or []) if profile else []
+
     blocks_out: list[dict[str, Any]] = []
     blocks = session.exec(
         select(PlanBlock)
@@ -120,20 +125,43 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
             .where(PlanExercise.block_id == block.id)
             .order_by(col(PlanExercise.order_index), col(PlanExercise.id))
         ).all()
+        used_names: set[str] = set()
+        used_gears: set[str] = set()
+        used_sub_regions: set[str] = set()
         ex_rows: list[dict[str, Any]] = []
         for ex in exercises:
-            thumb = None
-            if ex.exercise_id:
-                sku = session.get(Exercise, ex.exercise_id)
-                if sku and sku.image_start:
-                    path = sku.image_start
-                    thumb = path if path.startswith("/static/") else f"/static/exercises/{path}"
+            name = ex.exercise_name
+            exercise_id = ex.exercise_id
+            preview_filled = False
+            # 框架空槽 / 仅有角色：预览时就配好，和「练这场」同一套检索
+            if not name and not exercise_id:
+                picked = _resolve_exercise_row(
+                    session,
+                    tpl=tpl,
+                    block=block,
+                    row=ex,
+                    injuries=injuries,
+                    avoid=avoid,
+                    used_names=used_names,
+                    used_gears=used_gears,
+                    used_sub_regions=used_sub_regions,
+                )
+                name = picked.get("name")
+                exercise_id = picked.get("exercise_id") or exercise_id
+                preview_filled = bool(name)
+                if picked.get("gear"):
+                    used_gears.add(str(picked["gear"]))
+                if picked.get("sub_region"):
+                    used_sub_regions.add(str(picked["sub_region"]))
+            if name:
+                used_names.add(canonicalize_exercise(str(name)))
+            thumb = _thumb_url(session, exercise_id=exercise_id, name=name)
             ex_rows.append(
                 {
                     "id": ex.id,
                     "order_index": ex.order_index,
-                    "exercise_id": ex.exercise_id,
-                    "exercise_name": ex.exercise_name,
+                    "exercise_id": exercise_id,
+                    "exercise_name": name,
                     "role": ex.role,
                     "role_label": ROLE_LABEL.get(ex.role, ex.role),
                     "lock_level": ex.lock_level,
@@ -143,7 +171,8 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
                     "alternatives": list(ex.alternatives or []),
                     "note": ex.note,
                     "thumb_url": thumb,
-                    "pending": not (ex.exercise_id or ex.exercise_name),
+                    "pending": not bool(name),
+                    "preview_filled": preview_filled,
                 }
             )
         blocks_out.append(
@@ -163,6 +192,20 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
     detail["blocks"] = blocks_out
     detail["block_count"] = len(blocks_out)
     return detail
+
+
+def _thumb_url(
+    session: Session, *, exercise_id: str | None, name: str | None = None
+) -> str | None:
+    sku = None
+    if exercise_id:
+        sku = session.get(Exercise, exercise_id)
+    if not sku and name:
+        sku = session.exec(select(Exercise).where(Exercise.name_zh == name)).first()
+    if not sku or not sku.image_start:
+        return None
+    path = sku.image_start
+    return path if path.startswith("/static/") else f"/static/exercises/{path}"
 
 
 def expand_plan_block(session: Session, plan_id: str, block_id: int) -> dict[str, Any]:

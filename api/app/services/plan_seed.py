@@ -10,13 +10,15 @@ from app.models import PlanBlock, PlanExercise, PlanTemplate, utcnow
 def ensure_plan_seeds(session: Session) -> None:
     existing = session.exec(select(PlanTemplate.id).limit(1)).first()
     if existing:
+        # 已有库：把旧文案里的「槽位」改成用户能懂的说法
+        _patch_framework_copy(session)
         return
 
     now = utcnow()
     framework = PlanTemplate(
         id="three-split-classic",
         title="热门三分化",
-        subtitle="胸肩 · 背臂 · 腿臀，槽位按角色检索填充",
+        subtitle="胸肩 · 背臂 · 腿臀，进页即自动搭配动作",
         author="Gym Coach",
         badge_label="框架",
         template_type="framework",
@@ -27,7 +29,7 @@ def ensure_plan_seeds(session: Session) -> None:
         muscle_tags=["胸", "背", "肩", "腿", "臂"],
         split_summary="胸肩 · 背臂 · 腿臀",
         gear_tags=["杠铃", "哑铃", "绳索", "固定器械"],
-        description="经典三分化框架：结构固定，动作按部位与槽位角色从动作库搭配，并避开伤病与你声明避免的动作。",
+        description="经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；点「练这场」可再按伤病与偏好微调，动作均可换。",
         is_published=True,
         sort_order=10,
         created_at=now,
@@ -119,6 +121,26 @@ def ensure_plan_seeds(session: Session) -> None:
             )
         )
     session.commit()
+
+
+def _patch_framework_copy(session: Session) -> None:
+    tpl = session.get(PlanTemplate, "three-split-classic")
+    if not tpl:
+        return
+    dirty = False
+    if tpl.subtitle and "槽位" in tpl.subtitle:
+        tpl.subtitle = "胸肩 · 背臂 · 腿臀，进页即自动搭配动作"
+        dirty = True
+    if tpl.description and "槽位" in tpl.description:
+        tpl.description = (
+            "经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；"
+            "点「练这场」可再按伤病与偏好微调，动作均可换。"
+        )
+        dirty = True
+    if dirty:
+        tpl.updated_at = utcnow()
+        session.add(tpl)
+        session.commit()
 
 
 def _framework_slots(block_title: str) -> list[dict]:
