@@ -186,6 +186,8 @@ def _backfill_slot_roles() -> None:
                 gear=ex.gear,
                 modality=ex.modality,
                 coach_core=bool(ex.coach_core),
+                name=ex.name_zh,
+                muscle=ex.muscle,
             )
             if not inferred:
                 continue

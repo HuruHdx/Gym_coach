@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
+import { LoopClip } from "../components/LoopClip";
 import { api } from "../lib/api";
 import type { TrainingSession } from "../types";
 
@@ -148,7 +149,12 @@ export function ExerciseDetailPage() {
           <div className="mx-4 overflow-hidden rounded-2xl border border-line bg-elevated">
             <div className="relative aspect-square bg-bg">
               {mediaUrl ? (
-                isVideo(mediaUrl) ? (
+                isVideo(mediaUrl) && demoUrl ? (
+                  <LoopClip
+                    src={mediaUrl}
+                    className="h-full w-full object-contain"
+                  />
+                ) : isVideo(mediaUrl) ? (
                   <video src={mediaUrl} className="h-full w-full object-contain" controls playsInline />
                 ) : (
                   <img

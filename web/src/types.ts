@@ -109,6 +109,8 @@ export type PlanTemplateCard = {
   author?: string | null;
   badge_label?: string | null;
   template_type: "framework" | "fixed" | string;
+  /** 场景标签：三分化 / 四分化 / 博主同款 / 单部位专项 / 新手入门 … */
+  scene_tag?: string | null;
   level?: string | null;
   level_label?: string | null;
   days_per_week: number;
@@ -123,6 +125,34 @@ export type PlanTemplateCard = {
   block_count?: number;
 };
 
+export type FollowingBlockBrief = {
+  id: number;
+  order_index: number;
+  title: string;
+  muscles: string[];
+  minutes_label?: string | null;
+  cover_url?: string | null;
+  exercise_count: number;
+  preview_names: string[];
+};
+
+export type FollowingWeekProgress = {
+  completed_block_ids: number[];
+  next_block: FollowingBlockBrief | null;
+  week_cycle_done: boolean;
+  total_blocks: number;
+  completed_count: number;
+  today_block_id?: number | null;
+  progress_label?: string | null;
+};
+
+export type FollowingProgress = {
+  active_plan_id: string | null;
+  active_plan_started_at?: string | null;
+  plan: PlanTemplateCard | null;
+  week: FollowingWeekProgress;
+};
+
 export type PlanExerciseRow = {
   id: number;
   order_index: number;
@@ -131,6 +161,7 @@ export type PlanExerciseRow = {
   role: string;
   role_label?: string;
   lock_level: string;
+  target_muscle?: string | null;
   target_sets?: number | null;
   target_reps?: string | null;
   warmup_sets?: number;
@@ -157,6 +188,8 @@ export type PlanBlockDetail = {
 
 export type PlanDetail = PlanTemplateCard & {
   blocks: PlanBlockDetail[];
+  is_following?: boolean;
+  week_progress?: FollowingWeekProgress | null;
 };
 
 export type PlanListResponse = {

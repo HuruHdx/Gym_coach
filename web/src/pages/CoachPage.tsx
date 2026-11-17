@@ -269,6 +269,22 @@ export function CoachPage({ profile }: Props) {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  // 今日页胶囊带话术进来：灌入并自动发送一次
+  useEffect(() => {
+    if (!hydrated || busy) return;
+    let raw = "";
+    try {
+      raw = sessionStorage.getItem("coach_prefill") || "";
+      if (raw) sessionStorage.removeItem("coach_prefill");
+    } catch {
+      return;
+    }
+    if (!raw.trim()) return;
+    void handleSend(raw);
+    // 只在会话灌完后消费一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
+
   function flash(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(null), 1600);

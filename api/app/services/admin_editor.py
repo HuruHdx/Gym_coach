@@ -13,9 +13,8 @@ from sqlmodel import Session, col, select
 from app.exercises_catalog import reload_all
 from app.models import Exercise, ExerciseAlias, ExerciseMedia, utcnow
 from app.services.admin_catalog import MEDIA_ROLES, get_exercise_detail, media_url
+from app.services.storage import save_public_asset
 
-_STATIC_ROOT = Path(__file__).resolve().parents[2] / "static" / "exercises"
-_CUSTOM_ROOT = _STATIC_ROOT / "custom"
 _MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _VIDEO_EXTS = {".mp4", ".webm", ".mov"}
@@ -441,13 +440,20 @@ def save_media_bytes(
     if ext in _IMAGE_EXTS - {".gif"}:
         payload, save_ext = _process_image_bytes(raw, ext)
 
-    folder = _CUSTOM_ROOT / exercise_id
-    folder.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex[:10]
     out_name = f"{role}_{token}_{_safe_name(filename)}{save_ext}"
-    abs_path = folder / out_name
-    abs_path.write_bytes(payload)
-    rel_url = f"custom/{exercise_id}/{out_name}".replace("\\", "/")
+    key = f"exercises/custom/{exercise_id}/{out_name}"
+    mime = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+    }.get(save_ext.lower(), "application/octet-stream")
+    stored_url = save_public_asset(payload, key, mime)
 
     old_drafts = session.exec(
         select(ExerciseMedia).where(
@@ -473,14 +479,14 @@ def save_media_bytes(
             row.status = "archived"
             session.add(row)
         if role == "start":
-            ex.image_start = rel_url
+            ex.image_start = stored_url
         if role == "end":
-            ex.image_end = rel_url
+            ex.image_end = stored_url
 
     media = ExerciseMedia(
         exercise_id=exercise_id,
         role=role,
-        url=rel_url,
+        url=stored_url,
         status=status,
         source=source,
         meta={"original_name": filename, "bytes": len(payload)},
@@ -639,7 +645,11 @@ def clear_slot(session: Session, exercise_id: str, role: str) -> dict[str, Any]:
 
 
 def _guess_taxonomy(ex: Exercise) -> dict[str, Any]:
-    """本地启发式：罕见动作缺分类时给可人工改的建议。"""
+    """后台一次性「猜分类」：用动作名启发，产出可写入的字段建议。
+
+    注意：这里是唯一允许靠名字猜的地方。配课/换动作热路径禁止抄这套名单；
+    猜完后人工确认写入 muscle / movement_pattern / slot_roles / sub_region。
+    """
     blob = f"{ex.name_zh or ''} {ex.name_en or ''}".lower()
     muscle = (ex.muscle or "").strip() or None
     sub = (ex.sub_region or "").strip() or None

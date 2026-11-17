@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlmodel import Session, col, select
 
 from app.exercises_catalog import (
@@ -12,10 +14,22 @@ from app.exercises_catalog import (
     retrieve_candidates,
     suggest_weight_from_stats,
 )
-from app.models import Exercise, ExerciseStats, PlanBlock, PlanExercise, PlanTemplate
-from app.slot_roles import normalize_slot_roles
+from app.models import (
+    Exercise,
+    ExerciseStats,
+    PlanBlock,
+    PlanExercise,
+    PlanTemplate,
+    TrainingSession,
+    utcnow,
+)
+from app.slot_roles import infer_slot_roles, is_core_movement, normalize_slot_roles
 from app.taxonomy import canonicalize_exercise
 from app.tenancy import current_user_id, get_current_profile
+
+# 臂细分：优先信 sub_region 受控枚举（见 admin_editor._SUB_BY_MUSCLE「臂」）
+_PUSH_ARM_SUB = ("肱三头肌",)
+_PULL_ARM_SUB = ("肱二头肌",)
 
 
 ROLE_LABEL = {
@@ -49,7 +63,34 @@ def _split_line(tpl: PlanTemplate) -> str:
     return " · ".join(tags) if tags else ""
 
 
-def _template_card(tpl: PlanTemplate) -> dict[str, Any]:
+def _scene_tag_of(session: Session, tpl: PlanTemplate, block_count: int | None = None) -> str | None:
+    """优先用落库 scene_tag；空则按作者/难度/板块数兜底派生。"""
+    if tpl.scene_tag:
+        return tpl.scene_tag
+    author = (tpl.author or "").strip()
+    if author and author not in ("Gym Coach", "GymCoach"):
+        return "博主同款"
+    if tpl.level == "beginner":
+        return "新手入门"
+    n = block_count
+    if n is None:
+        n = len(
+            session.exec(select(PlanBlock.id).where(PlanBlock.template_id == tpl.id)).all()
+        )
+    if n == 1:
+        return "单部位专项"
+    if tpl.days_per_week == 3 and n >= 3:
+        return "三分化"
+    if tpl.days_per_week == 4 and n >= 4:
+        return "四分化"
+    if tpl.days_per_week == 5 and n >= 5:
+        return "五分化"
+    return None
+
+
+def _template_card(
+    session: Session, tpl: PlanTemplate, *, block_count: int | None = None
+) -> dict[str, Any]:
     return {
         "id": tpl.id,
         "title": tpl.title,
@@ -57,6 +98,7 @@ def _template_card(tpl: PlanTemplate) -> dict[str, Any]:
         "author": tpl.author,
         "badge_label": tpl.badge_label,
         "template_type": tpl.template_type,
+        "scene_tag": _scene_tag_of(session, tpl, block_count),
         "level": tpl.level,
         "level_label": LEVEL_LABEL.get(tpl.level or "", tpl.level),
         "days_per_week": tpl.days_per_week,
@@ -77,6 +119,7 @@ def list_published_plans(
     session: Session,
     *,
     template_type: str | None = None,
+    scene_tag: str | None = None,
     muscle: str | None = None,
     level: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -92,13 +135,16 @@ def list_published_plans(
             tags = [str(t) for t in (tpl.muscle_tags or [])]
             if muscle not in tags:
                 continue
-        card = _template_card(tpl)
         blocks = session.exec(
             select(PlanBlock)
             .where(PlanBlock.template_id == tpl.id)
             .order_by(col(PlanBlock.order_index), col(PlanBlock.id))
         ).all()
+        card = _template_card(session, tpl, block_count=len(blocks))
         card["block_count"] = len(blocks)
+        if scene_tag and scene_tag != "全部":
+            if card.get("scene_tag") != scene_tag:
+                continue
         out.append(card)
     return out
 
@@ -108,7 +154,7 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
     tpl = session.get(PlanTemplate, plan_id)
     if not tpl or not tpl.is_published:
         raise HTTPException(status_code=404, detail="计划不存在或未发布")
-    detail = _template_card(tpl)
+    detail = _template_card(session, tpl)
     profile = get_current_profile(session)
     injuries = list(getattr(profile, "injuries", None) or []) if profile else []
     avoid = list(getattr(profile, "avoid_exercises", None) or []) if profile else []
@@ -165,6 +211,7 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
                     "role": ex.role,
                     "role_label": ROLE_LABEL.get(ex.role, ex.role),
                     "lock_level": ex.lock_level,
+                    "target_muscle": getattr(ex, "target_muscle", None),
                     "target_sets": ex.target_sets,
                     "target_reps": ex.target_reps,
                     "warmup_sets": ex.warmup_sets or 0,
@@ -191,7 +238,190 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
         )
     detail["blocks"] = blocks_out
     detail["block_count"] = len(blocks_out)
+    detail["scene_tag"] = _scene_tag_of(session, tpl, len(blocks_out))
+    # 跟练态：详情页可直接标「本周已练 / 推荐今日练」
+    following = get_following_progress(session)
+    detail["is_following"] = following.get("active_plan_id") == plan_id
+    detail["week_progress"] = following.get("week") if detail["is_following"] else None
     return detail
+
+
+def _week_bounds(day: date | None = None) -> tuple[date, date]:
+    """自然周：周一 00:00 至周日。"""
+    day = day or date.today()
+    start = day - timedelta(days=day.weekday())
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def _sessions_for_user():
+    stmt = select(TrainingSession)
+    uid = current_user_id()
+    if uid is not None:
+        stmt = stmt.where(TrainingSession.user_id == uid)
+    return stmt
+
+
+def follow_plan(session: Session, plan_id: str) -> dict[str, Any]:
+    tpl = session.get(PlanTemplate, plan_id)
+    if not tpl or not tpl.is_published:
+        raise HTTPException(status_code=404, detail="计划不存在或未发布")
+    profile = get_current_profile(session)
+    if not profile:
+        raise HTTPException(status_code=400, detail="请先完善个人资料")
+    profile.active_plan_id = plan_id
+    profile.active_plan_started_at = utcnow()
+    profile.updated_at = utcnow()
+    session.add(profile)
+    session.commit()
+    return get_following_progress(session)
+
+
+def unfollow_plan(session: Session) -> dict[str, Any]:
+    profile = get_current_profile(session)
+    if not profile:
+        raise HTTPException(status_code=400, detail="请先完善个人资料")
+    profile.active_plan_id = None
+    profile.active_plan_started_at = None
+    profile.updated_at = utcnow()
+    session.add(profile)
+    session.commit()
+    return get_following_progress(session)
+
+
+def get_following_progress(session: Session, day: date | None = None) -> dict[str, Any]:
+    """本周跟练进度：按自然周已练板块推算 next_block，绝不锁死。"""
+    day = day or date.today()
+    profile = get_current_profile(session)
+    active_id = getattr(profile, "active_plan_id", None) if profile else None
+    started_at = getattr(profile, "active_plan_started_at", None) if profile else None
+    empty = {
+        "active_plan_id": None,
+        "active_plan_started_at": None,
+        "plan": None,
+        "week": {
+            "completed_block_ids": [],
+            "next_block": None,
+            "week_cycle_done": False,
+            "total_blocks": 0,
+            "completed_count": 0,
+            "today_block_id": None,
+            "progress_label": None,
+        },
+    }
+    if not active_id:
+        return empty
+
+    tpl = session.get(PlanTemplate, active_id)
+    if not tpl or not tpl.is_published:
+        # 计划被下架：清空跟练，避免脏指针
+        if profile:
+            profile.active_plan_id = None
+            profile.active_plan_started_at = None
+            profile.updated_at = utcnow()
+            session.add(profile)
+            session.commit()
+        return empty
+
+    blocks = list(
+        session.exec(
+            select(PlanBlock)
+            .where(PlanBlock.template_id == active_id)
+            .order_by(col(PlanBlock.order_index), col(PlanBlock.id))
+        ).all()
+    )
+    week_start, week_end = _week_bounds(day)
+    rows = list(
+        session.exec(
+            _sessions_for_user()
+            .where(TrainingSession.plan_template_id == active_id)
+            .where(TrainingSession.session_date >= week_start)
+            .where(TrainingSession.session_date <= week_end)
+            .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
+            .order_by(col(TrainingSession.session_date), col(TrainingSession.id))
+        ).all()
+    )
+
+    completed_ids: list[int] = []
+    today_block_id: int | None = None
+    seen: set[int] = set()
+    for sess in rows:
+        bid = sess.plan_block_id
+        if bid is None:
+            continue
+        if sess.session_date == day:
+            today_block_id = bid
+        if bid not in seen:
+            seen.add(bid)
+            completed_ids.append(bid)
+
+    next_block = None
+    week_cycle_done = False
+    for block in blocks:
+        if block.id not in seen:
+            next_block = block
+            break
+    if blocks and next_block is None:
+        week_cycle_done = True
+        next_block = blocks[0]
+
+    def _block_brief(block: PlanBlock | None) -> dict[str, Any] | None:
+        if not block:
+            return None
+        ex_rows = list(
+            session.exec(
+                select(PlanExercise)
+                .where(PlanExercise.block_id == block.id)
+                .order_by(col(PlanExercise.order_index), col(PlanExercise.id))
+            ).all()
+        )
+        preview_names: list[str] = []
+        for ex in ex_rows:
+            if ex.exercise_name:
+                preview_names.append(ex.exercise_name)
+            if len(preview_names) >= 4:
+                break
+        # 框架空槽：详情预览逻辑太重，这里只返回已有名；前端可再拉详情补
+        return {
+            "id": block.id,
+            "order_index": block.order_index,
+            "title": block.title,
+            "muscles": list(block.muscles or []),
+            "minutes_label": _minutes_label(block.minutes_min, block.minutes_max),
+            "cover_url": block.cover_url,
+            "exercise_count": len(ex_rows),
+            "preview_names": preview_names,
+        }
+
+    total = len(blocks)
+    done_n = len(completed_ids)
+    order_of_next = None
+    if next_block:
+        for i, b in enumerate(blocks, start=1):
+            if b.id == next_block.id:
+                order_of_next = i
+                break
+    progress_label = None
+    if total > 0 and order_of_next is not None:
+        progress_label = f"本周第 {order_of_next}/{total} 练"
+
+    card = _template_card(session, tpl, block_count=total)
+    card["block_count"] = total
+
+    return {
+        "active_plan_id": active_id,
+        "active_plan_started_at": started_at.isoformat() if started_at else None,
+        "plan": card,
+        "week": {
+            "completed_block_ids": completed_ids,
+            "next_block": _block_brief(next_block),
+            "week_cycle_done": week_cycle_done,
+            "total_blocks": total,
+            "completed_count": done_n,
+            "today_block_id": today_block_id,
+            "progress_label": progress_label,
+        },
+    }
 
 
 def _thumb_url(
@@ -322,6 +552,9 @@ def expand_plan_block(session: Session, plan_id: str, block_id: int) -> dict[str
 
 
 def _primary_muscle(block: PlanBlock, row: PlanExercise) -> str:
+    target = (getattr(row, "target_muscle", None) or "").strip()
+    if target:
+        return target
     muscles = [str(m) for m in (block.muscles or []) if m]
     if not muscles:
         return "全身"
@@ -329,6 +562,28 @@ def _primary_muscle(block: PlanBlock, row: PlanExercise) -> str:
     if row.role == "isolation" and "臂" in muscles:
         return "臂"
     return muscles[0]
+
+
+def _arm_bias_for_block(block: PlanBlock) -> str | None:
+    """推日→三头；拉日→二头。"""
+    muscles = {str(m) for m in (block.muscles or []) if m}
+    title = block.title or ""
+    if "背" in muscles or "背" in title or "拉" in title:
+        return "pull"
+    if ("胸" in muscles or "肩" in muscles) or any(x in title for x in ("胸", "肩", "推", "三头")):
+        return "push"
+    return None
+
+
+def _matches_arm_bias(cand: dict[str, Any], bias: str | None) -> bool:
+    """推日臂→三头；拉日臂→二头。只看 sub_region 枚举；未填亚区则不强行按名字猜。"""
+    if not bias:
+        return True
+    sub = str(cand.get("sub_region") or "")
+    if not sub:
+        return True  # 无亚区时不误杀；靠主练肌群分 + 多样性排序
+    want = _PUSH_ARM_SUB if bias == "push" else _PULL_ARM_SUB
+    return any(s in sub for s in want)
 
 
 def _suggest_weight(session: Session, name: str, experience: str) -> float | None:
@@ -390,15 +645,19 @@ def _resolve_exercise_row(
                 }
             )
 
-    # 框架型 / 空槽：从动作库检索
+    # 框架型 / 空槽：从动作库检索（有 target_muscle 则单部位抽，避免胸肩三头混池）
     if tpl.template_type == "framework" or not any(c.get("name") for c in candidates):
+        target = (getattr(row, "target_muscle", None) or "").strip()
+        slot_muscles = [target] if target else [str(m) for m in (block.muscles or []) if m]
         retrieved = _retrieve_for_slot(
             session,
-            muscles=[str(m) for m in (block.muscles or []) if m],
+            muscles=slot_muscles,
             role=row.role,
             injuries=injuries,
             exclude=list(used_names),
             avoid=avoid,
+            arm_bias=_arm_bias_for_block(block) if target == "臂" or "臂" in slot_muscles else None,
+            allow_core=("核心" in slot_muscles),
         )
         candidates.extend(retrieved)
 
@@ -438,9 +697,15 @@ def _resolve_exercise_row(
             swap_note = f"已从「{row.exercise_name}」降级替换"
         return {**best, "swap_note": swap_note}
 
-    # 框架：器械 / 亚区多样性 + coach_core
+    # 框架：主练肌群优先 + 臂推/拉细分 + 器械/亚区多样性 + coach_core
+    target = (getattr(row, "target_muscle", None) or "").strip()
+    arm_bias = _arm_bias_for_block(block) if target == "臂" else None
     for cand in valid:
         score = 0
+        if target and cand.get("muscle") == target:
+            score += 20
+        if target == "臂" and _matches_arm_bias(cand, arm_bias):
+            score += 15
         gear = cand.get("gear")
         sub = cand.get("sub_region")
         if gear and gear not in used_gears:
@@ -473,43 +738,75 @@ def _retrieve_for_slot(
     injuries: list[str],
     exclude: list[str],
     avoid: list[str],
+    arm_bias: str | None = None,
+    allow_core: bool = False,
 ) -> list[dict[str, Any]]:
-    """内存目录检索 + DB slot_roles 加权；兼顾器械/亚区多样性。"""
+    """内存目录检索 + DB slot_roles / 亚区；主练肌群强优先。"""
     pool = retrieve_candidates(
         muscles=muscles or None,
         modalities=["抗阻"],
         injuries=injuries,
         exclude=exclude,
-        limit=40,
+        limit=50,
+        primary_muscle_first=True,
+        drop_synergy_if_primary_ge=8,
     )
     avoid_canon = {canonicalize_exercise(a) for a in avoid if a}
-    # 可选：用 DB 的 slot_roles 抬权
-    name_to_roles: dict[str, list[str]] = {}
+    name_to_meta: dict[str, dict[str, Any]] = {}
     if pool:
-        names = [p["name"] for p in pool[:40]]
+        names = [p["name"] for p in pool[:50]]
         db_rows = session.exec(select(Exercise).where(col(Exercise.name_zh).in_(names))).all()
         for ex in db_rows:
-            name_to_roles[ex.name_zh] = normalize_slot_roles(ex.slot_roles)
+            name_to_meta[ex.name_zh] = {
+                "slot_roles": normalize_slot_roles(ex.slot_roles),
+                "sub_region": ex.sub_region,
+                "movement_pattern": ex.movement_pattern,
+                "muscle": ex.muscle,
+            }
 
     out: list[dict[str, Any]] = []
     for item in pool:
         name = item["name"]
         if canonicalize_exercise(name) in avoid_canon:
             continue
-        roles = name_to_roles.get(name) or []
-        # 有角色标注时优先匹配；没有标注的仍可进候选（兼容未清洗库）
+        meta = name_to_meta.get(name) or {}
+        muscle_v = meta.get("muscle") or item.get("muscle")
+        pattern_v = meta.get("movement_pattern")
+        if not allow_core and is_core_movement(movement_pattern=pattern_v, muscle=muscle_v):
+            continue
+        roles = list(meta.get("slot_roles") or [])
+        # slot_roles 空：用枚举字段推断（仍不看动作名）
+        if not roles:
+            roles = infer_slot_roles(
+                movement_pattern=pattern_v,
+                muscle=muscle_v,
+                coach_core=bool(item.get("coach_core")),
+            )
         if roles and role not in roles:
-            # 主项可放宽到 assist；孤立/热身严格一点
             if not (role == "main" and "assist" in roles):
                 continue
-        out.append(
-            {
-                "name": name,
-                "exercise_id": item.get("id"),
-                "muscle": item.get("muscle") or (muscles[0] if muscles else "全身"),
-                "gear": item.get("category") or item.get("gear"),
-                "sub_region": item.get("sub_region"),
-                "coach_core": bool(item.get("coach_core")),
-            }
-        )
+        if role == "isolation" and not allow_core and is_core_movement(
+            movement_pattern=pattern_v,
+            muscle=muscle_v,
+        ):
+            continue
+        cand = {
+            "name": name,
+            "exercise_id": item.get("id"),
+            "muscle": item.get("muscle") or (muscles[0] if muscles else "全身"),
+            "gear": item.get("category") or item.get("gear"),
+            "sub_region": meta.get("sub_region") or item.get("sub_region"),
+            "coach_core": bool(item.get("coach_core")),
+        }
+        if arm_bias and not _matches_arm_bias(cand, arm_bias):
+            # 臂细分：不硬过滤，靠后续打分压后；先收集，后置排序在框架分支
+            cand["_arm_mismatch"] = True
+        out.append(cand)
+
+    if arm_bias:
+        matched = [c for c in out if not c.get("_arm_mismatch")]
+        if len(matched) >= 3:
+            out = matched
+        else:
+            out = matched + [c for c in out if c.get("_arm_mismatch")]
     return out

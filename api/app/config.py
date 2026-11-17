@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""
     langsmith_project: str = "gym-coach"
+    # 公共资源存储：local（默认写 static/）| s3（Cloudflare R2 / OSS 等）
+    storage_backend: str = "local"
+    s3_endpoint_url: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_bucket_name: str = ""
+    s3_public_base_url: str = ""
+    s3_region: str = "auto"
 
 
 settings = Settings()

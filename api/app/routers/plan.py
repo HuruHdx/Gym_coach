@@ -1,4 +1,4 @@
-"""H5 计划模板只读 + 按板块展开。"""
+"""H5 计划模板只读 + 按板块展开 + 周跟练。"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ class ExpandBody(BaseModel):
 @router.get("")
 def list_plans(
     type: str | None = Query(default=None, description="framework | fixed"),
+    scene: str | None = Query(default=None, description="场景标签：三分化/四分化/博主同款…"),
     muscle: str | None = Query(default=None),
     level: str | None = Query(default=None),
     session: Session = Depends(get_session),
@@ -28,10 +29,28 @@ def list_plans(
     items = plan_service.list_published_plans(
         session,
         template_type=type,
+        scene_tag=scene,
         muscle=muscle,
         level=level,
     )
     return {"items": items, "total": len(items)}
+
+
+@router.get("/following")
+def following_progress(
+    session: Session = Depends(get_session),
+    _: AuthContext = Depends(bind_auth),
+):
+    """当前跟练计划 + 本周进度（自然周推算）。"""
+    return plan_service.get_following_progress(session)
+
+
+@router.delete("/follow")
+def unfollow_plan(
+    session: Session = Depends(get_session),
+    _: AuthContext = Depends(bind_auth),
+):
+    return plan_service.unfollow_plan(session)
 
 
 @router.get("/{plan_id}")
@@ -41,6 +60,15 @@ def plan_detail(
     _: AuthContext = Depends(bind_auth),
 ):
     return plan_service.get_plan_detail(session, plan_id)
+
+
+@router.post("/{plan_id}/follow")
+def follow_plan(
+    plan_id: str,
+    session: Session = Depends(get_session),
+    _: AuthContext = Depends(bind_auth),
+):
+    return plan_service.follow_plan(session, plan_id)
 
 
 @router.post("/{plan_id}/expand")

@@ -1,12 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { createPortal } from "react-dom";
+import { api, expandPlan, fetchFollowing, fetchPlans } from "../lib/api";
 import { COACH_NAME } from "../lib/brand";
-import type { SetLog, TrainingSession } from "../types";
+import type { CardBlock, SetLog, TrainingSession } from "../types";
 import { WeightStepper } from "../components/WeightStepper";
 import { RepsStepper } from "../components/RepsStepper";
 import { ReorderItem, ReorderList } from "../components/ReorderList";
+import { DraftCard } from "../components/DraftCard";
+
+const COACH_CHIPS = [
+  { label: "今天只有30分钟", prompt: "今天只有30分钟，帮我排一场高效训练" },
+  { label: "练胸·器械优先", prompt: "今天练胸，器械优先" },
+  { label: "按上次记录续排", prompt: "按我上次训练记录帮我续排今天这场" },
+  { label: "全身快速练", prompt: "帮我排一场全身快速练，控制在45分钟内" },
+] as const;
 
 export function TodayPage() {
   const navigate = useNavigate();
@@ -176,37 +185,7 @@ export function TodayPage() {
   }
 
   if (!local || local.status === "abandoned") {
-    return (
-      <div className="flex min-h-full flex-col px-4 pb-4 pt-3 rise-in">
-        <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
-          Gym Coach
-        </p>
-        <h1 className="font-display text-[26px] font-bold tracking-tight">今日</h1>
-        <div className="relative mt-4 flex min-h-[52vh] flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-5">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-muted">Ready</p>
-          <h2 className="font-display relative mt-3 max-w-[10ch] text-3xl font-extrabold leading-none tracking-tight">
-            还没开始
-          </h2>
-          <p className="relative mt-3 max-w-[28ch] text-sm leading-relaxed text-muted">
-            去浏览计划选一场，或让教练定制草稿，采纳后回到这里打卡。
-          </p>
-          <div className="relative mt-auto space-y-2">
-            <Link
-              to="/plans"
-              className="pressable inline-flex w-full items-center justify-center rounded-md bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink"
-            >
-              浏览计划
-            </Link>
-            <Link
-              to="/coach"
-              className="pressable inline-flex w-full items-center justify-center rounded-md border border-line bg-elevated py-3 text-sm font-bold text-ink"
-            >
-              让{COACH_NAME}定制
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+    return <TodayIdleWorkbench />;
   }
 
   const pct =
@@ -218,13 +197,11 @@ export function TodayPage() {
   const seconds = elapsedSeconds(local, now);
   const exerciseCount = groups.length;
   const planTypeLabel =
-    local.plan_type === "framework"
-      ? "框架计划"
-      : local.plan_type === "fixed"
-        ? "成品计划"
-        : local.plan_type === "custom"
-          ? "自定义"
-          : "今日计划";
+    local.plan_type === "framework" || local.plan_type === "fixed"
+      ? "计划场次"
+      : local.plan_type === "custom"
+        ? "自定义"
+        : "今日计划";
   const muscleSummary = [
     ...new Set(groups.map((g) => g.sets[0]?.muscle).filter(Boolean) as string[]),
   ]
@@ -259,8 +236,8 @@ export function TodayPage() {
       </p>
       <div className="flex items-end justify-between gap-3">
         <h1 className="font-display text-[26px] font-bold tracking-tight">今日</h1>
-        <Link to="/plans" className="text-[12px] font-bold text-accent-text">
-          浏览计划
+        <Link to="/plans" className="text-[12px] font-bold text-muted">
+          换计划
         </Link>
       </div>
 
@@ -494,6 +471,277 @@ export function TodayPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** 状态 A：今日未开练 — 选课工作台 */
+function TodayIdleWorkbench() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState<CardBlock | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  const followingQuery = useQuery({
+    queryKey: ["plans-following"],
+    queryFn: fetchFollowing,
+  });
+  const plansQuery = useQuery({
+    queryKey: ["plans", "featured"],
+    queryFn: () => fetchPlans({}),
+  });
+
+  const following = followingQuery.data;
+  const nextBlock = following?.week?.next_block ?? null;
+  const featured = (plansQuery.data?.items ?? []).slice(0, 3);
+
+  async function startNextBlock() {
+    if (!following?.active_plan_id || !nextBlock || starting) return;
+    setStarting(true);
+    try {
+      const res = await expandPlan(following.active_plan_id, nextBlock.id);
+      setDraft(res.card);
+      setSheetOpen(true);
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
+      <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
+        Gym Coach
+      </p>
+      <h1 className="font-display text-[26px] font-bold tracking-tight">今日</h1>
+
+      {/* 1. 今日待练 Hero */}
+      {following?.active_plan_id && nextBlock ? (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-elevated to-elevated p-4">
+          <p className="text-[11px] font-bold tracking-wide text-muted">
+            {following.plan?.title || "跟练计划"}
+            {following.week.progress_label ? (
+              <>
+                {" · "}
+                <span className="num">{following.week.progress_label}</span>
+              </>
+            ) : null}
+            {following.week.week_cycle_done ? " · 本周已轮完，可再练" : ""}
+          </p>
+          <h2 className="mt-2 font-display text-[28px] font-extrabold tracking-tight">
+            {nextBlock.title}
+          </h2>
+          <p className="mt-1 text-[12px] text-muted">
+            {(nextBlock.muscles || []).join(" · ") || "—"}
+            {nextBlock.minutes_label ? (
+              <>
+                {" · "}
+                <span className="num">{nextBlock.minutes_label}</span>
+              </>
+            ) : null}
+            {nextBlock.exercise_count ? (
+              <>
+                {" · "}
+                <span className="num">{nextBlock.exercise_count}</span> 动作
+              </>
+            ) : null}
+          </p>
+          {nextBlock.preview_names?.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {nextBlock.preview_names.map((name) => (
+                <span
+                  key={name}
+                  className="rounded-md border border-line bg-bg/80 px-2 py-1 text-[11px] font-bold text-ink"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              disabled={starting}
+              onClick={() => void startNextBlock()}
+              className="pressable flex-1 rounded-md bg-accent py-3 text-sm font-extrabold text-accent-ink disabled:opacity-50"
+            >
+              {starting ? "展开中…" : "开始这场"}
+            </button>
+            <Link
+              to={`/plans/${encodeURIComponent(following.active_plan_id)}`}
+              className="pressable shrink-0 rounded-md border border-line bg-elevated px-3 py-3 text-sm font-bold text-ink"
+            >
+              换个板块
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-4">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-muted">Ready</p>
+          <h2 className="mt-2 font-display text-2xl font-extrabold tracking-tight">
+            还没定今日课
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted">
+            让{COACH_NAME}按你状态排一场，或挑一套固定计划跟练。
+          </p>
+          <div className="mt-4 space-y-2">
+            <Link
+              to="/coach"
+              className="pressable inline-flex w-full items-center justify-center rounded-md bg-accent py-3.5 text-sm font-extrabold text-accent-ink"
+            >
+              让{COACH_NAME}排今天这场
+            </Link>
+            <Link
+              to="/plans"
+              className="pressable inline-flex w-full items-center justify-center rounded-md border border-line bg-elevated py-3 text-sm font-bold text-ink"
+            >
+              挑一套固定计划跟练
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* 2. 精选训练计划 */}
+      <div className="mt-6 flex items-center justify-between gap-2">
+        <p className="text-xs font-bold text-muted">精选训练计划</p>
+        <Link to="/plans" className="text-[12px] font-bold text-accent-text">
+          全部 &gt;
+        </Link>
+      </div>
+      <div className="no-scrollbar mt-2 flex gap-3 overflow-x-auto pb-1">
+        {plansQuery.isLoading && (
+          <p className="text-sm text-muted">加载计划…</p>
+        )}
+        {featured.map((plan) => (
+          <Link
+            key={plan.id}
+            to={`/plans/${encodeURIComponent(plan.id)}`}
+            className="pressable w-[72%] max-w-[280px] shrink-0 overflow-hidden rounded-xl border border-line bg-elevated"
+          >
+            <div
+              className="min-h-[96px] bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-3"
+              style={
+                plan.cover_url
+                  ? {
+                      backgroundImage: `linear-gradient(to top, rgb(var(--bg-rgb) / 0.9), rgb(var(--bg-rgb) / 0.4)), url(${plan.cover_url})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                    }
+                  : undefined
+              }
+            >
+              <span className="rounded-md bg-tint px-1.5 py-0.5 text-[10px] font-extrabold text-accent-text">
+                {plan.scene_tag || plan.badge_label || "计划"}
+              </span>
+              <h3 className="mt-4 font-display text-base font-extrabold tracking-tight">
+                {plan.title}
+              </h3>
+              <p className="mt-0.5 truncate text-[11px] text-muted">
+                {plan.split_summary || plan.subtitle || (
+                  <>
+                    每周 <span className="num">{plan.days_per_week}</span> 练
+                  </>
+                )}
+              </p>
+            </div>
+          </Link>
+        ))}
+        {!plansQuery.isLoading && featured.length === 0 && (
+          <p className="text-sm text-muted">暂无精选计划</p>
+        )}
+      </div>
+
+      {/* 3. 找教练快捷胶囊 */}
+      <p className="mt-6 text-xs font-bold text-muted">找{COACH_NAME}一句话定制</p>
+      <div className="chipbar no-scrollbar mt-2 flex gap-1.5 overflow-x-auto pb-1">
+        {COACH_CHIPS.map((chip) => (
+          <button
+            key={chip.label}
+            type="button"
+            onClick={() => {
+              try {
+                sessionStorage.setItem("coach_prefill", chip.prompt);
+              } catch {
+                /* ignore */
+              }
+              navigate("/coach");
+            }}
+            className="pressable shrink-0 rounded-md border border-line bg-elevated px-3 py-2 text-[12px] font-bold text-ink"
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
+      {draft && sheetOpen && (
+        <TodayDraftSheet
+          onClose={() => {
+            setSheetOpen(false);
+            setDraft(null);
+          }}
+        >
+          <DraftCard
+            card={draft}
+            onChange={setDraft}
+            todayStatus="none"
+            onAdopted={() => {
+              void qc.invalidateQueries({ queryKey: ["training-today"] });
+              void qc.invalidateQueries({ queryKey: ["plans-following"] });
+              setSheetOpen(false);
+              setDraft(null);
+            }}
+          />
+        </TodayDraftSheet>
+      )}
+    </div>
+  );
+}
+
+function TodayDraftSheet({
+  children,
+  onClose,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const id = window.requestAnimationFrame(() => setShown(true));
+    return () => {
+      document.body.style.overflow = prev;
+      window.cancelAnimationFrame(id);
+    };
+  }, []);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex flex-col justify-end">
+      <button
+        type="button"
+        aria-label="关闭草稿"
+        className={`absolute inset-0 bg-scrim transition-opacity duration-200 ${
+          shown ? "opacity-100" : "opacity-0"
+        }`}
+        onClick={onClose}
+      />
+      <div
+        className={`relative z-[1] max-h-[88dvh] overflow-y-auto rounded-t-2xl border border-line bg-bg px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 transition-transform duration-200 ${
+          shown ? "translate-y-0" : "translate-y-full"
+        }`}
+      >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-xs font-bold text-muted">今日草稿 · 可微调后采纳</p>
+          <button type="button" className="text-xs font-bold text-accent-text" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -94,6 +94,7 @@ def _plan_out(session: Session, tpl: PlanTemplate, *, with_blocks: bool = False)
         "gear_tags": list(tpl.gear_tags or []),
         "description": tpl.description,
         "cover_url": tpl.cover_url,
+        "scene_tag": getattr(tpl, "scene_tag", None),
         "is_published": bool(tpl.is_published),
         "sort_order": tpl.sort_order,
         "block_count": int(block_count or 0),
@@ -145,6 +146,7 @@ def _exercise_out(session: Session, row: PlanExercise) -> dict[str, Any]:
         "target_sets": row.target_sets,
         "target_reps": row.target_reps,
         "warmup_sets": row.warmup_sets or 0,
+        "target_muscle": getattr(row, "target_muscle", None),
         "alternatives": list(row.alternatives or []),
         "note": row.note,
         "thumb_url": _exercise_thumb(session, row.exercise_id),
@@ -235,6 +237,7 @@ def create_admin_plan(session: Session, payload: dict[str, Any]) -> dict[str, An
         gear_tags=_clean_str_list(payload.get("gear_tags"), allowed=PLAN_GEAR_TAGS),
         description=_opt_str(payload.get("description"), 4000),
         cover_url=_opt_str(payload.get("cover_url"), 512),
+        scene_tag=_opt_str(payload.get("scene_tag"), 32),
         is_published=bool(payload.get("is_published", False)),
         sort_order=int(payload.get("sort_order") or 0),
         created_at=now,
@@ -287,6 +290,8 @@ def update_admin_plan(session: Session, plan_id: str, payload: dict[str, Any]) -
         tpl.description = _opt_str(payload.get("description"), 4000)
     if "cover_url" in payload:
         tpl.cover_url = _opt_str(payload.get("cover_url"), 512)
+    if "scene_tag" in payload:
+        tpl.scene_tag = _opt_str(payload.get("scene_tag"), 32)
     if "is_published" in payload and payload["is_published"] is not None:
         tpl.is_published = bool(payload["is_published"])
     if "sort_order" in payload and payload["sort_order"] is not None:
@@ -426,6 +431,7 @@ def create_plan_exercise(session: Session, block_id: int, payload: dict[str, Any
         exercise_name=exercise_name,
         role=role,
         lock_level=lock_level,
+        target_muscle=_opt_str(payload.get("target_muscle"), 16),
         target_sets=_opt_int(payload.get("target_sets")),
         target_reps=_opt_str(payload.get("target_reps"), 32),
         warmup_sets=max(0, min(10, int(payload.get("warmup_sets") or 0))),
@@ -477,6 +483,8 @@ def update_plan_exercise(session: Session, ex_id: int, payload: dict[str, Any]) 
         row.alternatives = _clean_str_list(payload.get("alternatives"), limit=12)
     if "note" in payload:
         row.note = _opt_str(payload.get("note"), 1000)
+    if "target_muscle" in payload:
+        row.target_muscle = _opt_str(payload.get("target_muscle"), 16)
     if "order_index" in payload and payload["order_index"] is not None:
         row.order_index = int(payload["order_index"])
     session.add(row)
@@ -533,17 +541,54 @@ async def upload_plan_cover(session: Session, plan_id: str, file: UploadFile) ->
         raise HTTPException(status_code=400, detail="文件过大（上限 12MB）")
 
     payload, save_ext = _process_landscape_cover(raw)
-    folder = _PLANS_ROOT / plan_id
-    folder.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex[:8]
     out_name = f"cover_{token}{save_ext}"
-    (folder / out_name).write_bytes(payload)
-    url = f"/static/plans/{plan_id}/{out_name}"
+    from app.services.storage import save_public_asset
+
+    url = save_public_asset(
+        payload,
+        f"plans/{plan_id}/{out_name}",
+        "image/jpeg" if save_ext == ".jpg" else "application/octet-stream",
+    )
     tpl.cover_url = url
     tpl.updated_at = utcnow()
     session.add(tpl)
     session.commit()
     return get_admin_plan(session, plan_id)
+
+
+async def upload_block_cover(session: Session, block_id: int, file: UploadFile) -> dict[str, Any]:
+    block = session.get(PlanBlock, block_id)
+    if not block:
+        raise HTTPException(status_code=404, detail="板块不存在")
+    filename = file.filename or "cover.bin"
+    ext = Path(filename).suffix.lower()
+    if ext not in _IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext or '(无扩展名)'}")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="空文件")
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="文件过大（上限 12MB）")
+
+    payload, save_ext = _process_landscape_cover(raw)
+    token = uuid.uuid4().hex[:8]
+    out_name = f"block_cover_{token}{save_ext}"
+    from app.services.storage import save_public_asset
+
+    url = save_public_asset(
+        payload,
+        f"plans/{block.template_id}/blocks/{block_id}/{out_name}",
+        "image/jpeg" if save_ext == ".jpg" else "application/octet-stream",
+    )
+    block.cover_url = url
+    session.add(block)
+    tpl = session.get(PlanTemplate, block.template_id)
+    if tpl:
+        tpl.updated_at = utcnow()
+        session.add(tpl)
+    session.commit()
+    return _block_out(session, block)
 
 
 def _opt_str(value: Any, max_len: int) -> str | None:

@@ -332,6 +332,11 @@ def is_banned_for_injuries(title: str, injuries: list[str]) -> bool:
     return False
 
 
+def _is_core_item(item: ExerciseDetail) -> bool:
+    """只信主肌群字段：muscle==核心。标错了去后台改数据，不在这里写动作名。"""
+    return (item.get("muscle") or "") == "核心"
+
+
 def retrieve_candidates(
     *,
     muscles: list[str] | None = None,
@@ -342,18 +347,25 @@ def retrieve_candidates(
     focus: list[str] | None = None,
     boost_names: list[str] | None = None,
     limit: int = 30,
+    primary_muscle_first: bool = True,
+    drop_synergy_if_primary_ge: int | None = None,
 ) -> list[ExerciseDetail]:
-    """Small candidate pool for PLAN prompts / swap."""
+    """Small candidate pool for PLAN prompts / swap.
+
+    primary_muscle_first: 主练肌群 item.muscle 完全一致大幅加分，协同 roles 仅次级。
+    drop_synergy_if_primary_ge: 换动作用；主练梯队达到 N 个后丢弃仅协同候选。
+    """
     ensure_loaded()
     want_mods = [m for m in (modalities or []) if m]
     want_muscles = [m for m in (muscles or []) if m and m != "全身"]
+    allow_core = "核心" in want_muscles or not want_muscles
     gear_allow = set(equipment or [])
     exclude_set = {canonicalize_exercise(x) for x in (exclude or []) if x}
     focus_set = {canonicalize_exercise(x) for x in (focus or []) if x}
     boost_set = {canonicalize_exercise(x) for x in (boost_names or []) if x}
     keywords = injury_keywords_for(injuries)
 
-    scored: list[tuple[int, ExerciseDetail]] = []
+    scored: list[tuple[int, ExerciseDetail, bool]] = []
     for item in _rows:
         name = canonicalize_exercise(item["name"])
         if not looks_like_exercise_name(item["name"]):
@@ -361,6 +373,8 @@ def retrieve_candidates(
         if name in exclude_set:
             continue
         if want_mods and not any(m in modalities_of(detail=item) for m in want_mods):
+            continue
+        if not allow_core and _is_core_item(item):
             continue
         roles = roles_of(detail=item)
         if want_muscles and not any(m in roles for m in want_muscles):
@@ -370,21 +384,34 @@ def retrieve_candidates(
         if keywords and matches_injury_keywords(item["name"], str(item.get("name_en") or ""), keywords):
             continue
 
+        primary_hit = bool(want_muscles) and any(m == item.get("muscle") for m in want_muscles)
+        synergy_only = bool(want_muscles) and not primary_hit
+
         score = 0
         # 用户点名（模型给出）用子串加权，便于「深蹲」抬起「杠铃深蹲」
         if any(f and (f in item["name"] or item["name"] in f) for f in focus_set):
             score += 100
+        if primary_muscle_first and want_muscles:
+            if primary_hit:
+                score += 60
+            # 第二梯队（仅协同）基础分 +0，不再与主练等权
         if item.get("coach_core"):
             score += 25
         if name in boost_set:
             score += 35
         if len(item["name"]) <= 2:
             score -= 20
-        scored.append((score, item))
+        scored.append((score, item, synergy_only))
+
+    # 换动作：主练梯队够用时丢掉仅协同
+    if drop_synergy_if_primary_ge is not None and drop_synergy_if_primary_ge > 0:
+        primary_n = sum(1 for _, _, synergy in scored if not synergy)
+        if primary_n >= drop_synergy_if_primary_ge:
+            scored = [(s, it, syn) for s, it, syn in scored if not syn]
 
     # 同档内打乱，避免每次都同一套「最热」动作，保留定制随机感
     by_band: dict[int, list[ExerciseDetail]] = {}
-    for score, item in scored:
+    for score, item, _ in scored:
         by_band.setdefault(score, []).append(item)
     ordered_scores = sorted(by_band.keys(), reverse=True)
     out: list[ExerciseDetail] = []
@@ -430,6 +457,7 @@ def alternatives_rich(
     injuries: list[str] | None = None,
     modality: Modality | None = None,
 ) -> list[ExerciseDetail]:
+    """换动作：主练肌群第一梯队；协同梯队仅在主练不足 8 个时保留。"""
     ex = canonicalize_exercise(exclude) if exclude else None
     want: Modality | None = modality
     if want is None and ex:
@@ -444,6 +472,8 @@ def alternatives_rich(
         injuries=injuries,
         exclude=[ex] if ex else None,
         limit=40,
+        primary_muscle_first=True,
+        drop_synergy_if_primary_ge=8,
     )
 
 

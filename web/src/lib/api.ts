@@ -1,4 +1,9 @@
-import type { PlanDetail, PlanExpandResponse, PlanListResponse } from "../types";
+import type {
+  FollowingProgress,
+  PlanDetail,
+  PlanExpandResponse,
+  PlanListResponse,
+} from "../types";
 
 const TOKEN_KEY = "gym-app-token";
 const AUTH_FLAG = "gym-authed";
@@ -61,6 +66,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export type PlanListQuery = {
   type?: "framework" | "fixed" | "";
+  scene?: string;
   muscle?: string;
   level?: string;
 };
@@ -68,6 +74,7 @@ export type PlanListQuery = {
 export function fetchPlans(query: PlanListQuery = {}) {
   const params = new URLSearchParams();
   if (query.type) params.set("type", query.type);
+  if (query.scene && query.scene !== "全部") params.set("scene", query.scene);
   if (query.muscle && query.muscle !== "全部") params.set("muscle", query.muscle);
   if (query.level && query.level !== "全部") params.set("level", query.level);
   const qs = params.toString();
@@ -83,4 +90,18 @@ export function expandPlan(id: string, blockId: number) {
     method: "POST",
     body: JSON.stringify({ block_id: blockId }),
   });
+}
+
+export function fetchFollowing() {
+  return api<FollowingProgress>("/api/plans/following");
+}
+
+export function followPlan(id: string) {
+  return api<FollowingProgress>(`/api/plans/${encodeURIComponent(id)}/follow`, {
+    method: "POST",
+  });
+}
+
+export function unfollowPlan() {
+  return api<FollowingProgress>("/api/plans/follow", { method: "DELETE" });
 }

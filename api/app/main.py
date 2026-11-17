@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.db import init_db
 from app.exercises_catalog import ensure_loaded
-from app.routers import admin, auth, brain, catalog, plan, profile, training
+from app.routers import admin, admin_studio, auth, brain, catalog, plan, profile, training
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -40,6 +40,7 @@ app.include_router(training.router)
 app.include_router(catalog.router)
 app.include_router(plan.router)
 app.include_router(admin.router)
+app.include_router(admin_studio.router)
 
 # Exercise demo images (openGym / free-exercise-db); unused by UI this phase.
 _exercises_dir = _STATIC_DIR / "exercises"
@@ -49,6 +50,9 @@ app.mount("/static/exercises", StaticFiles(directory=str(_exercises_dir)), name=
 _plans_dir = _STATIC_DIR / "plans"
 _plans_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static/plans", StaticFiles(directory=str(_plans_dir)), name="plan_media")
+_studio_dir = _STATIC_DIR / "studio"
+_studio_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/studio", StaticFiles(directory=str(_studio_dir)), name="studio_media")
 
 
 @app.get("/api/health")

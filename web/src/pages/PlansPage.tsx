@@ -5,38 +5,26 @@ import { ChevronLeft } from "lucide-react";
 import { fetchPlans } from "../lib/api";
 import { MUSCLE_OPTIONS } from "../types";
 
-const TYPE_FILTERS = [
-  { id: "", label: "全部" },
-  { id: "framework", label: "框架" },
-  { id: "fixed", label: "成品" },
+const SCENE_FILTERS = [
+  "全部",
+  "三分化",
+  "四分化",
+  "博主同款",
+  "单部位专项",
+  "新手入门",
 ] as const;
-
-const LEVEL_FILTERS = [
-  { id: "全部", label: "全部难度" },
-  { id: "beginner", label: "新手" },
-  { id: "intermediate", label: "进阶" },
-  { id: "advanced", label: "强化" },
-] as const;
-
-function typeLabel(t: string) {
-  if (t === "framework") return "框架";
-  if (t === "fixed") return "成品";
-  return t;
-}
 
 export function PlansPage() {
   const navigate = useNavigate();
-  const [type, setType] = useState<"" | "framework" | "fixed">("");
+  const [scene, setScene] = useState<string>("全部");
   const [muscle, setMuscle] = useState("全部");
-  const [level, setLevel] = useState("全部");
 
   const query = useQuery({
-    queryKey: ["plans", type, muscle, level],
+    queryKey: ["plans", scene, muscle],
     queryFn: () =>
       fetchPlans({
-        type,
+        scene,
         muscle,
-        level: level === "全部" ? "" : level,
       }),
   });
 
@@ -58,23 +46,23 @@ export function PlansPage() {
         {query.isLoading ? "加载中…" : `${items.length} 个已发布计划`}
       </p>
 
-      <div className="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto pb-1">
-        {TYPE_FILTERS.map((item) => (
+      <div className="chipbar no-scrollbar mt-3 flex gap-1.5 overflow-x-auto pb-1">
+        {SCENE_FILTERS.map((item) => (
           <button
-            key={item.id || "all"}
+            key={item}
             type="button"
-            onClick={() => setType(item.id)}
+            onClick={() => setScene(item)}
             className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-bold ${
-              type === item.id ? "bg-accent text-accent-ink" : "border border-line bg-elevated text-muted"
+              scene === item ? "bg-accent text-accent-ink" : "border border-line bg-elevated text-muted"
             }`}
           >
-            {item.label}
+            {item}
           </button>
         ))}
       </div>
 
-      <div className="no-scrollbar mt-2 flex gap-1.5 overflow-x-auto pb-1">
-        {["全部", ...MUSCLE_OPTIONS].map((item) => (
+      <div className="chipbar no-scrollbar mt-2 flex gap-1.5 overflow-x-auto pb-1">
+        {["全部", ...MUSCLE_OPTIONS.filter((m) => m !== "全身" && m !== "核心")].map((item) => (
           <button
             key={item}
             type="button"
@@ -84,21 +72,6 @@ export function PlansPage() {
             }`}
           >
             {item}
-          </button>
-        ))}
-      </div>
-
-      <div className="no-scrollbar mt-2 flex gap-1.5 overflow-x-auto pb-1">
-        {LEVEL_FILTERS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setLevel(item.id)}
-            className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-bold ${
-              level === item.id ? "bg-accent text-accent-ink" : "border border-line bg-elevated text-muted"
-            }`}
-          >
-            {item.label}
           </button>
         ))}
       </div>
@@ -132,11 +105,13 @@ export function PlansPage() {
             >
               <div className="flex items-start justify-between gap-2">
                 <span className="rounded-md bg-tint px-2 py-0.5 text-[10px] font-extrabold text-accent-text">
-                  {plan.badge_label || typeLabel(plan.template_type)}
+                  {plan.badge_label || plan.scene_tag || "计划"}
                 </span>
-                <span className="rounded-md border border-line bg-elevated/80 px-2 py-0.5 text-[10px] font-bold text-muted">
-                  {typeLabel(plan.template_type)}
-                </span>
+                {plan.scene_tag && (
+                  <span className="rounded-md border border-line bg-elevated/80 px-2 py-0.5 text-[10px] font-bold text-muted">
+                    {plan.scene_tag}
+                  </span>
+                )}
               </div>
               <h2 className="mt-6 font-display text-xl font-extrabold tracking-tight text-ink">
                 {plan.title}

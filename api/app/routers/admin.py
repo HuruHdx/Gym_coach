@@ -62,6 +62,7 @@ class PlanCreateIn(BaseModel):
     gear_tags: list[str] | None = None
     description: str | None = None
     cover_url: str | None = None
+    scene_tag: str | None = None
     is_published: bool = False
     sort_order: int = 0
 
@@ -81,6 +82,7 @@ class PlanUpdateIn(BaseModel):
     gear_tags: list[str] | None = None
     description: str | None = None
     cover_url: str | None = None
+    scene_tag: str | None = None
     is_published: bool | None = None
     sort_order: int | None = None
 
@@ -100,6 +102,7 @@ class PlanExerciseIn(BaseModel):
     exercise_name: str | None = None
     role: str | None = None
     lock_level: str | None = None
+    target_muscle: str | None = None
     target_sets: int | None = Field(default=None, ge=1, le=20)
     target_reps: str | None = None
     warmup_sets: int | None = Field(default=None, ge=0, le=10)
@@ -476,6 +479,16 @@ def put_plan_block(
     _: object = Depends(require_admin),
 ):
     return admin_plans.update_block(session, block_id, body.model_dump(exclude_unset=True))
+
+
+@router.post("/plan-blocks/{block_id}/cover")
+async def post_plan_block_cover(
+    block_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+    file: UploadFile = File(...),
+):
+    return await admin_plans.upload_block_cover(session, block_id, file)
 
 
 @router.delete("/plan-blocks/{block_id}")
