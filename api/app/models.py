@@ -214,6 +214,7 @@ class TrainingSetLog(SQLModel, table=True):
     actual_weight: Optional[float] = None
     actual_reps: Optional[int] = None
     completed: bool = False
+    completed_at: Optional[NaiveDatetime] = None  # 勾选完成时刻；组间休息 / 视频分析要用
     feeling: Optional[str] = None  # 轻松 | 合适 | 力竭
     note: Optional[str] = None
     is_warmup: bool = False  # 热身组不计入 1RM / 有效容量（旧数据默认 False）
@@ -389,6 +390,7 @@ class PlanExercise(SQLModel, table=True):
     target_sets: Optional[int] = Field(default=None, ge=1, le=20)
     target_reps: Optional[str] = Field(default=None, max_length=32)  # 如 8-12 / 10
     warmup_sets: int = Field(default=0, ge=0, le=10)  # 正式组前的热身组数；独立热身动作用 role=warmup
+    rest_sec: int = Field(default=90, ge=30, le=300)  # 组间休息秒数；按 role 可预填
     alternatives: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
     note: Optional[str] = None  # 给人看的训练提示；禁止塞拆解 JSON
     # 单行目标肌群（胸/背/肩/腿/臂/核心）；框架配课与换动作按此检索，勿与板块 muscles 混抽

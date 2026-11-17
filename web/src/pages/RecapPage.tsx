@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toPng } from "html-to-image";
 import { TrainingPoster, buildPosterModel } from "../components/TrainingPoster";
@@ -202,6 +203,13 @@ export function RecapPage() {
               {showDetail ? "收起详细总结" : "查看详细总结"}
             </button>
           </div>
+
+          <Link
+            to="/training/form-check"
+            className="mt-4 block text-center text-[12px] font-semibold text-accent-text"
+          >
+            拍了这组视频？上传测速度衰减 →
+          </Link>
         </div>
       )}
     </div>

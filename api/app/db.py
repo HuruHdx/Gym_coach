@@ -114,6 +114,8 @@ def _ensure_columns() -> None:
         ("plan_exercises", "source_kind", "VARCHAR"),
         ("plan_exercises", "match_confidence", "REAL"),
         ("plan_exercises", "source_snippet", "TEXT"),
+        ("plan_exercises", "rest_sec", "INTEGER DEFAULT 90"),
+        ("trainingsetlog", "completed_at", "TIMESTAMP"),
     ]
     url = settings.database_url
 

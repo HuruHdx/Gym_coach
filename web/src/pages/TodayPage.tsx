@@ -441,6 +441,7 @@ export function TodayPage() {
             <p className="mt-2 text-sm opacity-70">点开看教练对这场的判断。</p>
             <p className="mt-4 text-sm font-semibold text-accent-ink">查看结算 →</p>
           </Link>
+          <DoneNextHint />
           <button
             type="button"
             className="mt-3 w-full text-center text-xs font-bold text-muted underline"
@@ -474,7 +475,22 @@ export function TodayPage() {
   );
 }
 
-/** 状态 A：今日未开练 — 选课工作台 */
+function DoneNextHint() {
+  const { data: following } = useQuery({
+    queryKey: ["plans-following"],
+    queryFn: fetchFollowing,
+  });
+  const next = following?.week?.next_block;
+  if (!following?.active_plan_id || !next) return null;
+  return (
+    <p className="mt-3 text-center text-[12px] text-muted">
+      下次：<span className="font-bold text-ink">{next.title}</span>
+      {(next.muscles || []).length > 0 ? ` · ${(next.muscles || []).join(" + ")}` : ""}
+    </p>
+  );
+}
+
+/** 状态 A：今日未开练 — 跟练主卡 + 轻量换计划 */
 function TodayIdleWorkbench() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -493,7 +509,7 @@ function TodayIdleWorkbench() {
 
   const following = followingQuery.data;
   const nextBlock = following?.week?.next_block ?? null;
-  const featured = (plansQuery.data?.items ?? []).slice(0, 3);
+  const featured = (plansQuery.data?.items ?? []).slice(0, 2);
 
   async function startNextBlock() {
     if (!following?.active_plan_id || !nextBlock || starting) return;
@@ -529,35 +545,38 @@ function TodayIdleWorkbench() {
             ) : null}
             {following.week.week_cycle_done ? " · 本周已轮完，可再练" : ""}
           </p>
-          <h2 className="mt-2 font-display text-[28px] font-extrabold tracking-tight">
-            {nextBlock.title}
-          </h2>
+          <div className="mt-1 flex items-start justify-between gap-2">
+            <h2 className="font-display text-[26px] font-extrabold tracking-tight">
+              {nextBlock.title}
+            </h2>
+            <span className="shrink-0 rounded-md bg-tint px-2 py-1 text-[10px] font-bold text-accent-text">
+              今天
+            </span>
+          </div>
           <p className="mt-1 text-[12px] text-muted">
-            {(nextBlock.muscles || []).join(" · ") || "—"}
+            {nextBlock.exercise_count ? (
+              <>
+                <span className="num">{nextBlock.exercise_count}</span> 动作
+              </>
+            ) : (
+              "—"
+            )}
             {nextBlock.minutes_label ? (
               <>
                 {" · "}
                 <span className="num">{nextBlock.minutes_label}</span>
               </>
             ) : null}
-            {nextBlock.exercise_count ? (
-              <>
-                {" · "}
-                <span className="num">{nextBlock.exercise_count}</span> 动作
-              </>
-            ) : null}
+            {(nextBlock.muscles || []).length > 0 ? ` · ${(nextBlock.muscles || []).join(" · ")}` : ""}
           </p>
-          {nextBlock.preview_names?.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {nextBlock.preview_names.map((name) => (
-                <span
-                  key={name}
-                  className="rounded-md border border-line bg-bg/80 px-2 py-1 text-[11px] font-bold text-ink"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
+          {following.week.total_blocks > 0 && (
+            <p className="mt-2 text-[11px] text-muted">
+              第{" "}
+              <span className="num">
+                {Math.min(following.week.completed_count + 1, following.week.total_blocks)}
+              </span>{" "}
+              / <span className="num">{following.week.total_blocks}</span> 个板块
+            </p>
           )}
           <div className="mt-4 flex gap-2">
             <button
@@ -602,60 +621,77 @@ function TodayIdleWorkbench() {
         </div>
       )}
 
-      {/* 2. 精选训练计划 */}
+      {/* 2. 本周 + 部位间隔（P2 接口未就绪时显示空态，不用假数据） */}
+      <div className="mt-4 grid grid-cols-2 gap-2.5">
+        <div className="rounded-xl border border-line bg-elevated p-3">
+          <p className="text-[11px] font-bold text-muted">本周</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-muted">
+            {following?.active_plan_id
+              ? `跟练进度 ${following.week.completed_count}/${following.plan?.days_per_week ?? following.week.total_blocks ?? "—"}`
+              : "完成一场后这里会亮起来"}
+          </p>
+        </div>
+        <div className="rounded-xl border border-line bg-elevated p-3">
+          <p className="text-[11px] font-bold text-muted">部位间隔</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-muted">
+            练过几次后，这里显示距各部位上次训练天数
+          </p>
+        </div>
+      </div>
+
+      {/* 3. 想换一套：最多 2 张，深色蒙版让封面可见 */}
       <div className="mt-6 flex items-center justify-between gap-2">
-        <p className="text-xs font-bold text-muted">精选训练计划</p>
+        <p className="text-xs font-bold text-muted">想换一套？</p>
         <Link to="/plans" className="text-[12px] font-bold text-accent-text">
           全部 &gt;
         </Link>
       </div>
-      <div className="no-scrollbar mt-2 flex gap-3 overflow-x-auto pb-1">
+      <div className="mt-2 grid grid-cols-2 gap-2.5">
         {plansQuery.isLoading && (
-          <p className="text-sm text-muted">加载计划…</p>
+          <p className="col-span-2 text-sm text-muted">加载计划…</p>
         )}
         {featured.map((plan) => (
           <Link
             key={plan.id}
             to={`/plans/${encodeURIComponent(plan.id)}`}
-            className="pressable w-[72%] max-w-[280px] shrink-0 overflow-hidden rounded-xl border border-line bg-elevated"
+            className="pressable relative min-h-[150px] overflow-hidden rounded-xl border border-line"
           >
             <div
-              className="min-h-[96px] bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-3"
+              className="absolute inset-0 bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg"
               style={
                 plan.cover_url
                   ? {
-                      backgroundImage: `linear-gradient(to top, rgb(var(--bg-rgb) / 0.9), rgb(var(--bg-rgb) / 0.4)), url(${plan.cover_url})`,
+                      backgroundImage: `linear-gradient(to top, rgba(23,22,28,.80) 0%, rgba(23,22,28,.24) 48%, rgba(23,22,28,.06) 100%), url(${plan.cover_url})`,
                       backgroundSize: "cover",
                       backgroundPosition: "center",
                     }
                   : undefined
               }
-            >
-              <span className="rounded-md bg-tint px-1.5 py-0.5 text-[10px] font-extrabold text-accent-text">
+            />
+            <div className="relative flex h-full min-h-[150px] flex-col justify-between p-3">
+              <span className="w-fit rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold text-white">
                 {plan.scene_tag || plan.badge_label || "计划"}
               </span>
-              <h3 className="mt-4 font-display text-base font-extrabold tracking-tight">
-                {plan.title}
-              </h3>
-              <p className="mt-0.5 truncate text-[11px] text-muted">
-                {plan.split_summary || plan.subtitle || (
-                  <>
-                    每周 <span className="num">{plan.days_per_week}</span> 练
-                  </>
-                )}
-              </p>
+              <div>
+                <h3 className="font-display text-sm font-semibold tracking-tight text-white">
+                  {plan.title}
+                </h3>
+                <p className="mt-0.5 truncate text-[9px] text-white/70">
+                  {plan.split_summary || plan.subtitle || `每周 ${plan.days_per_week} 练`}
+                </p>
+              </div>
             </div>
           </Link>
         ))}
         {!plansQuery.isLoading && featured.length === 0 && (
-          <p className="text-sm text-muted">暂无精选计划</p>
+          <p className="col-span-2 text-sm text-muted">暂无计划</p>
         )}
       </div>
 
-      {/* 3. 找教练快捷胶囊 */}
-      <p className="mt-6 text-xs font-bold text-muted">找{COACH_NAME}一句话定制</p>
+      {/* 4. 找教练快捷胶囊（保留 3 个高频） */}
+      <p className="mt-6 text-xs font-bold text-muted">一句话改课</p>
       <div className="chipbar no-scrollbar mt-2 flex gap-1.5 overflow-x-auto pb-1">
-        {COACH_CHIPS.map((chip) => (
+        {COACH_CHIPS.slice(0, 3).map((chip) => (
           <button
             key={chip.label}
             type="button"

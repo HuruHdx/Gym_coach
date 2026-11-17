@@ -2,13 +2,37 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
+
+_API_ROOT = Path(__file__).resolve().parents[2]
+_LOCAL_FFMPEG = _API_ROOT / "tools" / "ffmpeg" / "bin" / "ffmpeg.exe"
+
+
+@lru_cache(maxsize=1)
+def resolve_ffmpeg() -> str | None:
+    """优先环境变量 / 项目 tools / imageio-ffmpeg 自带二进制，再退回 PATH。"""
+    env = (os.environ.get("FFMPEG_BIN") or "").strip()
+    if env and Path(env).exists():
+        return env
+    if _LOCAL_FFMPEG.exists():
+        return str(_LOCAL_FFMPEG)
+    try:
+        import imageio_ffmpeg
+
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled and Path(bundled).exists():
+            return bundled
+    except Exception:
+        pass
+    return shutil.which("ffmpeg")
 
 
 def ffmpeg_available() -> bool:
-    return bool(shutil.which("ffmpeg"))
+    return bool(resolve_ffmpeg())
 
 
 def ffmpeg_loop_clip_cmd(
@@ -18,8 +42,9 @@ def ffmpeg_loop_clip_cmd(
     start: float,
     duration: float,
 ) -> list[str]:
+    bin_path = resolve_ffmpeg() or "ffmpeg"
     return [
-        "ffmpeg",
+        bin_path,
         "-y",
         "-ss",
         str(start),
@@ -50,8 +75,9 @@ def ffmpeg_poster_cmd(
     *,
     at_time: float,
 ) -> list[str]:
+    bin_path = resolve_ffmpeg() or "ffmpeg"
     return [
-        "ffmpeg",
+        bin_path,
         "-y",
         "-ss",
         str(at_time),
@@ -69,7 +95,9 @@ def ffmpeg_poster_cmd(
 
 def _run(cmd: list[str]) -> None:
     if not ffmpeg_available():
-        raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
+        raise RuntimeError(
+            "未找到 ffmpeg。请安装系统 ffmpeg，或解压到 api/tools/ffmpeg/bin/ffmpeg.exe"
+        )
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "ffmpeg 失败")[-2000:])

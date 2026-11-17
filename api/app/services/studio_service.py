@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -37,14 +38,23 @@ _COOKIE_FILE = _API_ROOT / "data" / "studio_cookies.json"
 _DATA_DIR = _API_ROOT / "data"
 
 _URL_RE = re.compile(
-    r"https?://[^\s<>\"']+|v\.douyin\.com/[A-Za-z0-9_-]+|b23\.tv/[A-Za-z0-9_-]+",
+    r"https?://[^\s<>\"']+|(?:www\.)?douyin\.com/[^\s<>\"']+|v\.douyin\.com/[A-Za-z0-9_-]+|b23\.tv/[A-Za-z0-9_-]+",
     re.I,
 )
+_DOUYIN_MODAL_RE = re.compile(r"[?&]modal_id=(\d+)", re.I)
+_DOUYIN_VIDEO_RE = re.compile(r"douyin\.com/video/(\d+)", re.I)
 _SETS_RE = re.compile(
     r"(?P<sets>\d+)\s*组.*?((?P<reps_a>\d+)\s*[-~到至]\s*(?P<reps_b>\d+)|(?P<reps>\d+)\s*次)",
     re.S,
 )
 _KNOWN_MUSCLES = {"胸", "背", "肩", "腿", "臂", "核心", "全身"}
+_RELINK_STATUSES = (
+    "needs_manual_upload",
+    "failed",
+    "queued",
+    "downloading",
+    "done",
+)
 
 
 def _task_dir(task_id: int) -> Path:
@@ -59,36 +69,90 @@ def _touch(task: StudioTask, **fields: Any) -> None:
     task.updated_at = utcnow()
 
 
+def normalize_media_url(raw: str) -> str:
+    """把分享口令 / 用户页 modal 链归一成可下载 URL。"""
+    url = (raw or "").strip().rstrip(")。.,，、]")
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = "https:" + url
+    if url.startswith(("v.douyin.com", "b23.tv", "douyin.com", "www.douyin.com")):
+        url = "https://" + url
+    # 用户页弹窗：...?modal_id=123 → https://www.douyin.com/video/123
+    m = _DOUYIN_MODAL_RE.search(url)
+    if m and "douyin.com" in url.lower():
+        return f"https://www.douyin.com/video/{m.group(1)}"
+    m2 = _DOUYIN_VIDEO_RE.search(url)
+    if m2:
+        return f"https://www.douyin.com/video/{m2.group(1)}"
+    return url
+
+
 def extract_urls(text: str) -> list[str]:
     found: list[str] = []
     for m in _URL_RE.finditer(text or ""):
-        raw = m.group(0).rstrip(")。.,，、]")
-        if raw.startswith("v.douyin.com") or raw.startswith("b23.tv"):
-            raw = "https://" + raw
-        if raw not in found:
+        raw = normalize_media_url(m.group(0))
+        if raw and raw not in found:
             found.append(raw)
     return found[:10]
 
 
+def _reset_task_media(task_id: int) -> None:
+    for stale in _task_dir(task_id).glob("source.*"):
+        try:
+            stale.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+_COOKIE_BROWSERS = ("chrome", "edge", "firefox", "brave", "chromium")
+
+
 def save_cookies(payload: dict[str, Any]) -> dict[str, Any]:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    source = str(payload.get("source") or "paste").strip().lower()
+    if source not in ("paste", "browser"):
+        source = "paste"
+    browser = str(payload.get("browser") or "chrome").strip().lower()
+    if browser not in _COOKIE_BROWSERS:
+        browser = "chrome"
     clean = {
+        "source": source,
+        "browser": browser,
         "bilibili": str(payload.get("bilibili") or "").strip(),
         "douyin": str(payload.get("douyin") or "").strip(),
         "youtube": str(payload.get("youtube") or "").strip(),
         "updated_at": utcnow().isoformat(),
     }
     _COOKIE_FILE.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "updated_at": clean["updated_at"]}
+    return {"ok": True, "updated_at": clean["updated_at"], "source": source, "browser": browser}
 
 
 def load_cookies() -> dict[str, Any]:
+    empty = {
+        "source": "paste",
+        "browser": "chrome",
+        "bilibili": "",
+        "douyin": "",
+        "youtube": "",
+        "updated_at": None,
+    }
     if not _COOKIE_FILE.exists():
-        return {"bilibili": "", "douyin": "", "youtube": "", "updated_at": None}
+        return empty
     try:
-        return json.loads(_COOKIE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_COOKIE_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return {"bilibili": "", "douyin": "", "youtube": "", "updated_at": None}
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    source = str(data.get("source") or "paste").lower()
+    browser = str(data.get("browser") or "chrome").lower()
+    return {
+        **empty,
+        **data,
+        "source": source if source in ("paste", "browser") else "paste",
+        "browser": browser if browser in _COOKIE_BROWSERS else "chrome",
+    }
 
 
 def _task_out(task: StudioTask) -> dict[str, Any]:
@@ -232,6 +296,72 @@ async def upload_fallback(session: Session, task_id: int, file: UploadFile) -> d
     return get_task(session, task_id)
 
 
+def retry_download(session: Session, task_id: int) -> dict[str, Any]:
+    """Cookie 配好后，对需补传/失败的链接任务重新走下载流水线。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not task.source_url:
+        raise HTTPException(status_code=400, detail="该任务没有源链接，请改用补传本地 MP4")
+    if task.status not in _RELINK_STATUSES:
+        raise HTTPException(status_code=400, detail=f"当前状态「{task.status}」不可重试下载")
+    _reset_task_media(task_id)
+    _touch(
+        task,
+        stored_path=None,
+        source_type="link",
+        status="queued",
+        progress=0,
+        error=None,
+        transcript_json=None,
+    )
+    session.add(task)
+    session.commit()
+    _spawn_pipeline(task_id)
+    return get_task(session, task_id)
+
+
+def replace_source(
+    session: Session,
+    task_id: int,
+    *,
+    text: str | None = None,
+) -> dict[str, Any]:
+    """更换任务源链接（可贴新口令 / 用户页 modal 链 / 直链），然后重新跑流水线。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status not in _RELINK_STATUSES and task.status not in ("transcribing", "parsing"):
+        raise HTTPException(status_code=400, detail=f"当前状态「{task.status}」不可更换源")
+    urls = extract_urls(text or "")
+    if not urls:
+        raise HTTPException(status_code=400, detail="未识别到链接；请粘贴抖音/B站分享口令或 URL")
+    url = urls[0]
+    keep_title = None
+    if isinstance(task.draft_json, dict):
+        keep_title = task.draft_json.get("plan_title")
+    _reset_task_media(task_id)
+    _touch(
+        task,
+        source_type="link",
+        source_text=(text or url)[:2000],
+        source_url=url,
+        stored_path=None,
+        status="queued",
+        progress=0,
+        error=None,
+        transcript_json=None,
+        draft_json={"plan_title": keep_title} if keep_title else {},
+        score={},
+        review_state="needs_review",
+        result_ref={},
+    )
+    session.add(task)
+    session.commit()
+    _spawn_pipeline(task_id)
+    return get_task(session, task_id)
+
+
 def _spawn_pipeline(task_id: int) -> None:
     t = threading.Thread(target=_run_pipeline_safe, args=(task_id,), daemon=True)
     t.start()
@@ -325,22 +455,120 @@ def _run_pipeline(session: Session, task_id: int) -> None:
     session.commit()
 
 
+def _cookie_domains_for_url(url: str) -> list[str]:
+    u = (url or "").lower()
+    if "douyin" in u or "iesdouyin" in u:
+        return [".douyin.com", ".iesdouyin.com"]
+    if "bilibili" in u or "b23.tv" in u:
+        return [".bilibili.com"]
+    if "youtube" in u or "youtu.be" in u:
+        return [".youtube.com"]
+    return [".douyin.com", ".bilibili.com", ".youtube.com"]
+
+
+def _pick_cookie_blob(cookies: dict[str, Any], url: str) -> str:
+    u = (url or "").lower()
+    if "douyin" in u or "iesdouyin" in u:
+        return str(cookies.get("douyin") or "")
+    if "bilibili" in u or "b23.tv" in u:
+        return str(cookies.get("bilibili") or "")
+    if "youtube" in u or "youtu.be" in u:
+        return str(cookies.get("youtube") or "")
+    return (
+        str(cookies.get("douyin") or "")
+        or str(cookies.get("bilibili") or "")
+        or str(cookies.get("youtube") or "")
+    )
+
+
+def _to_netscape_cookie_file(blob: str, domains: list[str]) -> str:
+    """把浏览器 Cookie 头或已有 Netscape 文本写成 yt-dlp 可读的 cookies.txt。"""
+    text = (blob or "").strip()
+    if not text:
+        return ""
+    # 已是 Netscape / 导出扩展格式
+    if "\t" in text and ("TRUE" in text or "FALSE" in text):
+        return text if text.lstrip().startswith("#") else f"# Netscape HTTP Cookie File\n{text}"
+    if "Netscape" in text and "\t" in text:
+        return text
+
+    lines = ["# Netscape HTTP Cookie File", "# Converted from Cookie header"]
+    for part in text.replace("\n", ";").split(";"):
+        item = part.strip()
+        if not item or "=" not in item:
+            continue
+        name, value = item.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            continue
+        for domain in domains:
+            # domain \t includeSubdomains \t path \t secure \t expiry \t name \t value
+            lines.append(f"{domain}\tTRUE\t/\tFALSE\t0\t{name}\t{value}")
+    return "\n".join(lines) + "\n"
+
+
+def _friendly_download_error(raw: str) -> str:
+    text = (raw or "").strip()
+    low = text.lower()
+    if "fresh cookies" in low or "http error 403" in low or "403: forbidden" in low:
+        return (
+            "抖音拒绝访问（403/需要新鲜 Cookie）。请任选其一："
+            "① 平台 Cookie 选「从本机浏览器读取」并先在该浏览器打开并登录 www.douyin.com；"
+            "② 用扩展 Get cookies.txt LOCALLY 导出 Netscape 文本贴进抖音框；"
+            "③ 补传本地 MP4。"
+        )
+    if "could not copy" in low and "cookie database" in low:
+        return (
+            "无法读取浏览器 Cookie 库（浏览器可能正占用数据库）。"
+            "请先完全退出 Chrome/Edge 再点「重新下载」，或改用扩展导出 cookies.txt 粘贴。"
+        )
+    return text[-800:] if text else "下载失败"
+
+
 def _download_url(task: StudioTask) -> tuple[bool, str | None]:
     assert task.id and task.source_url
     out_tmpl = str(_task_dir(task.id) / "source.%(ext)s")
     cookies = load_cookies()
     cookie_arg: list[str] = []
-    # 临时 cookie 文件
-    jar = None
-    blob = cookies.get("douyin") or cookies.get("bilibili") or cookies.get("youtube") or ""
-    if blob.strip():
-        jar = _task_dir(task.id) / "cookies.txt"
-        # 允许用户直接贴 Netscape cookie 或原始 Cookie 头；yt-dlp 更认 Netscape
-        jar.write_text(blob if "Netscape" in blob or "\t" in blob else f"# Netscape\n{blob}", encoding="utf-8")
-        cookie_arg = ["--cookies", str(jar)]
+    source = str(cookies.get("source") or "paste")
+    if source == "browser":
+        browser = str(cookies.get("browser") or "chrome")
+        cookie_arg = ["--cookies-from-browser", browser]
+    else:
+        blob = _pick_cookie_blob(cookies, task.source_url)
+        if blob.strip():
+            jar = _task_dir(task.id) / "cookies.txt"
+            jar.write_text(
+                _to_netscape_cookie_file(blob, _cookie_domains_for_url(task.source_url)),
+                encoding="utf-8",
+            )
+            cookie_arg = ["--cookies", str(jar)]
 
+    # 未 activate venv 时 PATH 里可能没有 yt-dlp.exe，优先 python -m yt_dlp
+    ytdlp_bin = shutil.which("yt-dlp")
+    if ytdlp_bin:
+        base_cmd = [ytdlp_bin]
+    else:
+        try:
+            import yt_dlp  # noqa: F401
+        except ImportError:
+            return False, "未安装 yt-dlp；请补传本地 MP4，或 pip install yt-dlp"
+        base_cmd = [sys.executable, "-m", "yt_dlp"]
+
+    ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
     cmd = [
-        "yt-dlp",
+        *base_cmd,
+        "--no-playlist",
+        "--socket-timeout",
+        "20",
+        "--user-agent",
+        ua,
+        "--referer",
+        "https://www.douyin.com/",
         "-f",
         "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
         "--merge-output-format",
@@ -350,15 +578,15 @@ def _download_url(task: StudioTask) -> tuple[bool, str | None]:
         *cookie_arg,
         task.source_url,
     ]
-    if not shutil.which("yt-dlp"):
-        return False, "未安装 yt-dlp；请补传本地 MP4，或 pip install yt-dlp"
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return False, "下载超时（120s）；请检查 Cookie 是否有效，或补传本地 MP4"
     # 找产出
     files = sorted(_task_dir(task.id).glob("source.*"))
     mp4s = [f for f in files if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov")]
     if proc.returncode != 0 or not mp4s:
-        err = (proc.stderr or proc.stdout or "下载失败")[-800:]
-        return False, err
+        return False, _friendly_download_error(proc.stderr or proc.stdout or "下载失败")
     dest = mp4s[0]
     task.stored_path = f"/static/studio/{task.id}/{dest.name}"
     return True, None

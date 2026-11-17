@@ -18,6 +18,8 @@ import { PlansPage } from "./pages/PlansPage";
 import { PlanDetailPage } from "./pages/PlanDetailPage";
 import { MePage } from "./pages/MePage";
 import { ProfileEditPage } from "./pages/ProfileEditPage";
+import { ProfileSettingsPage } from "./pages/ProfileSettingsPage";
+import { FormCheckPage } from "./pages/FormCheckPage";
 import { RecapPage } from "./pages/RecapPage";
 import { DebugPage } from "./pages/DebugPage";
 
@@ -110,6 +112,7 @@ export default function App() {
         <Route path="/training" element={<TrainingPage />} />
         <Route path="/training/records" element={<TrainingRecordsPage />} />
         <Route path="/training/lifts" element={<TrainingLiftsPage />} />
+        <Route path="/training/form-check" element={<FormCheckPage />} />
         <Route path="/training/exercise/:name" element={<ExerciseTrendPage />} />
         <Route path="/exercises" element={<ExercisesPage />} />
         <Route path="/exercises/:id" element={<ExerciseDetailPage />} />
@@ -126,7 +129,16 @@ export default function App() {
           path="/me/edit"
           element={<ProfileEditPage profile={data} onUpdated={() => refetch()} />}
         />
-        <Route path="/me/settings" element={<Navigate to="/me/edit" replace />} />
+        <Route
+          path="/me/settings"
+          element={
+            <ProfileSettingsPage
+              profile={data}
+              onUpdated={() => refetch()}
+              onResetOnboarding={() => refetch()}
+            />
+          }
+        />
         <Route path="/debug" element={<DebugPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

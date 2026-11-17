@@ -61,26 +61,27 @@ export function TrainingPage() {
       </p>
       <h1 className="font-display text-[26px] font-bold tracking-tight">训练</h1>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-3 grid grid-cols-3 gap-2">
         <Link
           to="/exercises"
-          className="pressable flex items-center justify-between rounded-2xl border border-line bg-elevated px-3.5 py-3"
+          className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
         >
-          <div>
-            <p className="text-sm font-bold">动作库</p>
-            <p className="mt-0.5 text-[11px] text-muted">浏览要领与示范</p>
-          </div>
-          <ChevronRight size={16} className="text-muted" />
+          <p className="text-sm font-bold">动作库</p>
+          <p className="mt-0.5 text-[10px] text-muted">要领示范</p>
         </Link>
         <Link
           to="/training/lifts"
-          className="pressable flex items-center justify-between rounded-2xl border border-line bg-elevated px-3.5 py-3"
+          className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
         >
-          <div>
-            <p className="text-sm font-bold">动作进阶</p>
-            <p className="mt-0.5 text-[11px] text-muted">练过动作走势</p>
-          </div>
-          <ChevronRight size={16} className="text-muted" />
+          <p className="text-sm font-bold">动作进阶</p>
+          <p className="mt-0.5 text-[10px] text-muted">走势 PR</p>
+        </Link>
+        <Link
+          to="/training/form-check"
+          className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
+        >
+          <p className="text-sm font-bold">动作分析</p>
+          <p className="mt-0.5 text-[10px] text-muted">练后复盘</p>
         </Link>
       </div>
 

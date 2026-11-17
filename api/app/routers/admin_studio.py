@@ -16,6 +16,8 @@ router = APIRouter(prefix="/api/admin/studio", tags=["admin-studio"])
 
 
 class CookiesIn(BaseModel):
+    source: str | None = "paste"  # paste | browser
+    browser: str | None = "chrome"  # chrome|edge|firefox|brave|chromium
     bilibili: str | None = None
     douyin: str | None = None
     youtube: str | None = None
@@ -49,6 +51,10 @@ class ConfirmPlanIn(BaseModel):
     publish: bool = True
 
 
+class ReplaceSourceIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
 @router.put("/cookies")
 def put_cookies(body: CookiesIn, _: object = Depends(require_admin)):
     return studio_service.save_cookies(body.model_dump())
@@ -57,8 +63,9 @@ def put_cookies(body: CookiesIn, _: object = Depends(require_admin)):
 @router.get("/cookies")
 def get_cookies(_: object = Depends(require_admin)):
     data = studio_service.load_cookies()
-    # 不回传完整 cookie 明文太长时也可；这里返回是否已配置
     return {
+        "source": data.get("source") or "paste",
+        "browser": data.get("browser") or "chrome",
         "bilibili_set": bool(data.get("bilibili")),
         "douyin_set": bool(data.get("douyin")),
         "youtube_set": bool(data.get("youtube")),
@@ -117,6 +124,25 @@ async def upload_fallback(
     file: UploadFile = File(...),
 ):
     return await studio_service.upload_fallback(session, task_id, file)
+
+
+@router.post("/tasks/{task_id}/retry-download")
+def retry_download(
+    task_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.retry_download(session, task_id)
+
+
+@router.post("/tasks/{task_id}/replace-source")
+def replace_source(
+    task_id: int,
+    body: ReplaceSourceIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.replace_source(session, task_id, text=body.text)
 
 
 @router.put("/tasks/{task_id}/draft")
