@@ -40,6 +40,13 @@ class QuickCreateIn(BaseModel):
     attach_demo: bool = True
 
 
+class AttachDemoIn(BaseModel):
+    task_id: int
+    exercise_id: str = Field(min_length=1, max_length=64)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+
+
 class DraftIn(BaseModel):
     draft: dict[str, Any]
 
@@ -74,6 +81,11 @@ def get_cookies(_: object = Depends(require_admin)):
     }
 
 
+@router.get("/deps")
+def get_deps(_: object = Depends(require_admin)):
+    return studio_service.studio_deps()
+
+
 @router.post("/ingest-batch")
 async def ingest_batch(
     session: Session = Depends(get_session),
@@ -82,6 +94,8 @@ async def ingest_batch(
     mode: str = Form(default="plan_single"),
     merge_into_one_plan: bool = Form(default=False),
     plan_title: str | None = Form(default=None),
+    pause_for_confirm: bool = Form(default=False),
+    source_kind: str | None = Form(default=None),
     files: list[UploadFile] | None = File(default=None),
 ):
     uploaded: list[tuple[str, bytes]] = []
@@ -95,6 +109,8 @@ async def ingest_batch(
         merge_into_one_plan=merge_into_one_plan,
         plan_title=plan_title,
         files=uploaded,
+        pause_for_confirm=pause_for_confirm,
+        source_kind=source_kind,
     )
 
 
@@ -145,6 +161,33 @@ def replace_source(
     return studio_service.replace_source(session, task_id, text=body.text)
 
 
+@router.post("/tasks/{task_id}/continue")
+def continue_pipeline(
+    task_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.continue_pipeline(session, task_id)
+
+
+@router.post("/tasks/{task_id}/retranscribe")
+def retranscribe(
+    task_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.retranscribe(session, task_id)
+
+
+@router.post("/tasks/{task_id}/reparse")
+def reparse(
+    task_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.reparse(session, task_id)
+
+
 @router.put("/tasks/{task_id}/draft")
 def put_draft(
     task_id: int,
@@ -192,6 +235,21 @@ def quick_create(
         start=body.start,
         end=body.end,
         attach_demo=body.attach_demo,
+    )
+
+
+@router.post("/attach-demo")
+def attach_demo(
+    body: AttachDemoIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.attach_demo_now(
+        session,
+        task_id=body.task_id,
+        exercise_id=body.exercise_id,
+        start=body.start,
+        end=body.end,
     )
 
 

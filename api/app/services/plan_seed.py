@@ -38,6 +38,7 @@ def ensure_plan_seeds(session: Session) -> None:
         created_at=now,
         updated_at=now,
     )
+    five = _five_split_template(now)
     fixed = PlanTemplate(
         id="fixed-push-strength",
         title="推日力量成品",
@@ -60,43 +61,12 @@ def ensure_plan_seeds(session: Session) -> None:
         updated_at=now,
     )
     session.add(framework)
+    session.add(five)
     session.add(fixed)
     session.commit()
 
-    fw_blocks = [
-        ("胸肩三头", ["胸", "肩", "臂"], 55, 75),
-        ("背二头", ["背", "臂"], 50, 70),
-        ("腿臀", ["腿"], 55, 80),
-    ]
-    for i, (title, muscles, mn, mx) in enumerate(fw_blocks):
-        block = PlanBlock(
-            template_id=framework.id,
-            order_index=i,
-            title=title,
-            muscles=muscles,
-            minutes_min=mn,
-            minutes_max=mx,
-        )
-        session.add(block)
-        session.flush()
-        slots = _framework_slots(title)
-        for j, slot in enumerate(slots):
-            session.add(
-                PlanExercise(
-                    block_id=block.id or 0,
-                    order_index=j,
-                    exercise_id=None,
-                    exercise_name=None,
-                    role=slot["role"],
-                    lock_level="slot",
-                    target_sets=slot["sets"],
-                    target_reps=slot["reps"],
-                    warmup_sets=slot.get("warmup_sets", 0),
-                    alternatives=[],
-                    note=slot.get("note"),
-                    target_muscle=slot.get("target_muscle"),
-                )
-            )
+    _seed_three_split_blocks(session, framework.id)
+    _seed_five_split_blocks(session, five.id)
 
     push = PlanBlock(
         template_id=fixed.id,
@@ -129,27 +99,137 @@ def ensure_plan_seeds(session: Session) -> None:
     session.commit()
 
 
+def _five_split_template(now) -> PlanTemplate:
+    return PlanTemplate(
+        id="five-split-classic",
+        title="经典五分化",
+        subtitle="胸 · 背 · 腿 · 肩 · 臂，一周五练自动搭配",
+        author="Gym Coach",
+        badge_label="框架",
+        template_type="framework",
+        level="intermediate",
+        days_per_week=5,
+        minutes_min=45,
+        minutes_max=70,
+        muscle_tags=["胸", "背", "腿", "肩", "臂"],
+        split_summary="胸 · 背 · 腿 · 肩 · 臂",
+        gear_tags=["杠铃", "哑铃", "绳索", "固定器械"],
+        description=(
+            "经典五分化：每周五场按部位拆开练，详情页已自动搭配常用动作；"
+            "点「练这场」可再按伤病与偏好微调。"
+        ),
+        scene_tag="五分化",
+        is_published=True,
+        sort_order=15,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _seed_three_split_blocks(session: Session, template_id: str) -> None:
+    fw_blocks = [
+        ("胸肩三头", ["胸", "肩", "臂"], 55, 75),
+        ("背二头", ["背", "臂"], 50, 70),
+        ("腿臀", ["腿"], 55, 80),
+    ]
+    for i, (title, muscles, mn, mx) in enumerate(fw_blocks):
+        block = PlanBlock(
+            template_id=template_id,
+            order_index=i,
+            title=title,
+            muscles=muscles,
+            minutes_min=mn,
+            minutes_max=mx,
+        )
+        session.add(block)
+        session.flush()
+        for j, slot in enumerate(_framework_slots(title)):
+            session.add(
+                PlanExercise(
+                    block_id=block.id or 0,
+                    order_index=j,
+                    exercise_id=None,
+                    exercise_name=None,
+                    role=slot["role"],
+                    lock_level="slot",
+                    target_sets=slot["sets"],
+                    target_reps=slot["reps"],
+                    warmup_sets=slot.get("warmup_sets", 0),
+                    alternatives=[],
+                    note=slot.get("note"),
+                    target_muscle=slot.get("target_muscle"),
+                )
+            )
+
+
+def _seed_five_split_blocks(session: Session, template_id: str) -> None:
+    fw_blocks = [
+        ("胸日", ["胸"], 50, 70),
+        ("背日", ["背"], 50, 70),
+        ("腿日", ["腿"], 55, 80),
+        ("肩日", ["肩"], 45, 65),
+        ("臂日", ["臂"], 40, 60),
+    ]
+    for i, (title, muscles, mn, mx) in enumerate(fw_blocks):
+        block = PlanBlock(
+            template_id=template_id,
+            order_index=i,
+            title=title,
+            muscles=muscles,
+            minutes_min=mn,
+            minutes_max=mx,
+        )
+        session.add(block)
+        session.flush()
+        for j, slot in enumerate(_five_split_slots(muscles[0])):
+            session.add(
+                PlanExercise(
+                    block_id=block.id or 0,
+                    order_index=j,
+                    exercise_id=None,
+                    exercise_name=None,
+                    role=slot["role"],
+                    lock_level="slot",
+                    target_sets=slot["sets"],
+                    target_reps=slot["reps"],
+                    warmup_sets=slot.get("warmup_sets", 0),
+                    alternatives=[],
+                    note=slot.get("note"),
+                    target_muscle=slot.get("target_muscle"),
+                )
+            )
+
+
 def _patch_existing_plans(session: Session) -> None:
-    """已有库：文案去「槽位」、补 scene_tag、动作行补 target_muscle。"""
+    """已有库：文案去「槽位」、补 scene_tag、动作行补 target_muscle；缺则补五分化。"""
     dirty = False
 
     fw = session.get(PlanTemplate, "three-split-classic")
     if fw:
+        local_dirty = False
         if fw.subtitle and "槽位" in fw.subtitle:
             fw.subtitle = "胸肩 · 背臂 · 腿臀，进页即自动搭配动作"
-            dirty = True
+            local_dirty = True
         if fw.description and "槽位" in fw.description:
             fw.description = (
                 "经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；"
                 "点「练这场」可再按伤病与偏好微调，动作均可换。"
             )
-            dirty = True
+            local_dirty = True
         if not fw.scene_tag:
             fw.scene_tag = "三分化"
-            dirty = True
-        if dirty:
+            local_dirty = True
+        if local_dirty:
             fw.updated_at = utcnow()
             session.add(fw)
+            dirty = True
+
+    if not session.get(PlanTemplate, "five-split-classic"):
+        five = _five_split_template(utcnow())
+        session.add(five)
+        session.flush()
+        _seed_five_split_blocks(session, five.id)
+        dirty = True
 
     fixed = session.get(PlanTemplate, "fixed-push-strength")
     if fixed and not fixed.scene_tag:
@@ -224,12 +304,20 @@ def _backfill_target_muscles(session: Session) -> bool:
 
 
 def _expected_muscles_for_block(title: str) -> list[str]:
+    # 五分化单部位日优先精确匹配
+    if title in ("胸日", "背日", "腿日", "肩日", "臂日"):
+        muscle = title[0]
+        return [muscle, muscle, muscle, muscle]
     if "胸" in title:
         return ["胸", "肩", "胸", "胸", "臂"]
     if "背" in title:
         return ["背", "背", "背", "臂"]
     if "腿" in title:
         return ["腿", "腿", "腿", "腿"]
+    if "肩" in title:
+        return ["肩", "肩", "肩"]
+    if "臂" in title:
+        return ["臂", "臂", "臂", "臂"]
     if "推" in title:
         return ["胸", "胸", "肩", "胸", "臂"]
     return []
@@ -250,6 +338,133 @@ def _guess_muscle_from_name(name: str) -> str | None:
     if any(k in n for k in ("深蹲", "腿举", "腿屈伸", "腿弯举", "臀桥", "箭步")):
         return "腿"
     return None
+
+
+def _five_split_slots(muscle: str) -> list[dict]:
+    """五分化单部位日：主项 + 辅助 + 孤立（臂日拆二头/三头孤立）。"""
+    if muscle == "臂":
+        return [
+            {
+                "role": "assist",
+                "target_muscle": "臂",
+                "sets": 3,
+                "reps": "8-12",
+                "warmup_sets": 1,
+                "note": "三头复合/辅助",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "臂",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "三头孤立",
+            },
+            {
+                "role": "assist",
+                "target_muscle": "臂",
+                "sets": 3,
+                "reps": "8-12",
+                "note": "二头辅助",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "臂",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "二头孤立",
+            },
+        ]
+    if muscle == "肩":
+        return [
+            {
+                "role": "main",
+                "target_muscle": "肩",
+                "sets": 4,
+                "reps": "6-8",
+                "warmup_sets": 2,
+                "note": "推肩主项",
+            },
+            {
+                "role": "assist",
+                "target_muscle": "肩",
+                "sets": 3,
+                "reps": "8-12",
+                "note": "肩辅助",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "肩",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "侧平举/后束孤立",
+            },
+        ]
+    if muscle == "腿":
+        return [
+            {
+                "role": "main",
+                "target_muscle": "腿",
+                "sets": 4,
+                "reps": "6-8",
+                "warmup_sets": 2,
+                "note": "腿复合主项",
+            },
+            {
+                "role": "main",
+                "target_muscle": "腿",
+                "sets": 3,
+                "reps": "8-10",
+                "warmup_sets": 1,
+                "note": "髋主导互补",
+            },
+            {
+                "role": "assist",
+                "target_muscle": "腿",
+                "sets": 3,
+                "reps": "8-12",
+                "note": "单侧或器械辅助",
+            },
+            {
+                "role": "isolation",
+                "target_muscle": "腿",
+                "sets": 3,
+                "reps": "10-15",
+                "note": "腘绳 / 小腿",
+            },
+        ]
+    # 胸 / 背
+    return [
+        {
+            "role": "main",
+            "target_muscle": muscle,
+            "sets": 4,
+            "reps": "6-8",
+            "warmup_sets": 2,
+            "note": f"{muscle}复合主项",
+        },
+        {
+            "role": "assist",
+            "target_muscle": muscle,
+            "sets": 3,
+            "reps": "8-12",
+            "warmup_sets": 1,
+            "note": f"{muscle}辅助",
+        },
+        {
+            "role": "assist",
+            "target_muscle": muscle,
+            "sets": 3,
+            "reps": "8-12",
+            "note": f"{muscle}换面辅助",
+        },
+        {
+            "role": "isolation",
+            "target_muscle": muscle,
+            "sets": 3,
+            "reps": "10-15",
+            "note": f"{muscle}孤立",
+        },
+    ]
 
 
 def _framework_slots(block_title: str) -> list[dict]:

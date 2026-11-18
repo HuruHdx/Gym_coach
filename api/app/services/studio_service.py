@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -155,11 +157,63 @@ def load_cookies() -> dict[str, Any]:
     }
 
 
+def _pipeline_step(task: StudioTask) -> str:
+    st = task.status
+    if st in ("queued", "downloading"):
+        return "download"
+    if st == "awaiting_confirm":
+        return "downloaded"
+    if st == "transcribing":
+        return "transcribe"
+    if st == "parsing":
+        return "parse"
+    if st in ("done",):
+        return "review"
+    if st in ("needs_manual_upload", "failed"):
+        return "download"
+    return st
+
+
+def studio_deps() -> dict[str, Any]:
+    ytdlp = False
+    try:
+        import yt_dlp  # noqa: F401
+
+        ytdlp = True
+    except Exception:
+        ytdlp = bool(shutil.which("yt-dlp"))
+    whisper = False
+    try:
+        import faster_whisper  # noqa: F401
+
+        whisper = True
+    except Exception:
+        whisper = False
+    from app.brain.llm import MockLLM, get_llm
+    from app.config import settings
+
+    llm_ok = not isinstance(get_llm(), MockLLM)
+    return {
+        "yt_dlp": ytdlp,
+        "ffmpeg": ffmpeg_available(),
+        "faster_whisper": whisper,
+        "llm": llm_ok,
+        "llm_model": settings.llm_model if llm_ok else None,
+        "cookie_source": (load_cookies().get("source") or "paste"),
+    }
+
+
 def _task_out(task: StudioTask) -> dict[str, Any]:
     play_url = None
     if task.stored_path:
         p = task.stored_path.replace("\\", "/")
         play_url = p if p.startswith(("http://", "https://", "/static/")) else f"/static/{p}"
+    draft = task.draft_json or {}
+    exercises = []
+    if isinstance(draft, dict):
+        for b in draft.get("blocks") or []:
+            exercises.extend(b.get("exercises") or [])
+    clipped = sum(1 for e in exercises if (e or {}).get("media_status") == "clipped")
     return {
         "id": task.id,
         "batch_id": task.batch_id,
@@ -172,12 +226,15 @@ def _task_out(task: StudioTask) -> dict[str, Any]:
         "mode": task.mode,
         "status": task.status,
         "progress": task.progress,
+        "pipeline_step": _pipeline_step(task),
         "transcript_json": task.transcript_json or {},
-        "draft_json": task.draft_json or {},
+        "draft_json": draft,
         "score": task.score or {},
         "review_state": task.review_state,
         "result_ref": task.result_ref or {},
         "error": task.error,
+        "exercise_count": len(exercises),
+        "clipped_count": clipped,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     }
@@ -207,6 +264,8 @@ def ingest_batch(
     merge_into_one_plan: bool = False,
     plan_title: str | None = None,
     files: list[tuple[str, bytes]] | None = None,
+    pause_for_confirm: bool = False,
+    source_kind: str | None = None,
 ) -> dict[str, Any]:
     mode = mode if mode in ("plan_single", "plan_merge", "exercise_only") else "plan_single"
     if merge_into_one_plan:
@@ -221,18 +280,24 @@ def ingest_batch(
     title = (plan_title or "").strip() or None
     created: list[StudioTask] = []
     order = 0
+    link_type = "direct" if (source_kind or "").strip() == "direct" else "link"
 
     for url in urls:
+        draft0: dict[str, Any] = {}
+        if title:
+            draft0["plan_title"] = title
+        if pause_for_confirm:
+            draft0["pause_for_confirm"] = True
         task = StudioTask(
             batch_id=batch_id,
             batch_order=order,
-            source_type="link",
+            source_type=link_type,
             source_text=(text or "")[:2000] if order == 0 else url,
             source_url=url,
             mode=mode,
             status="queued",
             progress=0,
-            draft_json={"plan_title": title} if title else {},
+            draft_json=draft0,
             review_state="needs_review",
         )
         session.add(task)
@@ -243,6 +308,11 @@ def ingest_batch(
     for filename, raw in uploads:
         if not raw:
             continue
+        draft0: dict[str, Any] = {}
+        if title:
+            draft0["plan_title"] = title
+        if pause_for_confirm:
+            draft0["pause_for_confirm"] = True
         task = StudioTask(
             batch_id=batch_id,
             batch_order=order,
@@ -252,7 +322,7 @@ def ingest_batch(
             mode=mode,
             status="queued",
             progress=5,
-            draft_json={"plan_title": title} if title else {},
+            draft_json=draft0,
             review_state="needs_review",
         )
         session.add(task)
@@ -303,21 +373,136 @@ def retry_download(session: Session, task_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="任务不存在")
     if not task.source_url:
         raise HTTPException(status_code=400, detail="该任务没有源链接，请改用补传本地 MP4")
-    if task.status not in _RELINK_STATUSES:
+    if task.status not in (*_RELINK_STATUSES, "awaiting_confirm"):
         raise HTTPException(status_code=400, detail=f"当前状态「{task.status}」不可重试下载")
     _reset_task_media(task_id)
+    ref = dict(task.result_ref or {})
+    ref.pop("continued", None)
     _touch(
         task,
         stored_path=None,
-        source_type="link",
+        source_type=task.source_type or "link",
         status="queued",
         progress=0,
         error=None,
         transcript_json=None,
+        result_ref=ref,
     )
     session.add(task)
     session.commit()
     _spawn_pipeline(task_id)
+    return get_task(session, task_id)
+
+
+def continue_pipeline(session: Session, task_id: int) -> dict[str, Any]:
+    """「先停住等确认」之后继续转字幕 / 拆计划。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status not in ("awaiting_confirm", "needs_manual_upload", "done", "failed"):
+        raise HTTPException(status_code=400, detail=f"当前状态「{task.status}」不可继续")
+    if not _abs_video(task):
+        raise HTTPException(status_code=400, detail="还没有本地视频")
+    ref = dict(task.result_ref or {})
+    ref["continued"] = True
+    _touch(task, status="queued", progress=35, error=None, result_ref=ref)
+    session.add(task)
+    session.commit()
+    _spawn_pipeline(task_id)
+    return get_task(session, task_id)
+
+
+def retranscribe(session: Session, task_id: int) -> dict[str, Any]:
+    """重跑字幕 + 拆计划（视频已在本地）。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not _abs_video(task):
+        raise HTTPException(status_code=400, detail="还没有本地视频，请先下载或补传")
+    ref = dict(task.result_ref or {})
+    ref["continued"] = True
+    _touch(
+        task,
+        status="queued",
+        progress=35,
+        error=None,
+        transcript_json=None,
+        result_ref=ref,
+    )
+    session.add(task)
+    session.commit()
+    _spawn_pipeline(task_id)
+    return get_task(session, task_id)
+
+
+def attach_demo_now(
+    session: Session,
+    *,
+    task_id: int,
+    exercise_id: str,
+    start: float,
+    end: float,
+) -> dict[str, Any]:
+    """立刻把选区压成静音小 MP4 + 封面，写入动作库（不等到发布）。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not session.get(Exercise, exercise_id):
+        raise HTTPException(status_code=404, detail="动作 SKU 不存在")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="选区无效：结束须大于开始")
+    if end - start > 30:
+        raise HTTPException(status_code=400, detail="示范选区请控制在 30 秒内")
+    if not ffmpeg_available():
+        raise HTTPException(status_code=400, detail="本机没有 ffmpeg，无法切片")
+    meta = _attach_demo_media(session, task, exercise_id, float(start), float(end))
+    if not meta:
+        raise HTTPException(status_code=400, detail="切片失败：本地视频不存在或 ffmpeg 出错")
+    synced = _sync_sku_text_from_draft(session, task, exercise_id)
+    session.commit()
+    return {"ok": True, "exercise_id": exercise_id, "demo": meta, "synced_text": synced}
+
+
+def reparse(session: Session, task_id: int) -> dict[str, Any]:
+    """字幕已有时只重跑 LLM/启发式拆计划，不重转写。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    transcript = task.transcript_json or {}
+    segs = (transcript.get("segments") if isinstance(transcript, dict) else None) or []
+    text = (transcript.get("text") if isinstance(transcript, dict) else None) or ""
+    if not segs and not text:
+        raise HTTPException(status_code=400, detail="还没有字幕，请先转字幕")
+    _touch(task, status="parsing", progress=75, error=None)
+    session.add(task)
+    session.commit()
+    try:
+        draft, score = _parse_and_score(session, task, transcript if isinstance(transcript, dict) else {})
+        if isinstance(task.draft_json, dict):
+            title = task.draft_json.get("plan_title")
+            if title and not draft.get("plan_title"):
+                draft["plan_title"] = title
+        review = (
+            "needs_review"
+            if score.get("red_count", 0) > 0 or score.get("amber_count", 0) > 0
+            else "auto_pass"
+        )
+        _touch(
+            task,
+            draft_json=draft,
+            score=score,
+            review_state=review,
+            status="done",
+            progress=100,
+            error=None,
+        )
+        session.add(task)
+        session.commit()
+    except Exception as e:  # noqa: BLE001
+        _touch(task, status="failed", error=f"拆计划失败：{str(e)[:400]}", progress=100)
+        session.add(task)
+        session.commit()
+        raise HTTPException(status_code=500, detail=str(e)[:300]) from e
     return get_task(session, task_id)
 
 
@@ -377,7 +562,17 @@ def _run_pipeline_safe(task_id: int) -> None:
         with Session(engine) as session:
             task = session.get(StudioTask, task_id)
             if task:
-                _touch(task, status="failed", error=str(e)[:500], progress=100)
+                # 本地视频还在 → 多半是转字幕挂了，别伪装成「抓不到」
+                has_video = bool(_abs_video(task))
+                msg = str(e)[:500]
+                if has_video and "metadata_errors" in msg:
+                    msg = (
+                        "转字幕失败：faster-whisper 与本机 PyAV 版本不兼容（metadata_errors）。"
+                        "已修复兼容层，请点「重跑字幕」。"
+                    )
+                elif has_video:
+                    msg = f"转字幕/拆计划失败：{msg}"
+                _touch(task, status="failed", error=msg, progress=100)
                 session.add(task)
                 session.commit()
 
@@ -402,9 +597,21 @@ def _run_pipeline(session: Session, task_id: int) -> None:
     # 1) download
     if not task.stored_path and task.source_url:
         _touch(task, status="downloading", progress=10, error=None)
+        _set_live(task, stage="downloading", percent=0)
         session.add(task)
         session.commit()
-        ok, err = _download_url(task)
+
+        def _on_download(meta: dict[str, Any]) -> None:
+            fresh = session.get(StudioTask, task_id)
+            if not fresh:
+                return
+            pct = int(meta.get("percent") or 0)
+            fresh.progress = min(38, 10 + int(pct * 0.28))
+            _set_live(fresh, **meta)
+            session.add(fresh)
+            session.commit()
+
+        ok, err = _download_url(task, on_progress=_on_download)
         session.refresh(task)
         if not ok:
             _touch(task, status="needs_manual_upload", progress=20, error=err)
@@ -419,8 +626,19 @@ def _run_pipeline(session: Session, task_id: int) -> None:
         session.commit()
         return
 
+    pause = bool((task.draft_json or {}).get("pause_for_confirm")) if isinstance(task.draft_json, dict) else False
+    continued = bool((task.result_ref or {}).get("continued")) if isinstance(task.result_ref, dict) else False
+    if pause and not continued:
+        # 素材已就绪，先停住等确认，再转字幕/拆计划
+        _touch(task, status="awaiting_confirm", progress=35, error=None)
+        _set_live(task, stage="awaiting_confirm", percent=35)
+        session.add(task)
+        session.commit()
+        return
+
     # 2) transcribe
     _touch(task, status="transcribing", progress=40)
+    _set_live(task, stage="transcribing", percent=40)
     session.add(task)
     session.commit()
     transcript = _transcribe(video)
@@ -429,6 +647,7 @@ def _run_pipeline(session: Session, task_id: int) -> None:
 
     # 3) parse + score
     _touch(task, status="parsing", progress=75)
+    _set_live(task, stage="parsing", percent=75)
     session.add(task)
     session.commit()
     draft, score = _parse_and_score(session, task, transcript)
@@ -508,25 +727,47 @@ def _to_netscape_cookie_file(blob: str, domains: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+_DOWNLOAD_PROGRESS_RE = re.compile(
+    r"\[download\]\s+(?P<pct>[\d.]+)%"
+    r"(?:\s+of\s+~?(?P<size>\S+))?"
+    r"(?:\s+at\s+(?P<speed>\S+))?"
+    r"(?:\s+ETA\s+(?P<eta>\S+))?",
+    re.I,
+)
+
+
 def _friendly_download_error(raw: str) -> str:
     text = (raw or "").strip()
     low = text.lower()
     if "fresh cookies" in low or "http error 403" in low or "403: forbidden" in low:
         return (
-            "抖音拒绝访问（403/需要新鲜 Cookie）。请任选其一："
-            "① 平台 Cookie 选「从本机浏览器读取」并先在该浏览器打开并登录 www.douyin.com；"
-            "② 用扩展 Get cookies.txt LOCALLY 导出 Netscape 文本贴进抖音框；"
-            "③ 补传本地 MP4。"
+            "平台拒绝访问（需要新鲜 Cookie）。"
+            "请用「从本机浏览器读取」或导出 cookies.txt，也可补传本地 MP4。"
         )
     if "could not copy" in low and "cookie database" in low:
-        return (
-            "无法读取浏览器 Cookie 库（浏览器可能正占用数据库）。"
-            "请先完全退出 Chrome/Edge 再点「重新下载」，或改用扩展导出 cookies.txt 粘贴。"
-        )
+        return "读不到浏览器 Cookie 库。请先完全退出该浏览器再重试，或改用导出的 cookies.txt。"
+    if "private video" in low or "author has closed" in low or "video is unavailable" in low:
+        return "作者已关闭或视频不可见。请换一条公开链接，或补传本地 MP4。"
+    if "requested format is not available" in low or "no video formats" in low:
+        return "这条链接没有可下载的视频格式。请换直链，或补传本地 MP4。"
+    if "unsupported url" in low or "no suitable extractor" in low:
+        return "不认识这个链接。请贴分享口令、视频页地址，或补传本地 MP4。"
+    if "timed out" in low or "network" in low or "connection" in low or "无新进度" in text:
+        return text[-400:] if "无新进度" in text else "网络中断或超时。可重新下载，或补传本地 MP4。"
     return text[-800:] if text else "下载失败"
 
 
-def _download_url(task: StudioTask) -> tuple[bool, str | None]:
+def _set_live(task: StudioTask, **meta: Any) -> None:
+    ref = dict(task.result_ref or {})
+    ref["live"] = meta
+    task.result_ref = ref
+
+
+def _download_url(
+    task: StudioTask,
+    *,
+    on_progress: Any = None,
+) -> tuple[bool, str | None]:
     assert task.id and task.source_url
     out_tmpl = str(_task_dir(task.id) / "source.%(ext)s")
     cookies = load_cookies()
@@ -563,6 +804,7 @@ def _download_url(task: StudioTask) -> tuple[bool, str | None]:
     cmd = [
         *base_cmd,
         "--no-playlist",
+        "--newline",
         "--socket-timeout",
         "20",
         "--user-agent",
@@ -578,18 +820,88 @@ def _download_url(task: StudioTask) -> tuple[bool, str | None]:
         *cookie_arg,
         task.source_url,
     ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    log_lines: list[str] = []
+    last_tick = time.monotonic()
+    last_emit = 0.0
+    stalled = False
+
+    def _reader() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            q.put(line)
+        q.put(None)
+
+    q: queue.Queue[str | None] = queue.Queue()
+    threading.Thread(target=_reader, daemon=True).start()
+    while True:
+        try:
+            line = q.get(timeout=1)
+        except queue.Empty:
+            if time.monotonic() - last_tick > 30:
+                stalled = True
+                proc.kill()
+                break
+            if proc.poll() is not None and q.empty():
+                break
+            continue
+        if line is None:
+            break
+        last_tick = time.monotonic()
+        log_lines.append(line.rstrip())
+        if len(log_lines) > 80:
+            log_lines = log_lines[-80:]
+        match = _DOWNLOAD_PROGRESS_RE.search(line)
+        if match and on_progress and time.monotonic() - last_emit > 0.6:
+            last_emit = time.monotonic()
+            on_progress(
+                {
+                    "stage": "downloading",
+                    "percent": int(float(match.group("pct"))),
+                    "size": match.group("size"),
+                    "speed": match.group("speed"),
+                    "eta": match.group("eta"),
+                }
+            )
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc.wait(timeout=8)
     except subprocess.TimeoutExpired:
-        return False, "下载超时（120s）；请检查 Cookie 是否有效，或补传本地 MP4"
-    # 找产出
+        proc.kill()
+    if stalled:
+        return False, "下载超过 30 秒没有新进度，已中断。可重新下载，或补传本地 MP4。"
     files = sorted(_task_dir(task.id).glob("source.*"))
     mp4s = [f for f in files if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov")]
-    if proc.returncode != 0 or not mp4s:
-        return False, _friendly_download_error(proc.stderr or proc.stdout or "下载失败")
+    if proc.returncode not in (0, None) or not mp4s:
+        return False, _friendly_download_error("\n".join(log_lines) or "下载失败")
     dest = mp4s[0]
     task.stored_path = f"/static/studio/{task.id}/{dest.name}"
     return True, None
+
+
+def _patch_av_open_compat() -> None:
+    """faster-whisper 会传 metadata_errors=；新版 PyAV(≥14) 已去掉该参数，不补丁会直接 TypeError。"""
+    try:
+        import av
+    except Exception:
+        return
+    if getattr(av.open, "_gym_compat", False):
+        return
+    _orig = av.open
+
+    def _open(*args: Any, **kwargs: Any):  # noqa: ANN401
+        kwargs.pop("metadata_errors", None)
+        return _orig(*args, **kwargs)
+
+    _open._gym_compat = True  # type: ignore[attr-defined]
+    av.open = _open  # type: ignore[assignment]
 
 
 def _transcribe(video: Path) -> dict[str, Any]:
@@ -604,15 +916,59 @@ def _transcribe(video: Path) -> dict[str, Any]:
             "text": "",
         }
 
+    _patch_av_open_compat()
+    # 先用 ffmpeg 抽 16k mono wav，绕开部分损坏容器；失败则直接喂原视频
+    wav = video.with_suffix(".whisper16k.wav")
+    audio_path = video
+    try:
+        from app.services.media_clip import resolve_ffmpeg
+
+        ff = resolve_ffmpeg()
+        if ff:
+            subprocess.run(
+                [
+                    ff,
+                    "-y",
+                    "-i",
+                    str(video),
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-f",
+                    "wav",
+                    str(wav),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
+            if wav.exists() and wav.stat().st_size > 44:
+                audio_path = wav
+    except Exception:
+        audio_path = video
+
     model = WhisperModel("base", device="cpu", compute_type="int8")
     segments_out: list[dict[str, Any]] = []
     texts: list[str] = []
-    segs, _info = model.transcribe(str(video), language="zh", vad_filter=True)
-    for s in segs:
-        row = {"start": round(float(s.start), 2), "end": round(float(s.end), 2), "text": (s.text or "").strip()}
-        if row["text"]:
-            segments_out.append(row)
-            texts.append(row["text"])
+    try:
+        segs, _info = model.transcribe(str(audio_path), language="zh", vad_filter=True)
+        for s in segs:
+            row = {
+                "start": round(float(s.start), 2),
+                "end": round(float(s.end), 2),
+                "text": (s.text or "").strip(),
+            }
+            if row["text"]:
+                segments_out.append(row)
+                texts.append(row["text"])
+    finally:
+        if wav.exists():
+            try:
+                wav.unlink()
+            except OSError:
+                pass
     return {"engine": "faster-whisper", "segments": segments_out, "text": "\n".join(texts)}
 
 
@@ -624,79 +980,109 @@ def _muscle_from_hit(hit: dict[str, Any] | None) -> str:
     return m if m in _KNOWN_MUSCLES else "全身"
 
 
-def _parse_and_score(
-    session: Session, task: StudioTask, transcript: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    text = str(transcript.get("text") or "")
+def _fmt_mmss(sec: float) -> str:
+    s = max(0, int(sec))
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
+def _run_coro(coro: Any) -> Any:
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # 已在事件循环里（少见）：开新线程跑
+    out: dict[str, Any] = {}
+    err: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            out["v"] = asyncio.run(coro)
+        except BaseException as e:  # noqa: BLE001
+            err.append(e)
+
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
+    t.join()
+    if err:
+        raise err[0]
+    return out.get("v")
+
+
+_STUDIO_PARSE_SYSTEM = """你是健身房跟练视频拆课助手。根据带时间戳的口播字幕，抽出正式训练动作清单。
+规则：
+1. 只抽正式组抗阻动作；跳过开场、闲聊、纯热身口头叮嘱、收尾拉伸（除非明确是正式动作）。
+2. spoken_name 用教练口中的标准动作名（如「高位下拉」「杠铃划船」），不要「上背部拉伸」这类含糊说法；看不清就写口语原词。
+3. target_muscle 只能是：胸/背/肩/腿/臂/核心。
+4. role：main / assist / isolation / warmup。
+5. spoken_at 是「讲到这个动作名」的秒数（字幕时间），不是示范画面起点。
+6. cues / mistakes 各 0～3 条，必须来自字幕里的要领/易错，并带 source_at（对应字幕秒数）；没有就空数组，禁止编造。
+7. tempo / intensity 有则摘一句，无则空字符串。
+8. 组次未提及时 target_sets/target_reps 置 null。
+只输出 JSON：
+{
+  "plan_title": "短标题",
+  "block_title": "如 拉日 / 背",
+  "target_muscle": "背",
+  "exercises": [
+    {
+      "spoken_name": "高位下拉",
+      "target_muscle": "背",
+      "role": "main",
+      "target_sets": 4,
+      "target_reps": "8-10",
+      "spoken_at": 72.5,
+      "cues": [{"text":"肘往髋走","source_at":80}],
+      "mistakes": [{"text":"别借力后仰","source_at":85}],
+      "tempo": "",
+      "intensity": ""
+    }
+  ]
+}"""
+
+
+def _llm_extract_plan(transcript: dict[str, Any], task: StudioTask) -> dict[str, Any] | None:
+    """DeepSeek（openai_compatible）拆课；失败或 mock 返回 None，由启发式兜底。"""
+    from app.brain.llm import MockLLM, TEMPERATURE_STRUCTURED, get_llm
+
+    llm = get_llm()
+    if isinstance(llm, MockLLM):
+        return None
     segments = list(transcript.get("segments") or [])
-    ensure_loaded()
+    if not segments and not transcript.get("text"):
+        return None
+    lines: list[str] = []
+    for seg in segments[:220]:
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue
+        lines.append(f"[{_fmt_mmss(float(seg.get('start') or 0))}] {text}")
+    body = "\n".join(lines) if lines else str(transcript.get("text") or "")[:12000]
+    if len(body) > 14000:
+        body = body[:14000] + "\n…(字幕过长已截断)"
+    hint = ""
+    if isinstance(task.draft_json, dict) and task.draft_json.get("plan_title"):
+        hint = f"已知计划名倾向：{task.draft_json.get('plan_title')}\n"
+    user = (
+        f"{hint}视频模式：{task.mode}\n"
+        f"下面是 whisper 口播字幕（[mm:ss] 原文）。请拆出正式动作：\n\n{body}"
+    )
+    try:
+        raw = _run_coro(
+            llm.complete_json(_STUDIO_PARSE_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED)
+        )
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    exs = raw.get("exercises")
+    if not isinstance(exs, list) or not exs:
+        return None
+    return raw
 
-    # 从字幕里捞动作名（目录子串命中）
-    mentions = find_catalog_mentions_in_text(text) if text else []
-    exercises: list[dict[str, Any]] = []
 
-    if mentions:
-        for i, name in enumerate(mentions[:12]):
-            snip = _snippet_for_name(segments, name)
-            hit = _match_exercise(session, name)
-            conf = float(hit["confidence"]) if hit else 0.0
-            exercises.append(
-                {
-                    "id": f"row-{i}",
-                    "spoken_name": name,
-                    "exercise_id": hit["id"] if hit else None,
-                    "exercise_name": hit["name_zh"] if hit else name,
-                    "target_muscle": _muscle_from_hit(hit),
-                    "role": "main" if i < 2 else ("assist" if i < 4 else "isolation"),
-                    "target_sets": None,
-                    "target_reps": None,
-                    "sets_from_transcript": False,
-                    "source_kind": "spoken",
-                    "match_confidence": conf,
-                    "snippet": snip,
-                    "traffic": "red",
-                    "replace_demo": False,
-                    "attach_demo": not bool(hit and hit.get("has_demo")),
-                }
-            )
-    elif text:
-        # 无目录命中：按「第N个动作」粗切
-        parts = re.split(r"(?:第[一二三四五六七八九十\d]+个动作|下一个动作|正式组)", text)
-        for i, part in enumerate(parts[1:7], start=0):
-            spoken = (part.strip()[:40] or f"未识别动作{i+1}")
-            snip = _snippet_for_name(segments, spoken[:6]) if segments else {"start": 10.0 * i, "end": 10.0 * i + 5}
-            exercises.append(
-                {
-                    "id": f"row-{i}",
-                    "spoken_name": spoken,
-                    "exercise_id": None,
-                    "exercise_name": None,
-                    "target_muscle": "全身",
-                    "role": "main" if i == 0 else "assist",
-                    "target_sets": None,
-                    "target_reps": None,
-                    "sets_from_transcript": False,
-                    "source_kind": "spoken",
-                    "match_confidence": 0.1,
-                    "snippet": snip,
-                    "traffic": "red",
-                    "replace_demo": False,
-                    "attach_demo": True,
-                }
-            )
-
-    # 从文本补组次（整段字幕扫一次；命中则记 sets_from_transcript）
-    sets_match = _SETS_RE.search(text) if text else None
-    for ex in exercises:
-        if sets_match and ex.get("target_sets") is None:
-            ex["target_sets"] = int(sets_match.group("sets"))
-            if sets_match.group("reps_a") and sets_match.group("reps_b"):
-                ex["target_reps"] = f"{sets_match.group('reps_a')}-{sets_match.group('reps_b')}"
-            elif sets_match.group("reps"):
-                ex["target_reps"] = str(sets_match.group("reps"))
-            ex["sets_from_transcript"] = True
-
-    # 未解析到组次：保留默认建议，但不得假绿灯
+def _finalize_exercise_traffic(exercises: list[dict[str, Any]]) -> None:
     for ex in exercises:
         if ex.get("target_sets") is None:
             ex["target_sets"] = 3
@@ -707,37 +1093,33 @@ def _parse_and_score(
         if matched and ex.get("sets_from_transcript"):
             ex["traffic"] = "green"
         elif matched:
-            ex["traffic"] = "amber"  # 库已绑上，组次是默认建议，需瞄一眼
+            ex["traffic"] = "amber"
         else:
             ex["traffic"] = "red"
 
-    if not exercises:
-        exercises = [
-            {
-                "id": "row-0",
-                "spoken_name": "待人工补充",
-                "exercise_id": None,
-                "exercise_name": None,
-                "target_muscle": "全身",
-                "role": "main",
-                "target_sets": 3,
-                "target_reps": "8-12",
-                "sets_from_transcript": False,
-                "source_kind": "missing",
-                "match_confidence": 0.0,
-                "snippet": {"start": 0, "end": 5},
-                "traffic": "red",
-                "replace_demo": False,
-                "attach_demo": True,
-            }
-        ]
 
-    muscle = exercises[0].get("target_muscle") or "全身"
-    title = (task.draft_json or {}).get("plan_title") if isinstance(task.draft_json, dict) else None
+def _build_draft(
+    task: StudioTask,
+    exercises: list[dict[str, Any]],
+    *,
+    title: str | None,
+    block_title: str | None,
+    muscle: str | None,
+    parse_engine: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _finalize_exercise_traffic(exercises)
+    muscle = muscle if muscle in _KNOWN_MUSCLES else (
+        (exercises[0].get("target_muscle") if exercises else None) or "全身"
+    )
+    if muscle not in _KNOWN_MUSCLES:
+        muscle = "全身"
+    kept_title = None
+    if isinstance(task.draft_json, dict):
+        kept_title = task.draft_json.get("plan_title")
+    title = title or kept_title
     if not title:
         title = f"工坊草稿 · {muscle}" if task.mode != "exercise_only" else "动作素材草稿"
-
-    block_title = {
+    block_title = block_title or {
         "胸": "推日 / 胸",
         "背": "拉日 / 背",
         "肩": "肩部",
@@ -746,11 +1128,11 @@ def _parse_and_score(
         "核心": "核心",
         "全身": "待定部位",
     }.get(str(muscle), str(muscle))
-
     draft = {
         "plan_title": title,
         "scene_tag": "博主同款" if task.mode != "exercise_only" else None,
         "mode": task.mode,
+        "parse_engine": parse_engine,
         "blocks": [
             {
                 "title": block_title,
@@ -759,16 +1141,243 @@ def _parse_and_score(
             }
         ],
     }
-    red = sum(1 for e in exercises if e.get("traffic") == "red")
-    amber = sum(1 for e in exercises if e.get("traffic") == "amber")
-    green = sum(1 for e in exercises if e.get("traffic") == "green")
     score = {
-        "red_count": red,
-        "amber_count": amber,
-        "green_count": green,
+        "red_count": sum(1 for e in exercises if e.get("traffic") == "red"),
+        "amber_count": sum(1 for e in exercises if e.get("traffic") == "amber"),
+        "green_count": sum(1 for e in exercises if e.get("traffic") == "green"),
         "total": len(exercises),
+        "parse_engine": parse_engine,
     }
     return draft, score
+
+
+def _parse_and_score(
+    session: Session, task: StudioTask, transcript: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    text = str(transcript.get("text") or "")
+    segments = list(transcript.get("segments") or [])
+    ensure_loaded()
+
+    # 1) DeepSeek / 兼容 LLM
+    llm_raw = _llm_extract_plan(transcript, task)
+    if llm_raw:
+        exercises: list[dict[str, Any]] = []
+        for i, item in enumerate(llm_raw.get("exercises") or []):
+            if not isinstance(item, dict):
+                continue
+            spoken = str(item.get("spoken_name") or "").strip()
+            if not spoken:
+                continue
+            spoken_at = float(item.get("spoken_at") or 0)
+            snip = {
+                "start": round(max(0.0, spoken_at - 1.0), 2),
+                "end": round(spoken_at + 5.0, 2),
+                "spoken_at": round(spoken_at, 2),
+            }
+            # 若字幕里能对准动作名，用更准的 spoken_at
+            aligned = _snippet_for_name(segments, spoken) if segments else None
+            if aligned and abs(float(aligned.get("spoken_at") or 0) - spoken_at) < 45:
+                snip = aligned
+            hit = _match_exercise(session, spoken)
+            role = str(item.get("role") or "main")
+            if role not in ("main", "assist", "isolation", "warmup"):
+                role = "main"
+            row = _exercise_draft_row(
+                i=i,
+                spoken=spoken,
+                hit=hit,
+                snip=snip,
+                segments=segments,
+                role=role,
+                attach_demo=not bool(hit and hit.get("has_demo")),
+                source_kind="spoken",
+            )
+            muscle = str(item.get("target_muscle") or "").strip()
+            if muscle in _KNOWN_MUSCLES:
+                row["target_muscle"] = muscle
+            elif hit:
+                row["target_muscle"] = _muscle_from_hit(hit)
+            sets = item.get("target_sets")
+            reps = item.get("target_reps")
+            if isinstance(sets, int) and sets > 0:
+                row["target_sets"] = sets
+                row["target_reps"] = str(reps).strip() if reps else row.get("target_reps")
+                row["sets_from_transcript"] = True
+            elif isinstance(sets, str) and sets.isdigit():
+                row["target_sets"] = int(sets)
+                row["target_reps"] = str(reps).strip() if reps else row.get("target_reps")
+                row["sets_from_transcript"] = True
+            cues_in = item.get("cues") if isinstance(item.get("cues"), list) else []
+            mistakes_in = item.get("mistakes") if isinstance(item.get("mistakes"), list) else []
+            cues: list[dict[str, Any]] = []
+            for c in cues_in[:3]:
+                if isinstance(c, dict) and str(c.get("text") or "").strip():
+                    cues.append(
+                        {
+                            "text": str(c.get("text")).strip()[:80],
+                            "source_at": float(c.get("source_at") or spoken_at),
+                        }
+                    )
+                elif isinstance(c, str) and c.strip():
+                    cues.append({"text": c.strip()[:80], "source_at": spoken_at})
+            mistakes: list[dict[str, Any]] = []
+            for c in mistakes_in[:3]:
+                if isinstance(c, dict) and str(c.get("text") or "").strip():
+                    mistakes.append(
+                        {
+                            "text": str(c.get("text")).strip()[:80],
+                            "source_at": float(c.get("source_at") or spoken_at),
+                        }
+                    )
+                elif isinstance(c, str) and c.strip():
+                    mistakes.append({"text": c.strip()[:80], "source_at": spoken_at})
+            if cues:
+                row["cues"] = cues
+            if mistakes:
+                row["mistakes"] = mistakes
+            row["tempo"] = str(item.get("tempo") or "")[:60]
+            row["intensity"] = str(item.get("intensity") or "")[:60]
+            exercises.append(row)
+        if exercises:
+            return _build_draft(
+                task,
+                exercises,
+                title=str(llm_raw.get("plan_title") or "").strip() or None,
+                block_title=str(llm_raw.get("block_title") or "").strip() or None,
+                muscle=str(llm_raw.get("target_muscle") or "").strip() or None,
+                parse_engine="llm",
+            )
+
+    # 2) 启发式兜底（目录子串 / 第N个动作）
+    exercises = []
+    mentions = find_catalog_mentions_in_text(text) if text else []
+    if mentions:
+        for i, name in enumerate(mentions[:12]):
+            snip = _snippet_for_name(segments, name)
+            hit = _match_exercise(session, name)
+            exercises.append(
+                _exercise_draft_row(
+                    i=i,
+                    spoken=name,
+                    hit=hit,
+                    snip=snip,
+                    segments=segments,
+                    role="main" if i < 2 else ("assist" if i < 4 else "isolation"),
+                    attach_demo=not bool(hit and hit.get("has_demo")),
+                )
+            )
+    elif text:
+        parts = re.split(r"(?:第[一二三四五六七八九十\d]+个动作|下一个动作|正式组)", text)
+        for i, part in enumerate(parts[1:7], start=0):
+            spoken = (part.strip()[:40] or f"未识别动作{i+1}")
+            snip = (
+                _snippet_for_name(segments, spoken[:6])
+                if segments
+                else {"start": 10.0 * i, "end": 10.0 * i + 5, "spoken_at": 10.0 * i}
+            )
+            exercises.append(
+                _exercise_draft_row(
+                    i=i,
+                    spoken=spoken,
+                    hit=None,
+                    snip=snip,
+                    segments=segments,
+                    role="main" if i == 0 else "assist",
+                    attach_demo=True,
+                    conf=0.1,
+                )
+            )
+
+    sets_match = _SETS_RE.search(text) if text else None
+    for ex in exercises:
+        if sets_match and not ex.get("sets_from_transcript"):
+            ex["target_sets"] = int(sets_match.group("sets"))
+            if sets_match.group("reps_a") and sets_match.group("reps_b"):
+                ex["target_reps"] = f"{sets_match.group('reps_a')}-{sets_match.group('reps_b')}"
+            elif sets_match.group("reps"):
+                ex["target_reps"] = str(sets_match.group("reps"))
+            ex["sets_from_transcript"] = True
+
+    return _build_draft(
+        task,
+        exercises,
+        title=None,
+        block_title=None,
+        muscle=None,
+        parse_engine="heuristic",
+    )
+
+
+def _nearby_lines(
+    segments: list[dict[str, Any]], spoken_at: float, *, window: float = 12.0
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        s = float(seg.get("start") or 0)
+        if abs(s - spoken_at) <= window:
+            out.append(
+                {
+                    "text": str(seg.get("text") or "").strip(),
+                    "at": round(s, 2),
+                }
+            )
+    return out[:4]
+
+
+def _exercise_draft_row(
+    *,
+    i: int,
+    spoken: str,
+    hit: dict[str, Any] | None,
+    snip: dict[str, float],
+    segments: list[dict[str, Any]],
+    role: str,
+    attach_demo: bool,
+    conf: float | None = None,
+    source_kind: str = "spoken",
+) -> dict[str, Any]:
+    confidence = float(conf if conf is not None else (hit["confidence"] if hit else 0.0))
+    spoken_at = float(snip.get("spoken_at") or snip.get("start") or 0)
+    nearby = _nearby_lines(segments, spoken_at)
+    cues = [
+        {"text": n["text"], "source_at": n["at"]}
+        for n in nearby
+        if any(k in n["text"] for k in ("注意", "不要", "别", "保持", "感受", "顶住", "下放"))
+    ][:2]
+    mistakes = [
+        {"text": n["text"], "source_at": n["at"]}
+        for n in nearby
+        if any(k in n["text"] for k in ("别", "不要", "错误", "避免", "翻", "打开太多"))
+    ][:2]
+    media_status = "library" if hit and hit.get("has_demo") else ("pending_sku" if not hit else "uncut")
+    return {
+        "id": f"row-{i}",
+        "spoken_name": spoken,
+        "exercise_id": hit["id"] if hit else None,
+        "exercise_name": hit["name_zh"] if hit else (None if source_kind == "missing" else spoken),
+        "target_muscle": _muscle_from_hit(hit),
+        "gear": hit.get("gear") if hit else None,
+        "role": role,
+        "target_sets": None,
+        "target_reps": None,
+        "sets_from_transcript": False,
+        "source_kind": source_kind,
+        "match_confidence": confidence,
+        "snippet": {
+            "start": float(snip.get("start") or 0),
+            "end": float(snip.get("end") or 5),
+            "spoken_at": spoken_at,
+        },
+        "spoken_at": spoken_at,
+        "media_status": media_status,
+        "cues": cues,
+        "mistakes": mistakes,
+        "tempo": "",
+        "intensity": "",
+        "traffic": "red",
+        "replace_demo": False,
+        "attach_demo": attach_demo,
+    }
 
 
 def _snippet_for_name(segments: list[dict[str, Any]], name: str) -> dict[str, float]:
@@ -777,13 +1386,17 @@ def _snippet_for_name(segments: list[dict[str, Any]], name: str) -> dict[str, fl
         if key and key in str(seg.get("text") or ""):
             start = float(seg.get("start") or 0)
             end = float(seg.get("end") or (start + 5))
-            # 扩成 3~6 秒示范窗
+            # spoken_at ≈ 他讲到这句的秒；选区给人拖，不直接当切片起点
             mid = (start + end) / 2
-            return {"start": round(max(0, mid - 2.5), 2), "end": round(mid + 2.5, 2)}
+            return {
+                "start": round(max(0, mid - 2.5), 2),
+                "end": round(mid + 2.5, 2),
+                "spoken_at": round(start, 2),
+            }
     if segments:
         s0 = float(segments[0].get("start") or 0)
-        return {"start": s0, "end": s0 + 5}
-    return {"start": 0.0, "end": 5.0}
+        return {"start": s0, "end": s0 + 5, "spoken_at": s0}
+    return {"start": 0.0, "end": 5.0, "spoken_at": 0.0}
 
 
 def _match_exercise(session: Session, spoken: str) -> dict[str, Any] | None:
@@ -812,7 +1425,14 @@ def _match_exercise(session: Session, spoken: str) -> dict[str, Any] | None:
         ).first()
     )
     conf = 0.95 if ex.name_zh == name else 0.8
-    return {"id": ex.id, "name_zh": ex.name_zh, "muscle": ex.muscle, "confidence": conf, "has_demo": has_demo}
+    return {
+        "id": ex.id,
+        "name_zh": ex.name_zh,
+        "muscle": ex.muscle,
+        "gear": ex.gear,
+        "confidence": conf,
+        "has_demo": has_demo,
+    }
 
 
 def preview_clip(
@@ -916,23 +1536,99 @@ def _attach_demo_media(
     )
     session.add(media)
 
-    ex = session.get(Exercise, exercise_id)
-    if ex and not ex.image_start:
-        ex.image_start = cover_url
-        session.add(ex)
-        # 同时挂 start 槽
-        session.add(
-            ExerciseMedia(
-                exercise_id=exercise_id,
-                role="start",
-                url=cover_url,
-                status="published",
-                source="video_studio",
-                meta={"mime": "image/jpeg"},
-            )
+    # 封面：始终刷新 published start + image_start（示范与列表缩略图同源）
+    old_starts = session.exec(
+        select(ExerciseMedia).where(
+            ExerciseMedia.exercise_id == exercise_id,
+            ExerciseMedia.role == "start",
+            ExerciseMedia.status == "published",
         )
+    ).all()
+    for row in old_starts:
+        row.status = "archived"
+        session.add(row)
+    session.add(
+        ExerciseMedia(
+            exercise_id=exercise_id,
+            role="start",
+            url=cover_url,
+            status="published",
+            source="video_studio",
+            meta={"mime": "image/jpeg"},
+        )
+    )
+
+    ex = session.get(Exercise, exercise_id)
+    if ex:
+        ex.image_start = cover_url
+        ex.updated_at = utcnow()
+        session.add(ex)
+    # 把工坊 LLM 要点同步进 SKU（H5「动作要领 / 发力提示」）
+    _sync_sku_text_from_draft(session, task, exercise_id)
     session.commit()
     return {"demo_url": demo_url, "cover_url": cover_url}
+
+
+def _draft_row_for_exercise(task: StudioTask, exercise_id: str) -> dict[str, Any] | None:
+    draft = task.draft_json if isinstance(task.draft_json, dict) else {}
+    for block in draft.get("blocks") or []:
+        for ex in block.get("exercises") or []:
+            if not isinstance(ex, dict):
+                continue
+            if str(ex.get("exercise_id") or "") == str(exercise_id):
+                return ex
+    return None
+
+
+def _line_texts(items: Any, *, limit: int = 6) -> list[str]:
+    out: list[str] = []
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+        else:
+            text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text[:120])
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _sync_sku_text_from_draft(
+    session: Session, task: StudioTask, exercise_id: str
+) -> dict[str, Any]:
+    """工坊草稿里的 cues/mistakes → Exercise.cues_zh / common_mistakes_zh / instructions_zh。
+
+    以前只把示范媒体写进 SKU，LLM 要点留在草稿，SKU/H5 一直「暂无教案」。
+    """
+    row = _draft_row_for_exercise(task, exercise_id)
+    ex = session.get(Exercise, exercise_id)
+    if not row or not ex:
+        return {"ok": False, "reason": "no_draft_row"}
+
+    cues = _line_texts(row.get("cues"))
+    mistakes = _line_texts(row.get("mistakes"))
+    changed = False
+    if cues:
+        ex.cues_zh = cues
+        # H5「动作要领」读 instructions；工坊 LLM 通常只给 cues → 空教案时用 cues 填
+        if not (ex.instructions_zh or []):
+            ex.instructions_zh = cues[:4]
+        changed = True
+    if mistakes:
+        ex.common_mistakes_zh = mistakes
+        changed = True
+    if changed:
+        ex.updated_at = utcnow()
+        session.add(ex)
+    return {
+        "ok": changed,
+        "cues": cues,
+        "mistakes": mistakes,
+        "instructions": list(ex.instructions_zh or [])[:4],
+    }
 
 
 async def upload_task_cover(session: Session, task_id: int, file: UploadFile) -> dict[str, Any]:

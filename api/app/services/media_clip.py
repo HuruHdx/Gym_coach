@@ -42,16 +42,17 @@ def ffmpeg_loop_clip_cmd(
     start: float,
     duration: float,
 ) -> list[str]:
+    """精确裁切：``-ss`` 放在 ``-i`` 之后，避免关键帧快切导致往前/往后多出一截。"""
     bin_path = resolve_ffmpeg() or "ffmpeg"
     return [
         bin_path,
         "-y",
-        "-ss",
-        str(start),
-        "-t",
-        str(duration),
         "-i",
         str(input_path),
+        "-ss",
+        f"{float(start):.3f}",
+        "-t",
+        f"{float(duration):.3f}",
         "-an",
         "-vf",
         "scale='min(540,iw)':-2,fps=24",
@@ -79,10 +80,10 @@ def ffmpeg_poster_cmd(
     return [
         bin_path,
         "-y",
-        "-ss",
-        str(at_time),
         "-i",
         str(input_path),
+        "-ss",
+        f"{float(at_time):.3f}",
         "-frames:v",
         "1",
         "-vf",
@@ -136,11 +137,14 @@ def make_demo_pair(
     out_dir: str | Path,
     stem: str = "demo",
 ) -> tuple[Path, Path]:
-    """一次产出静音小 MP4 + 中间帧 JPG。"""
+    """一次产出静音小 MP4 + 封面 JPG。
+
+    封面取**切片成品的第 0 帧**（= 动图首帧），与 H5 循环播放起点一致；
+    不再取选区中点，也不再对源片粗略 seek。
+    """
     duration = max(0.5, float(end) - float(start))
-    mid = float(start) + duration / 2
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
     mp4 = make_loop_clip(input_path, root / f"{stem}_loop.mp4", start=start, duration=duration)
-    jpg = make_poster_frame(input_path, root / f"{stem}_cover.jpg", at_time=mid)
+    jpg = make_poster_frame(mp4, root / f"{stem}_cover.jpg", at_time=0.0)
     return mp4, jpg

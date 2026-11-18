@@ -152,10 +152,17 @@ export function ExerciseDetailPage() {
                 isVideo(mediaUrl) && demoUrl ? (
                   <LoopClip
                     src={mediaUrl}
+                    poster={startUrl || endUrl || undefined}
                     className="h-full w-full object-contain"
                   />
                 ) : isVideo(mediaUrl) ? (
-                  <video src={mediaUrl} className="h-full w-full object-contain" controls playsInline />
+                  <video
+                    src={mediaUrl}
+                    poster={startUrl || endUrl || undefined}
+                    className="h-full w-full object-contain"
+                    controls
+                    playsInline
+                  />
                 ) : (
                   <img
                     key={mediaUrl}

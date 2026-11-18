@@ -31,6 +31,32 @@ from app.tenancy import current_user_id, get_current_profile
 _PUSH_ARM_SUB = ("肱三头肌",)
 _PULL_ARM_SUB = ("肱二头肌",)
 
+# 奥举 / 杂技平衡：大众健身房框架课默认降权过滤（见 docs/09 A2）
+_NICHE_LIFT_MARKERS = (
+    "抓举",
+    "挺举",
+    "翻举",
+    "上送",
+    "高翻",
+    "悬垂抓",
+    "肌肉抓",
+    "力量抓",
+    "力量挺",
+    "架上抓",
+    "抓举平衡",
+    "挺举预蹲",
+    "弗兰肯斯坦",
+    "过头深蹲",
+)
+_NICHE_BALANCE_MARKERS = ("平衡板", "平衡垫", "平衡三点")
+_MAIN_GEAR_SCORE = {
+    "自由重量": 10,
+    "固定器械": 8,
+    "器械": 8,
+    "绳索": 4,
+    "自重": -8,
+}
+
 
 ROLE_LABEL = {
     "main": "主项",
@@ -586,6 +612,24 @@ def _matches_arm_bias(cand: dict[str, Any], bias: str | None) -> bool:
     return any(s in sub for s in want)
 
 
+def _is_niche_gym_lift(cand: dict[str, Any]) -> bool:
+    """奥举 / 平衡杂技：框架配课默认不当大众主项。"""
+    name = str(cand.get("name") or "")
+    modality = str(cand.get("modality") or "")
+    category = str(cand.get("category") or cand.get("gear") or "")
+    if modality == "灵活性" and any(k in name for k in _NICHE_BALANCE_MARKERS):
+        return True
+    if any(k in name for k in _NICHE_LIFT_MARKERS):
+        return True
+    if any(k in name for k in _NICHE_BALANCE_MARKERS):
+        return True
+    # category 偶发带 olympic 英文标签
+    low = f"{category} {modality}".lower()
+    if "olympic" in low or "weightlifting" in low:
+        return True
+    return False
+
+
 def _suggest_weight(session: Session, name: str, experience: str) -> float | None:
     uid = current_user_id()
     q = select(ExerciseStats).where(ExerciseStats.exercise_name == canonicalize_exercise(name))
@@ -663,7 +707,7 @@ def _resolve_exercise_row(
 
     avoid_canon = {canonicalize_exercise(a) for a in avoid if a}
 
-    def _ok(cand: dict[str, Any]) -> bool:
+    def _ok(cand: dict[str, Any], *, allow_niche: bool = False) -> bool:
         name = str(cand.get("name") or "").strip()
         if not name:
             return False
@@ -672,9 +716,33 @@ def _resolve_exercise_row(
             return False
         if is_banned_for_injuries(name, injuries):
             return False
+        if not allow_niche and _is_niche_gym_lift(cand):
+            return False
         return True
 
     valid = [c for c in candidates if _ok(c)]
+    # 伤病/过滤过严时再放宽奥举池，避免整槽空白
+    if not valid:
+        valid = [c for c in candidates if _ok(c, allow_niche=True)]
+    isolation_fallback_note = None
+    if not valid and row.role == "isolation":
+        # A3：孤立无候选时退到同肌群辅助
+        assist_pool = _retrieve_for_slot(
+            session,
+            muscles=[_primary_muscle(block, row)],
+            role="assist",
+            injuries=injuries,
+            exclude=list(used_names),
+            avoid=avoid,
+            arm_bias=_arm_bias_for_block(block)
+            if _primary_muscle(block, row) == "臂"
+            else None,
+            allow_core=("核心" == _primary_muscle(block, row)),
+        )
+        valid = [c for c in assist_pool if _ok(c)]
+        if valid:
+            isolation_fallback_note = "孤立动作暂缺，已用辅助动作替代"
+
     if not valid:
         if row.exercise_name:
             return {
@@ -697,9 +765,10 @@ def _resolve_exercise_row(
             swap_note = f"已从「{row.exercise_name}」降级替换"
         return {**best, "swap_note": swap_note}
 
-    # 框架：主练肌群优先 + 臂推/拉细分 + 器械/亚区多样性 + coach_core
+    # 框架：主练肌群优先 + 臂推/拉细分 + 器械/亚区多样性 + coach_core 强优先
     target = (getattr(row, "target_muscle", None) or "").strip()
     arm_bias = _arm_bias_for_block(block) if target == "臂" else None
+    role = (row.role or "assist").strip()
     for cand in valid:
         score = 0
         if target and cand.get("muscle") == target:
@@ -713,10 +782,25 @@ def _resolve_exercise_row(
         if sub and sub not in used_sub_regions:
             score += 2
         if cand.get("coach_core"):
-            score += 1
+            # 主项强绑常用池；辅助/孤立也明显加分
+            score += 40 if role == "main" else 18
+        elif role == "main":
+            score -= 25  # 非 core 不当默认主项
+        if role == "main":
+            gear_key = str(cand.get("gear") or cand.get("category") or "")
+            score += int(_MAIN_GEAR_SCORE.get(gear_key, 0))
+        if _is_niche_gym_lift(cand):
+            score -= 80
         cand["_score"] = score
     valid.sort(key=lambda c: int(c.get("_score") or 0), reverse=True)
-    return {**valid[0], "swap_note": None}
+    best = valid[0]
+    # 主项：优先非奥举的 coach_core；再优先自由重量/器械
+    if role == "main":
+        core_pool = [c for c in valid if c.get("coach_core") and not _is_niche_gym_lift(c)]
+        if core_pool:
+            core_pool.sort(key=lambda c: int(c.get("_score") or 0), reverse=True)
+            best = core_pool[0]
+    return {**best, "swap_note": isolation_fallback_note}
 
 
 def _from_sku(sku: Exercise) -> dict[str, Any]:
@@ -764,44 +848,59 @@ def _retrieve_for_slot(
                 "muscle": ex.muscle,
             }
 
-    out: list[dict[str, Any]] = []
-    for item in pool:
-        name = item["name"]
-        if canonicalize_exercise(name) in avoid_canon:
-            continue
-        meta = name_to_meta.get(name) or {}
-        muscle_v = meta.get("muscle") or item.get("muscle")
-        pattern_v = meta.get("movement_pattern")
-        if not allow_core and is_core_movement(movement_pattern=pattern_v, muscle=muscle_v):
-            continue
-        roles = list(meta.get("slot_roles") or [])
-        # slot_roles 空：用枚举字段推断（仍不看动作名）
-        if not roles:
-            roles = infer_slot_roles(
+    def _collect(wanted_role: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in pool:
+            name = item["name"]
+            if canonicalize_exercise(name) in avoid_canon:
+                continue
+            meta = name_to_meta.get(name) or {}
+            muscle_v = meta.get("muscle") or item.get("muscle")
+            pattern_v = meta.get("movement_pattern")
+            if not allow_core and is_core_movement(movement_pattern=pattern_v, muscle=muscle_v):
+                continue
+            roles = list(meta.get("slot_roles") or [])
+            # slot_roles 空：用枚举字段推断（仍不看动作名）
+            if not roles:
+                roles = infer_slot_roles(
+                    movement_pattern=pattern_v,
+                    muscle=muscle_v,
+                    coach_core=bool(item.get("coach_core")),
+                )
+            if roles and wanted_role not in roles:
+                # 主项可吃辅助；孤立也可吃辅助（movement_pattern 大量为空时否则配空）
+                if wanted_role == "main" and "assist" in roles:
+                    pass
+                elif wanted_role == "isolation" and "assist" in roles:
+                    pass
+                else:
+                    continue
+            if wanted_role == "isolation" and not allow_core and is_core_movement(
                 movement_pattern=pattern_v,
                 muscle=muscle_v,
-                coach_core=bool(item.get("coach_core")),
-            )
-        if roles and role not in roles:
-            if not (role == "main" and "assist" in roles):
+            ):
                 continue
-        if role == "isolation" and not allow_core and is_core_movement(
-            movement_pattern=pattern_v,
-            muscle=muscle_v,
-        ):
-            continue
-        cand = {
-            "name": name,
-            "exercise_id": item.get("id"),
-            "muscle": item.get("muscle") or (muscles[0] if muscles else "全身"),
-            "gear": item.get("category") or item.get("gear"),
-            "sub_region": meta.get("sub_region") or item.get("sub_region"),
-            "coach_core": bool(item.get("coach_core")),
-        }
-        if arm_bias and not _matches_arm_bias(cand, arm_bias):
-            # 臂细分：不硬过滤，靠后续打分压后；先收集，后置排序在框架分支
-            cand["_arm_mismatch"] = True
-        out.append(cand)
+            cand = {
+                "name": name,
+                "exercise_id": item.get("id"),
+                "muscle": item.get("muscle") or (muscles[0] if muscles else "全身"),
+                "gear": item.get("category") or item.get("gear"),
+                "category": item.get("category"),
+                "modality": item.get("modality"),
+                "sub_region": meta.get("sub_region") or item.get("sub_region"),
+                "coach_core": bool(item.get("coach_core")),
+            }
+            if _is_niche_gym_lift(cand) and wanted_role == "main":
+                continue
+            if arm_bias and not _matches_arm_bias(cand, arm_bias):
+                cand["_arm_mismatch"] = True
+            rows.append(cand)
+        return rows
+
+    out = _collect(role)
+    # A3：孤立槽位无命中时，同池退到 assist
+    if not out and role == "isolation":
+        out = _collect("assist")
 
     if arm_bias:
         matched = [c for c in out if not c.get("_arm_mismatch")]

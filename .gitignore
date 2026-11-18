@@ -3,6 +3,8 @@ api/.venv/
 api/data/
 api/.env
 api/static/exercises/
+api/static/studio/
+api/static/plans/
 api/assets/opengym/_*.txt
 api/assets/opengym/_llm_enrich_cache.json
 # 一次性调试 / 分析脚本目录，不进仓

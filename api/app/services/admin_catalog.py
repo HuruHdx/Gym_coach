@@ -15,12 +15,22 @@ MediaState = Literal["none", "frames_only", "has_dynamic", "complete"]
 
 
 def media_url(path: str | None) -> str | None:
+    """Normalize stored media path to a public URL.
+
+    DB / storage usually already stores ``/static/...`` (see ``save_public_asset``).
+    Do **not** strip the leading slash before checking ``/static/`` — that used to
+    double-prefix into ``/static/exercises/static/exercises/...`` and break H5.
+    """
     if not path:
         return None
-    p = path.replace("\\", "/").lstrip("/")
-    if p.startswith("http://") or p.startswith("https://") or p.startswith("/static/"):
+    p = path.replace("\\", "/").strip()
+    if p.startswith(("http://", "https://")):
         return p
-    return f"/static/exercises/{p}"
+    if p.startswith("static/"):
+        return f"/{p}"
+    if p.startswith("/static/"):
+        return p
+    return f"/static/exercises/{p.lstrip('/')}"
 
 
 def _published_media_by_exercise(
@@ -225,6 +235,16 @@ def build_overview(session: Session) -> dict[str, Any]:
     }
 
 
+def _exercise_order(sort: str | None):
+    key = (sort or "updated_desc").strip().lower()
+    if key in ("name", "name_asc"):
+        return col(Exercise.name_zh).asc(), col(Exercise.id).asc()
+    if key in ("core", "coach_core"):
+        return col(Exercise.coach_core).desc(), col(Exercise.name_zh).asc()
+    # 默认：最近更新（工坊刚写入示范时最容易找到）
+    return col(Exercise.updated_at).desc(), col(Exercise.id).desc()
+
+
 def list_exercises(
     session: Session,
     *,
@@ -236,11 +256,13 @@ def list_exercises(
     coach_core: bool | None = None,
     media_state: str | None = None,
     needs_review: bool | None = None,
+    sort: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
+    order = _exercise_order(sort)
 
     stmt = select(Exercise)
     filters = []
@@ -288,14 +310,12 @@ def list_exercises(
             count_stmt = count_stmt.where(and_(*filters))
         total = int(session.exec(count_stmt).one() or 0)
         rows = session.exec(
-            stmt.order_by(col(Exercise.coach_core).desc(), col(Exercise.name_zh))
+            stmt.order_by(*order)
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
     else:
-        rows_all = session.exec(
-            stmt.order_by(col(Exercise.coach_core).desc(), col(Exercise.name_zh))
-        ).all()
+        rows_all = session.exec(stmt.order_by(*order)).all()
         ids = [ex.id for ex in rows_all]
         media_maps = _published_media_by_exercise(session, ids)
         filtered: list[Exercise] = []

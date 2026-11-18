@@ -45,9 +45,10 @@ def test_list_and_detail_and_expand_fixed():
         listed = client.get("/api/plans", headers=headers)
         assert listed.status_code == 200
         body = listed.json()
-        assert body["total"] >= 2
+        assert body["total"] >= 3
         ids = {item["id"] for item in body["items"]}
         assert "three-split-classic" in ids
+        assert "five-split-classic" in ids
         assert "fixed-push-strength" in ids
 
         detail = client.get("/api/plans/fixed-push-strength", headers=headers)

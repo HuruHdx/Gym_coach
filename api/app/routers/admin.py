@@ -192,6 +192,7 @@ def list_exercises(
     coach_core: bool | None = Query(default=None),
     media_state: str | None = Query(default=None),
     needs_review: bool | None = Query(default=None),
+    sort: str | None = Query(default="updated_desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
 ):
@@ -205,6 +206,7 @@ def list_exercises(
         coach_core=coach_core,
         media_state=media_state,
         needs_review=needs_review,
+        sort=sort,
         page=page,
         page_size=page_size,
     )

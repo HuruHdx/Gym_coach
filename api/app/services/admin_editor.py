@@ -341,6 +341,9 @@ def update_exercise(session: Session, exercise_id: str, payload: dict[str, Any])
         ex.coach_core = bool(payload["coach_core"])
     if "needs_review" in payload and payload["needs_review"] is not None:
         ex.needs_review = bool(payload["needs_review"])
+    if "is_valid_exercise" in payload and payload["is_valid_exercise"] is not None:
+        # False = 从 H5 动作库下架（仍留在后台，可再上架）
+        ex.is_valid_exercise = bool(payload["is_valid_exercise"])
     if "instructions_zh" in payload and payload["instructions_zh"] is not None:
         ex.instructions_zh = _clean_list(payload["instructions_zh"], limit=8)
     if "cues_zh" in payload and payload["cues_zh"] is not None:
@@ -426,7 +429,7 @@ def save_media_bytes(
     filename = filename or "upload.bin"
     ext = Path(filename).suffix.lower()
     allowed = _IMAGE_EXTS | {".gif"}
-    if role == "highlight_video":
+    if role in ("highlight_video", "demo"):
         allowed = allowed | _VIDEO_EXTS
     if ext not in allowed:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext or '(无扩展名)'}")
@@ -608,23 +611,31 @@ def rollback_media(session: Session, media_id: int) -> dict[str, Any]:
 
 
 def clear_slot(session: Session, exercise_id: str, role: str) -> dict[str, Any]:
-    """Archive published/draft for a role and clear seed path so the slot becomes empty."""
+    """Archive published/draft for a role and clear seed path so the slot becomes empty.
+
+    删「动图」时：若起始封面也是工坊切片带出来的（source=video_studio），一并归档，
+    避免 H5 只剩一张静图还以为示范还在。
+    """
     if role not in MEDIA_ROLES:
         raise HTTPException(status_code=400, detail=f"无效槽位: {role}")
     ex = session.get(Exercise, exercise_id)
     if not ex:
         raise HTTPException(status_code=404, detail="动作不存在")
 
-    rows = session.exec(
-        select(ExerciseMedia).where(
-            ExerciseMedia.exercise_id == exercise_id,
-            ExerciseMedia.role == role,
-            col(ExerciseMedia.status).in_(["published", "draft"]),
+    def _active_rows(r: str) -> list[ExerciseMedia]:
+        return list(
+            session.exec(
+                select(ExerciseMedia).where(
+                    ExerciseMedia.exercise_id == exercise_id,
+                    ExerciseMedia.role == r,
+                    col(ExerciseMedia.status).in_(["published", "draft"]),
+                )
+            ).all()
         )
-    ).all()
-    if not rows and not (
-        (role == "start" and ex.image_start) or (role == "end" and ex.image_end)
-    ):
+
+    rows = _active_rows(role)
+    seed_only = (role == "start" and ex.image_start) or (role == "end" and ex.image_end)
+    if not rows and not seed_only:
         raise HTTPException(status_code=400, detail="该槽位已是空的")
 
     for row in rows:
@@ -635,6 +646,16 @@ def clear_slot(session: Session, exercise_id: str, role: str) -> dict[str, Any]:
         ex.image_start = None
     if role == "end":
         ex.image_end = None
+
+    # 工坊「做成示范」会同时写 demo + start；删动图时带走同源封面
+    if role == "demo":
+        studio_starts = [r for r in _active_rows("start") if (r.source or "") == "video_studio"]
+        for row in studio_starts:
+            row.status = "archived"
+            session.add(row)
+        if studio_starts and ex.image_start in {r.url for r in studio_starts}:
+            ex.image_start = None
+
     ex.updated_at = utcnow()
     session.add(ex)
     session.commit()
