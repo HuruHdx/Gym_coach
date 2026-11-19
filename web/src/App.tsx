@@ -22,6 +22,7 @@ import { ProfileSettingsPage } from "./pages/ProfileSettingsPage";
 import { FormCheckPage } from "./pages/FormCheckPage";
 import { RecapPage } from "./pages/RecapPage";
 import { DebugPage } from "./pages/DebugPage";
+import { PageState } from "./feedback";
 
 export default function App() {
   const qc = useQueryClient();
@@ -65,7 +66,9 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="noise flex h-dvh items-center justify-center bg-bg text-muted">加载中…</div>
+      <div className="noise flex h-dvh items-center justify-center bg-bg">
+        <PageState kind="loading" title="加载中…" />
+      </div>
     );
   }
 

@@ -18,6 +18,7 @@ import { CoachMark } from "../components/CoachMark";
 import { DraftCard } from "../components/DraftCard";
 import { ExerciseRefCards } from "../components/ExerciseRefCards";
 import { MessageFeedback } from "../components/MessageFeedback";
+import { toast } from "../feedback";
 import type {
   AgentReply,
   Block,
@@ -249,7 +250,6 @@ export function CoachPage({ profile }: Props) {
   const promptChips = primaryActions;
   const [inputVal, setInputVal] = useState("");
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
@@ -286,8 +286,7 @@ export function CoachPage({ profile }: Props) {
   }, [hydrated]);
 
   function flash(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(null), 1600);
+    toast.info(message);
   }
 
   async function handleSend(textToSend?: string) {
@@ -685,11 +684,6 @@ export function CoachPage({ profile }: Props) {
         </div>
       </div>
 
-      {toast && (
-        <p className="pointer-events-none fixed bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-ink px-3 py-1.5 text-micro font-semibold text-accent-ink">
-          {toast}
-        </p>
-      )}
     </div>
   );
 }

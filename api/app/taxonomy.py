@@ -49,14 +49,28 @@ def normalize_muscle(raw: str | None) -> Muscle | None:
 
 
 def normalize_exercise_name(name: str) -> str:
-    """Collapse spacing/punctuation; keep Chinese as-is for display key."""
+    """Collapse spacing/punctuation/fullwidth; strip filler display noise.
+
+    不做「深蹲→杠铃深蹲」硬改写。含糊口播的枚举匹配见 ``exercise_match``。
+    """
     s = name.strip()
+    s = s.replace("\u3000", " ")
     s = re.sub(r"\s+", "", s)
     s = s.replace("（", "(").replace("）", ")")
+    # 全半角数字/字母粗统一
+    trans = str.maketrans(
+        "ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ０１２３４５６７８９",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+    )
+    s = s.translate(trans)
+    for w in ("标准", "正确", "健身", "训练", "动作", "教程", "教学"):
+        s = s.replace(w, "")
     return s
 
 
-# Common synonym groups → canonical display name
+# 同义词 → 规范名（排课/去重用）。
+# 注意：工坊口播匹配不要先 canonicalize 再搜，否则「深蹲」会被钉死成杠铃深蹲、候选消失。
+# 含糊词（深蹲/硬拉/卧推）在匹配链路里只作加分线索，见 exercise_match。
 EXERCISE_CANONICAL: dict[str, str] = {
     "哑铃平板卧推": "哑铃卧推",
     "哑铃平卧推": "哑铃卧推",
@@ -73,6 +87,8 @@ EXERCISE_CANONICAL: dict[str, str] = {
     "器械夹胸": "龙门架坐姿夹胸",
     "跑步机": "跑步机跑步",
     "跑步机慢跑": "跑步机跑步",
+    "平卧推": "平板卧推",
+    "平卧": "平板",
 }
 
 

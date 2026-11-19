@@ -11,6 +11,7 @@ import {
   type EquipmentTag,
 } from "../lib/profileOptions";
 import type { Profile } from "../types";
+import { toast } from "../feedback";
 
 type Props = { profile: Profile; onUpdated: () => void; onResetOnboarding: () => void };
 
@@ -22,7 +23,6 @@ function currentEquipment(profile: Profile): string[] {
 /** 训练资料：分组卡 + 画像摘要（方案 A） */
 export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: Props) {
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [rhythmOpen, setRhythmOpen] = useState(false);
   const [heightOpen, setHeightOpen] = useState(false);
   const [weightOpen, setWeightOpen] = useState(false);
@@ -44,12 +44,9 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
     try {
       await api("/api/profile", { method: "PATCH", body: JSON.stringify(body) });
       onUpdated();
-      if (label) {
-        setToast(label);
-        window.setTimeout(() => setToast(null), 1400);
-      }
+      if (label) toast.ok(label);
     } catch (e) {
-      alert(String(e));
+      toast.err(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -64,8 +61,6 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
 
   return (
     <div className="flex min-h-full flex-col px-4 pb-8 pt-3">
-      {toast && <p className="text-xs font-bold text-ok rise-in">{toast}</p>}
-
       <Link to="/me" className="pressable -ml-1 mb-1 inline-flex w-fit text-[12px] font-bold text-muted">
         ‹ 我的
       </Link>
@@ -290,8 +285,7 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
                     body: JSON.stringify({ weight_kg: weightDraft }),
                   });
                   onUpdated();
-                  setToast("体重已记录");
-                  window.setTimeout(() => setToast(null), 1400);
+                  toast.ok("体重已记录");
                   setWeightOpen(false);
                 } catch (e) {
                   alert(String(e));

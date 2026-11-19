@@ -38,6 +38,28 @@ class QuickCreateIn(BaseModel):
     start: float | None = None
     end: float | None = None
     attach_demo: bool = True
+    cues: list[Any] | None = None
+    mistakes: list[Any] | None = None
+    instructions: list[Any] | None = None
+    write_cues: bool = False
+
+
+class RestoreCuesIn(BaseModel):
+    task_id: int
+    exercise_id: str = Field(min_length=1, max_length=64)
+
+
+class PairCuesIn(BaseModel):
+    task_id: int
+    row_id: str = Field(min_length=1, max_length=64)
+    exercise_id: str | None = None
+
+
+class WriteCuesIn(BaseModel):
+    task_id: int
+    row_id: str = Field(min_length=1, max_length=64)
+    cue_mode: str = Field(default="replace", max_length=16)
+    pairs: list[dict[str, Any]] | None = None
 
 
 class AttachDemoIn(BaseModel):
@@ -235,6 +257,10 @@ def quick_create(
         start=body.start,
         end=body.end,
         attach_demo=body.attach_demo,
+        cues=body.cues,
+        mistakes=body.mistakes,
+        instructions=body.instructions,
+        write_cues=body.write_cues,
     )
 
 
@@ -250,6 +276,47 @@ def attach_demo(
         exercise_id=body.exercise_id,
         start=body.start,
         end=body.end,
+    )
+
+
+@router.post("/restore-cues")
+def restore_cues(
+    body: RestoreCuesIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    """后端保留；方案 A 前端不做还原入口。"""
+    return studio_service.restore_sku_cues_from_backup(
+        session, task_id=body.task_id, exercise_id=body.exercise_id
+    )
+
+
+@router.post("/pair-cues")
+def pair_cues(
+    body: PairCuesIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.pair_studio_cues(
+        session,
+        task_id=body.task_id,
+        row_id=body.row_id,
+        exercise_id=body.exercise_id,
+    )
+
+
+@router.post("/write-cues")
+def write_cues(
+    body: WriteCuesIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.write_studio_cues(
+        session,
+        task_id=body.task_id,
+        row_id=body.row_id,
+        cue_mode=body.cue_mode,
+        pairs=body.pairs,
     )
 
 

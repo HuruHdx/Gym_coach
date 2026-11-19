@@ -867,6 +867,11 @@ def _retrieve_for_slot(
                     muscle=muscle_v,
                     coach_core=bool(item.get("coach_core")),
                 )
+            # 热身不进主项/辅助/孤立竞争池
+            if wanted_role != "warmup" and "warmup" in roles and "main" not in roles and "assist" not in roles and "isolation" not in roles:
+                continue
+            if wanted_role != "warmup" and roles == ["warmup"]:
+                continue
             if roles and wanted_role not in roles:
                 # 主项可吃辅助；孤立也可吃辅助（movement_pattern 大量为空时否则配空）
                 if wanted_role == "main" and "assist" in roles:

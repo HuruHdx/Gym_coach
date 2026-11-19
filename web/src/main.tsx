@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { FeedbackHost } from "./feedback";
 import "../../gym-ui/tokens.css";
 import "../../gym-ui/base.css";
 import "../../gym-ui/components.css";
@@ -17,7 +18,12 @@ function Root() {
     document.documentElement.setAttribute("data-theme", skin);
     document.documentElement.setAttribute("data-skin", skin);
   }, [skin]);
-  return <App />;
+  return (
+    <>
+      <App />
+      <FeedbackHost />
+    </>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

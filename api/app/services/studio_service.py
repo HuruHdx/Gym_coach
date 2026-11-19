@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.services.media_clip import ffmpeg_available, make_demo_pair
 from app.services.storage import save_public_asset
+from app.exercise_match import resolve_spoken_match
 from app.taxonomy import canonicalize_exercise
 
 _API_ROOT = Path(__file__).resolve().parents[2]
@@ -458,9 +459,14 @@ def attach_demo_now(
     meta = _attach_demo_media(session, task, exercise_id, float(start), float(end))
     if not meta:
         raise HTTPException(status_code=400, detail="切片失败：本地视频不存在或 ffmpeg 出错")
-    synced = _sync_sku_text_from_draft(session, task, exercise_id)
+    # 方案 A：立刻出库示范只写媒体；要领只在抽屉点「写进库」
     session.commit()
-    return {"ok": True, "exercise_id": exercise_id, "demo": meta, "synced_text": synced}
+    return {
+        "ok": True,
+        "exercise_id": exercise_id,
+        "demo": meta,
+        "synced_text": {"ok": False, "reason": "drawer_only"},
+    }
 
 
 def reparse(session: Session, task_id: int) -> dict[str, Any]:
@@ -736,13 +742,36 @@ _DOWNLOAD_PROGRESS_RE = re.compile(
 )
 
 
-def _friendly_download_error(raw: str) -> str:
+def _referer_for_url(url: str) -> str | None:
+    """按域名给 Referer；写死抖音会让 B 站 playurl 直接 403。"""
+    u = (url or "").lower()
+    if "douyin" in u or "iesdouyin" in u:
+        return "https://www.douyin.com/"
+    if "bilibili" in u or "b23.tv" in u:
+        return "https://www.bilibili.com/"
+    if "youtube" in u or "youtu.be" in u:
+        return None
+    return None
+
+
+def _friendly_download_error(raw: str, *, url: str = "") -> str:
     text = (raw or "").strip()
     low = text.lower()
-    if "fresh cookies" in low or "http error 403" in low or "403: forbidden" in low:
+    bili = "bilibili" in (url or "").lower() or "b23.tv" in (url or "").lower()
+    if "fresh cookies" in low:
         return (
-            "平台拒绝访问（需要新鲜 Cookie）。"
+            "平台要求登录态 Cookie。"
             "请用「从本机浏览器读取」或导出 cookies.txt，也可补传本地 MP4。"
+        )
+    if "http error 403" in low or "403: forbidden" in low:
+        if bili:
+            return (
+                "B站拒绝访问（多为 Referer/风控，公开视频通常不需 Cookie）。"
+                "可重试下载、换直链，或补传本地 MP4；只有 1080P+/大会员才需要 SESSDATA。"
+            )
+        return (
+            "平台拒绝访问（403）。"
+            "可先不配 Cookie 重试；仍失败再用「从本机浏览器读取」，或补传本地 MP4。"
         )
     if "could not copy" in low and "cookie database" in low:
         return "读不到浏览器 Cookie 库。请先完全退出该浏览器再重试，或改用导出的 cookies.txt。"
@@ -763,40 +792,32 @@ def _set_live(task: StudioTask, **meta: Any) -> None:
     task.result_ref = ref
 
 
-def _download_url(
-    task: StudioTask,
-    *,
-    on_progress: Any = None,
-) -> tuple[bool, str | None]:
-    assert task.id and task.source_url
-    out_tmpl = str(_task_dir(task.id) / "source.%(ext)s")
+def _cookie_args_for_url(url: str, task_id: int) -> list[str]:
     cookies = load_cookies()
-    cookie_arg: list[str] = []
     source = str(cookies.get("source") or "paste")
     if source == "browser":
         browser = str(cookies.get("browser") or "chrome")
-        cookie_arg = ["--cookies-from-browser", browser]
-    else:
-        blob = _pick_cookie_blob(cookies, task.source_url)
-        if blob.strip():
-            jar = _task_dir(task.id) / "cookies.txt"
-            jar.write_text(
-                _to_netscape_cookie_file(blob, _cookie_domains_for_url(task.source_url)),
-                encoding="utf-8",
-            )
-            cookie_arg = ["--cookies", str(jar)]
+        return ["--cookies-from-browser", browser]
+    blob = _pick_cookie_blob(cookies, url)
+    if not blob.strip():
+        return []
+    jar = _task_dir(task_id) / "cookies.txt"
+    jar.write_text(
+        _to_netscape_cookie_file(blob, _cookie_domains_for_url(url)),
+        encoding="utf-8",
+    )
+    return ["--cookies", str(jar)]
 
-    # 未 activate venv 时 PATH 里可能没有 yt-dlp.exe，优先 python -m yt_dlp
-    ytdlp_bin = shutil.which("yt-dlp")
-    if ytdlp_bin:
-        base_cmd = [ytdlp_bin]
-    else:
-        try:
-            import yt_dlp  # noqa: F401
-        except ImportError:
-            return False, "未安装 yt-dlp；请补传本地 MP4，或 pip install yt-dlp"
-        base_cmd = [sys.executable, "-m", "yt_dlp"]
 
+def _run_ytdlp_once(
+    *,
+    base_cmd: list[str],
+    out_tmpl: str,
+    url: str,
+    cookie_arg: list[str],
+    on_progress: Any = None,
+) -> tuple[bool, str, bool]:
+    """跑一轮 yt-dlp。返回 (ok, log, stalled)。"""
     ua = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -809,17 +830,22 @@ def _download_url(
         "20",
         "--user-agent",
         ua,
-        "--referer",
-        "https://www.douyin.com/",
-        "-f",
-        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
-        "--merge-output-format",
-        "mp4",
-        "-o",
-        out_tmpl,
-        *cookie_arg,
-        task.source_url,
     ]
+    referer = _referer_for_url(url)
+    if referer:
+        cmd.extend(["--referer", referer])
+    cmd.extend(
+        [
+            "-f",
+            "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+            "--merge-output-format",
+            "mp4",
+            "-o",
+            out_tmpl,
+            *cookie_arg,
+            url,
+        ]
+    )
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -875,15 +901,67 @@ def _download_url(
         proc.wait(timeout=8)
     except subprocess.TimeoutExpired:
         proc.kill()
-    if stalled:
+    log = "\n".join(log_lines)
+    ok = (not stalled) and proc.returncode in (0, None)
+    return ok, log, stalled
+
+
+def _download_url(
+    task: StudioTask,
+    *,
+    on_progress: Any = None,
+) -> tuple[bool, str | None]:
+    assert task.id and task.source_url
+    out_tmpl = str(_task_dir(task.id) / "source.%(ext)s")
+
+    # 未 activate venv 时 PATH 里可能没有 yt-dlp.exe，优先 python -m yt_dlp
+    ytdlp_bin = shutil.which("yt-dlp")
+    if ytdlp_bin:
+        base_cmd = [ytdlp_bin]
+    else:
+        try:
+            import yt_dlp  # noqa: F401
+        except ImportError:
+            return False, "未安装 yt-dlp；请补传本地 MP4，或 pip install yt-dlp"
+        base_cmd = [sys.executable, "-m", "yt_dlp"]
+
+    cookie_arg = _cookie_args_for_url(task.source_url, task.id)
+
+    def _pick_mp4() -> Path | None:
+        files = sorted(_task_dir(task.id).glob("source.*"))
+        mp4s = [f for f in files if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov")]
+        return mp4s[0] if mp4s else None
+
+    # 公开视频（尤其 B 站 480/720P）多数不需要 Cookie：先裸下，失败再带 Cookie 重试
+    attempts: list[list[str]] = [[]]
+    if cookie_arg:
+        attempts.append(cookie_arg)
+
+    last_log = ""
+    last_stalled = False
+    for i, args in enumerate(attempts):
+        if i > 0 and on_progress:
+            on_progress({"stage": "downloading", "percent": 0, "size": None, "speed": None, "eta": None})
+        ok, log, stalled = _run_ytdlp_once(
+            base_cmd=base_cmd,
+            out_tmpl=out_tmpl,
+            url=task.source_url,
+            cookie_arg=args,
+            on_progress=on_progress,
+        )
+        last_log, last_stalled = log, stalled
+        dest = _pick_mp4()
+        if ok and dest:
+            task.stored_path = f"/static/studio/{task.id}/{dest.name}"
+            return True, None
+        # 无 Cookie 可重试时直接结束；有 Cookie 则进入下一轮
+        if i + 1 < len(attempts) and not stalled:
+            continue
+        break
+
+    if last_stalled:
         return False, "下载超过 30 秒没有新进度，已中断。可重新下载，或补传本地 MP4。"
-    files = sorted(_task_dir(task.id).glob("source.*"))
-    mp4s = [f for f in files if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov")]
-    if proc.returncode not in (0, None) or not mp4s:
-        return False, _friendly_download_error("\n".join(log_lines) or "下载失败")
-    dest = mp4s[0]
-    task.stored_path = f"/static/studio/{task.id}/{dest.name}"
-    return True, None
+    return False, _friendly_download_error(last_log or "下载失败", url=task.source_url)
 
 
 def _patch_av_open_compat() -> None:
@@ -1010,40 +1088,167 @@ def _run_coro(coro: Any) -> Any:
     return out.get("v")
 
 
-_STUDIO_PARSE_SYSTEM = """你是健身房跟练视频拆课助手。根据带时间戳的口播字幕，抽出正式训练动作清单。
+_STUDIO_PARSE_SYSTEM = """你是健身房跟练视频拆课助手。根据带时间戳的口播字幕，抽出训练动作清单。
 规则：
-1. 只抽正式组抗阻动作；跳过开场、闲聊、纯热身口头叮嘱、收尾拉伸（除非明确是正式动作）。
+1. 开场热身动作照抽，role=warmup，target_sets/target_reps 可 null；跳过寒暄、纯闲聊和收尾放松拉伸（口头叮嘱可忽略，有具体动作名的拉伸/激活要抽）。
 2. spoken_name 用教练口中的标准动作名（如「高位下拉」「杠铃划船」），不要「上背部拉伸」这类含糊说法；看不清就写口语原词。
 3. target_muscle 只能是：胸/背/肩/腿/臂/核心。
 4. role：main / assist / isolation / warmup。
 5. spoken_at 是「讲到这个动作名」的秒数（字幕时间），不是示范画面起点。
 6. cues / mistakes 各 0～3 条，必须来自字幕里的要领/易错，并带 source_at（对应字幕秒数）；没有就空数组，禁止编造。
 7. tempo / intensity 有则摘一句，无则空字符串。
-8. 组次未提及时 target_sets/target_reps 置 null。
+8. 组次未提及时 target_sets/target_reps 置 null；热身尤其不要瞎填组次。
+9. 若下面给了「可对照动作名表」：字幕里的说法能对上表里某个标准名时，spoken_name 照抄表内标准名；对不上才写口语原词。
+10. 混练视频按部位/阶段分块：每个 block 对应一段连续的训练内容（如 热身 / 胸日 / 背日）；单一部位视频可把热身单独一块或放在同块最前。
 只输出 JSON：
 {
   "plan_title": "短标题",
-  "block_title": "如 拉日 / 背",
-  "target_muscle": "背",
-  "exercises": [
+  "blocks": [
     {
-      "spoken_name": "高位下拉",
+      "block_title": "如 拉日 / 背",
       "target_muscle": "背",
-      "role": "main",
-      "target_sets": 4,
-      "target_reps": "8-10",
-      "spoken_at": 72.5,
-      "cues": [{"text":"肘往髋走","source_at":80}],
-      "mistakes": [{"text":"别借力后仰","source_at":85}],
-      "tempo": "",
-      "intensity": ""
+      "exercises": [
+        {
+          "spoken_name": "高位下拉",
+          "target_muscle": "背",
+          "role": "main",
+          "target_sets": 4,
+          "target_reps": "8-10",
+          "spoken_at": 72.5,
+          "cues": [{"text":"肘往髋走","source_at":80}],
+          "mistakes": [{"text":"别借力后仰","source_at":85}],
+          "tempo": "",
+          "intensity": ""
+        }
+      ]
     }
   ]
 }"""
 
+_PARSE_CHUNK_SECONDS = 300.0  # 5 分钟一块
+_PARSE_CHUNK_OVERLAP = 30.0  # 块间重叠，避免跨块动作被切丢
 
-def _llm_extract_plan(transcript: dict[str, Any], task: StudioTask) -> dict[str, Any] | None:
-    """DeepSeek（openai_compatible）拆课；失败或 mock 返回 None，由启发式兜底。"""
+
+def _build_name_vocabulary(session: Session) -> str:
+    """从动作库按 coach_core 优先取常用动作名，作为 LLM 对照词表。"""
+    try:
+        rows = session.exec(
+            select(Exercise).where(Exercise.name_zh.is_not(None)).order_by(Exercise.id)
+        ).all()
+    except Exception:
+        return ""
+    # 只取有效动作；coach_core 优先，每个部位各留一些常见名
+    rows = [
+        r for r in rows
+        if getattr(r, "is_valid_exercise", True) and (r.name_zh or "").strip()
+    ]
+    core = [r.name_zh for r in rows if getattr(r, "coach_core", False)]
+    rest = [r.name_zh for r in rows if not getattr(r, "coach_core", False)]
+    names = core[:60] + rest[:40]
+    names = [n for n in dict.fromkeys(names) if n]
+    if not names:
+        return ""
+    return "可对照动作名表（能对上就照抄标准名）：\n" + "、".join(names)
+
+
+def _chunk_segments(segments: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """按 5 分钟分块、块间留 30s 重叠；单块不超过 220 条字幕。"""
+    if not segments:
+        return []
+    total_end = max(float(s.get("end") or s.get("start") or 0) for s in segments)
+    if total_end <= _PARSE_CHUNK_SECONDS:
+        return [segments]
+    chunks: list[list[dict[str, Any]]] = []
+    start = 0.0
+    while start < total_end:
+        end = start + _PARSE_CHUNK_SECONDS
+        chunk = [
+            s
+            for s in segments
+            if float(s.get("start") or 0) < end
+            and float(s.get("end") or s.get("start") or 0) >= start - _PARSE_CHUNK_OVERLAP
+        ]
+        if chunk:
+            chunks.append(chunk[:220])
+        start = end - _PARSE_CHUNK_OVERLAP
+    return chunks
+
+
+def _format_segment_lines(segments: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for seg in segments[:220]:
+        text = str(seg.get("text") or "").strip()
+        if text:
+            lines.append(f"[{_fmt_mmss(float(seg.get('start') or 0))}] {text}")
+    return "\n".join(lines)
+
+
+def _normalize_llm_blocks(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """兼容新旧两种返回：blocks[] 优先；旧的单块结构包成一个 block。"""
+    blocks_in = raw.get("blocks")
+    if isinstance(blocks_in, list) and blocks_in:
+        out: list[dict[str, Any]] = []
+        for b in blocks_in:
+            if isinstance(b, dict) and isinstance(b.get("exercises"), list):
+                out.append(b)
+        if out:
+            return out
+    exercises = raw.get("exercises")
+    if isinstance(exercises, list) and exercises:
+        return [
+            {
+                "block_title": str(raw.get("block_title") or "").strip(),
+                "target_muscle": str(raw.get("target_muscle") or "").strip(),
+                "exercises": exercises,
+            }
+        ]
+    return []
+
+
+def _merge_llm_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """多块结果按 (部位, 动作名) 合并去重；spoken_at 取最早出现的一条。"""
+    merged: list[dict[str, Any]] = []
+    seen: dict[tuple[str, str], int] = {}
+    for block in blocks:
+        muscle = str(block.get("target_muscle") or "").strip()
+        title = str(block.get("block_title") or "").strip()
+        exs = block.get("exercises") or []
+        if not isinstance(exs, list) or not exs:
+            continue
+        bucket_idx: int | None = None
+        for i, b in enumerate(merged):
+            if b.get("target_muscle") == muscle and b.get("block_title") == title:
+                bucket_idx = i
+                break
+        if bucket_idx is None:
+            bucket_idx = len(merged)
+            merged.append({"block_title": title, "target_muscle": muscle, "exercises": []})
+        for item in exs:
+            if not isinstance(item, dict):
+                continue
+            spoken = str(item.get("spoken_name") or "").strip()
+            if not spoken:
+                continue
+            key = (muscle, canonicalize_exercise(spoken))
+            if key in seen:
+                # 重叠段重复命中：保留 spoken_at 更早的一条
+                existing = merged[seen[key]]["exercises"]
+                prev_at = float(existing[0].get("spoken_at") or 0)
+                cur_at = float(item.get("spoken_at") or 0)
+                if cur_at < prev_at:
+                    existing[0] = item
+                continue
+            seen[key] = bucket_idx
+            merged[bucket_idx]["exercises"].append(item)
+    return [b for b in merged if b.get("exercises")]
+
+
+def _llm_extract_plan(
+    transcript: dict[str, Any],
+    task: StudioTask,
+    session: Session | None = None,
+) -> dict[str, Any] | None:
+    """DeepSeek（openai_compatible）拆课；分块调用 + 词表对照；失败或 mock 返回 None。"""
     from app.brain.llm import MockLLM, TEMPERATURE_STRUCTURED, get_llm
 
     llm = get_llm()
@@ -1052,47 +1257,81 @@ def _llm_extract_plan(transcript: dict[str, Any], task: StudioTask) -> dict[str,
     segments = list(transcript.get("segments") or [])
     if not segments and not transcript.get("text"):
         return None
-    lines: list[str] = []
-    for seg in segments[:220]:
-        text = str(seg.get("text") or "").strip()
-        if not text:
-            continue
-        lines.append(f"[{_fmt_mmss(float(seg.get('start') or 0))}] {text}")
-    body = "\n".join(lines) if lines else str(transcript.get("text") or "")[:12000]
-    if len(body) > 14000:
-        body = body[:14000] + "\n…(字幕过长已截断)"
+
     hint = ""
     if isinstance(task.draft_json, dict) and task.draft_json.get("plan_title"):
         hint = f"已知计划名倾向：{task.draft_json.get('plan_title')}\n"
-    user = (
-        f"{hint}视频模式：{task.mode}\n"
-        f"下面是 whisper 口播字幕（[mm:ss] 原文）。请拆出正式动作：\n\n{body}"
-    )
-    try:
-        raw = _run_coro(
-            llm.complete_json(_STUDIO_PARSE_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED)
-        )
-    except Exception:
+    vocab = _build_name_vocabulary(session) if session is not None else ""
+
+    def _call_chunk(chunk: list[dict[str, Any]]) -> dict[str, Any] | None:
+        body = _format_segment_lines(chunk)
+        if not body:
+            body = str(transcript.get("text") or "")[:12000]
+        if len(body) > 14000:
+            body = body[:14000] + "\n…(字幕过长已截断)"
+        parts = [
+            f"{hint}视频模式：{task.mode}",
+            "下面是 whisper 口播字幕（[mm:ss] 原文）。请拆出正式动作：",
+            "",
+            body,
+        ]
+        if vocab:
+            parts += ["", vocab]
+        user = "\n".join(parts)
+        try:
+            raw = _run_coro(
+                llm.complete_json(_STUDIO_PARSE_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED)
+            )
+        except Exception:
+            return None
+        return raw if isinstance(raw, dict) else None
+
+    chunks = _chunk_segments(segments)
+    if chunks:
+        raw_blocks: list[dict[str, Any]] = []
+        plan_title = ""
+        for chunk in chunks:
+            raw = _call_chunk(chunk)
+            if not raw:
+                continue
+            if not plan_title:
+                plan_title = str(raw.get("plan_title") or "").strip()
+            raw_blocks.extend(_normalize_llm_blocks(raw))
+        blocks = _merge_llm_blocks(raw_blocks)
+        if blocks:
+            return {"plan_title": plan_title, "blocks": blocks}
         return None
-    if not isinstance(raw, dict):
+
+    # 无时间戳字幕：整段喂一次，兼容旧结构
+    raw = _call_chunk(segments)
+    if not raw:
         return None
-    exs = raw.get("exercises")
-    if not isinstance(exs, list) or not exs:
-        return None
-    return raw
+    blocks = _merge_llm_blocks(_normalize_llm_blocks(raw))
+    if blocks:
+        return {"plan_title": str(raw.get("plan_title") or "").strip(), "blocks": blocks}
+    return None
 
 
 def _finalize_exercise_traffic(exercises: list[dict[str, Any]]) -> None:
+    """灯色与百分制对齐：≥90 预填可绿/黄；有候选未绑=黄；无候选=红。
+
+    热身 role=warmup 不填默认 3×8-12，避免看起来像正式组。
+    """
     for ex in exercises:
-        if ex.get("target_sets") is None:
+        role = str(ex.get("role") or "")
+        if ex.get("target_sets") is None and role != "warmup":
             ex["target_sets"] = 3
             ex["target_reps"] = ex.get("target_reps") or "8-12"
             ex["sets_from_transcript"] = False
-        conf = float(ex.get("match_confidence") or 0)
-        matched = bool(ex.get("exercise_id")) and conf >= 0.75
-        if matched and ex.get("sets_from_transcript"):
+        score = int(ex.get("match_score") or round(float(ex.get("match_confidence") or 0) * 100))
+        ex["match_score"] = score
+        ex["match_confidence"] = score / 100.0
+        if not ex.get("cue_mode"):
+            ex["cue_mode"] = "replace"  # 方案 A：默认按上面的换；真正写库在抽屉点按钮
+        # 12 §3.1：有 exercise_id 即绿（点选即绑）；黄=有候选未点；红=无候选
+        if ex.get("exercise_id"):
             ex["traffic"] = "green"
-        elif matched:
+        elif ex.get("candidates") and score >= 55:
             ex["traffic"] = "amber"
         else:
             ex["traffic"] = "red"
@@ -1100,52 +1339,68 @@ def _finalize_exercise_traffic(exercises: list[dict[str, Any]]) -> None:
 
 def _build_draft(
     task: StudioTask,
-    exercises: list[dict[str, Any]],
+    blocks_in: list[dict[str, Any]],
     *,
     title: str | None,
-    block_title: str | None,
-    muscle: str | None,
     parse_engine: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    _finalize_exercise_traffic(exercises)
-    muscle = muscle if muscle in _KNOWN_MUSCLES else (
-        (exercises[0].get("target_muscle") if exercises else None) or "全身"
-    )
-    if muscle not in _KNOWN_MUSCLES:
-        muscle = "全身"
+    """blocks_in: [{block_title, target_muscle, exercises:[row...]}]；动作行已构造好。"""
+    exercise_rows: list[dict[str, Any]] = []
+    out_blocks: list[dict[str, Any]] = []
+    for block in blocks_in:
+        exs = list(block.get("exercises") or [])
+        if not exs:
+            continue
+        muscle = str(block.get("target_muscle") or "").strip()
+        if muscle not in _KNOWN_MUSCLES:
+            muscle = (exs[0].get("target_muscle") if exs else None) or "全身"
+        if muscle not in _KNOWN_MUSCLES:
+            muscle = "全身"
+        block_title = str(block.get("block_title") or "").strip() or {
+            "胸": "推日 / 胸",
+            "背": "拉日 / 背",
+            "肩": "肩部",
+            "腿": "腿日",
+            "臂": "手臂",
+            "核心": "核心",
+            "全身": "待定部位",
+        }.get(muscle, muscle)
+        exercise_rows.extend(exs)
+        out_blocks.append(
+            {
+                "title": block_title,
+                "muscles": [muscle] if muscle != "全身" else [],
+                "exercises": exs,
+            }
+        )
+    _finalize_exercise_traffic(exercise_rows)
     kept_title = None
     if isinstance(task.draft_json, dict):
         kept_title = task.draft_json.get("plan_title")
     title = title or kept_title
     if not title:
-        title = f"工坊草稿 · {muscle}" if task.mode != "exercise_only" else "动作素材草稿"
-    block_title = block_title or {
-        "胸": "推日 / 胸",
-        "背": "拉日 / 背",
-        "肩": "肩部",
-        "腿": "腿日",
-        "臂": "手臂",
-        "核心": "核心",
-        "全身": "待定部位",
-    }.get(str(muscle), str(muscle))
+        muscle0 = out_blocks[0]["muscles"][0] if out_blocks and out_blocks[0]["muscles"] else "全身"
+        title = f"工坊草稿 · {muscle0}" if task.mode != "exercise_only" else "动作素材草稿"
+    if not out_blocks:
+        out_blocks = [
+            {
+                "title": "待定部位",
+                "muscles": [],
+                "exercises": [],
+            }
+        ]
     draft = {
         "plan_title": title,
         "scene_tag": "博主同款" if task.mode != "exercise_only" else None,
         "mode": task.mode,
         "parse_engine": parse_engine,
-        "blocks": [
-            {
-                "title": block_title,
-                "muscles": [muscle] if muscle != "全身" else [],
-                "exercises": exercises,
-            }
-        ],
+        "blocks": out_blocks,
     }
     score = {
-        "red_count": sum(1 for e in exercises if e.get("traffic") == "red"),
-        "amber_count": sum(1 for e in exercises if e.get("traffic") == "amber"),
-        "green_count": sum(1 for e in exercises if e.get("traffic") == "green"),
-        "total": len(exercises),
+        "red_count": sum(1 for e in exercise_rows if e.get("traffic") == "red"),
+        "amber_count": sum(1 for e in exercise_rows if e.get("traffic") == "amber"),
+        "green_count": sum(1 for e in exercise_rows if e.get("traffic") == "green"),
+        "total": len(exercise_rows),
         "parse_engine": parse_engine,
     }
     return draft, score
@@ -1158,93 +1413,114 @@ def _parse_and_score(
     segments = list(transcript.get("segments") or [])
     ensure_loaded()
 
-    # 1) DeepSeek / 兼容 LLM
-    llm_raw = _llm_extract_plan(transcript, task)
+    def _row_from_item(item: dict[str, Any], seq: int) -> dict[str, Any] | None:
+        spoken = str(item.get("spoken_name") or "").strip()
+        if not spoken:
+            return None
+        spoken_at = float(item.get("spoken_at") or 0)
+        snip = {
+            "start": round(max(0.0, spoken_at - 1.0), 2),
+            "end": round(spoken_at + 5.0, 2),
+            "spoken_at": round(spoken_at, 2),
+        }
+        # 若字幕里能对准动作名，用更准的 spoken_at
+        aligned = _snippet_for_name(segments, spoken) if segments else None
+        if aligned and abs(float(aligned.get("spoken_at") or 0) - spoken_at) < 45:
+            snip = aligned
+        muscle_hint = str(item.get("target_muscle") or "").strip() or None
+        matched = _match_exercise(session, spoken, muscle_hint=muscle_hint if muscle_hint in _KNOWN_MUSCLES else None)
+        hit = matched.get("hit")
+        role = str(item.get("role") or "main")
+        if role not in ("main", "assist", "isolation", "warmup"):
+            role = "main"
+        row = _exercise_draft_row(
+            i=seq,
+            spoken=spoken,
+            hit=hit,
+            snip=snip,
+            segments=segments,
+            role=role,
+            attach_demo=not bool(hit and hit.get("has_demo")),
+            source_kind="spoken",
+            candidates=list(matched.get("candidates") or []),
+            match_score=int(matched.get("match_score") or 0),
+        )
+        muscle = str(item.get("target_muscle") or "").strip()
+        if muscle in _KNOWN_MUSCLES:
+            row["target_muscle"] = muscle
+        elif hit:
+            row["target_muscle"] = _muscle_from_hit(hit)
+        sets = item.get("target_sets")
+        reps = item.get("target_reps")
+        if isinstance(sets, int) and sets > 0:
+            row["target_sets"] = sets
+            row["target_reps"] = str(reps).strip() if reps else row.get("target_reps")
+            row["sets_from_transcript"] = True
+        elif isinstance(sets, str) and sets.isdigit():
+            row["target_sets"] = int(sets)
+            row["target_reps"] = str(reps).strip() if reps else row.get("target_reps")
+            row["sets_from_transcript"] = True
+        cues_in = item.get("cues") if isinstance(item.get("cues"), list) else []
+        mistakes_in = item.get("mistakes") if isinstance(item.get("mistakes"), list) else []
+        cues: list[dict[str, Any]] = []
+        for c in cues_in[:3]:
+            if isinstance(c, dict) and str(c.get("text") or "").strip():
+                cues.append(
+                    {
+                        "text": str(c.get("text")).strip()[:80],
+                        "source_at": float(c.get("source_at") or spoken_at),
+                    }
+                )
+            elif isinstance(c, str) and c.strip():
+                cues.append({"text": c.strip()[:80], "source_at": spoken_at})
+        mistakes: list[dict[str, Any]] = []
+        for c in mistakes_in[:3]:
+            if isinstance(c, dict) and str(c.get("text") or "").strip():
+                mistakes.append(
+                    {
+                        "text": str(c.get("text")).strip()[:80],
+                        "source_at": float(c.get("source_at") or spoken_at),
+                    }
+                )
+            elif isinstance(c, str) and c.strip():
+                mistakes.append({"text": c.strip()[:80], "source_at": spoken_at})
+        if cues:
+            row["cues"] = cues
+        if mistakes:
+            row["mistakes"] = mistakes
+        row["tempo"] = str(item.get("tempo") or "")[:60]
+        row["intensity"] = str(item.get("intensity") or "")[:60]
+        return row
+
+    # 1) DeepSeek / 兼容 LLM（分块 + 词表 + 多块结构）
+    llm_raw = _llm_extract_plan(transcript, task, session)
     if llm_raw:
-        exercises: list[dict[str, Any]] = []
-        for i, item in enumerate(llm_raw.get("exercises") or []):
-            if not isinstance(item, dict):
+        out_blocks: list[dict[str, Any]] = []
+        seq = 0
+        for block in llm_raw.get("blocks") or []:
+            if not isinstance(block, dict):
                 continue
-            spoken = str(item.get("spoken_name") or "").strip()
-            if not spoken:
-                continue
-            spoken_at = float(item.get("spoken_at") or 0)
-            snip = {
-                "start": round(max(0.0, spoken_at - 1.0), 2),
-                "end": round(spoken_at + 5.0, 2),
-                "spoken_at": round(spoken_at, 2),
-            }
-            # 若字幕里能对准动作名，用更准的 spoken_at
-            aligned = _snippet_for_name(segments, spoken) if segments else None
-            if aligned and abs(float(aligned.get("spoken_at") or 0) - spoken_at) < 45:
-                snip = aligned
-            hit = _match_exercise(session, spoken)
-            role = str(item.get("role") or "main")
-            if role not in ("main", "assist", "isolation", "warmup"):
-                role = "main"
-            row = _exercise_draft_row(
-                i=i,
-                spoken=spoken,
-                hit=hit,
-                snip=snip,
-                segments=segments,
-                role=role,
-                attach_demo=not bool(hit and hit.get("has_demo")),
-                source_kind="spoken",
-            )
-            muscle = str(item.get("target_muscle") or "").strip()
-            if muscle in _KNOWN_MUSCLES:
-                row["target_muscle"] = muscle
-            elif hit:
-                row["target_muscle"] = _muscle_from_hit(hit)
-            sets = item.get("target_sets")
-            reps = item.get("target_reps")
-            if isinstance(sets, int) and sets > 0:
-                row["target_sets"] = sets
-                row["target_reps"] = str(reps).strip() if reps else row.get("target_reps")
-                row["sets_from_transcript"] = True
-            elif isinstance(sets, str) and sets.isdigit():
-                row["target_sets"] = int(sets)
-                row["target_reps"] = str(reps).strip() if reps else row.get("target_reps")
-                row["sets_from_transcript"] = True
-            cues_in = item.get("cues") if isinstance(item.get("cues"), list) else []
-            mistakes_in = item.get("mistakes") if isinstance(item.get("mistakes"), list) else []
-            cues: list[dict[str, Any]] = []
-            for c in cues_in[:3]:
-                if isinstance(c, dict) and str(c.get("text") or "").strip():
-                    cues.append(
-                        {
-                            "text": str(c.get("text")).strip()[:80],
-                            "source_at": float(c.get("source_at") or spoken_at),
-                        }
-                    )
-                elif isinstance(c, str) and c.strip():
-                    cues.append({"text": c.strip()[:80], "source_at": spoken_at})
-            mistakes: list[dict[str, Any]] = []
-            for c in mistakes_in[:3]:
-                if isinstance(c, dict) and str(c.get("text") or "").strip():
-                    mistakes.append(
-                        {
-                            "text": str(c.get("text")).strip()[:80],
-                            "source_at": float(c.get("source_at") or spoken_at),
-                        }
-                    )
-                elif isinstance(c, str) and c.strip():
-                    mistakes.append({"text": c.strip()[:80], "source_at": spoken_at})
-            if cues:
-                row["cues"] = cues
-            if mistakes:
-                row["mistakes"] = mistakes
-            row["tempo"] = str(item.get("tempo") or "")[:60]
-            row["intensity"] = str(item.get("intensity") or "")[:60]
-            exercises.append(row)
-        if exercises:
+            rows: list[dict[str, Any]] = []
+            for item in block.get("exercises") or []:
+                if not isinstance(item, dict):
+                    continue
+                row = _row_from_item(item, seq)
+                if row:
+                    rows.append(row)
+                    seq += 1
+            if rows:
+                out_blocks.append(
+                    {
+                        "block_title": str(block.get("block_title") or "").strip(),
+                        "target_muscle": str(block.get("target_muscle") or "").strip(),
+                        "exercises": rows,
+                    }
+                )
+        if out_blocks:
             return _build_draft(
                 task,
-                exercises,
+                out_blocks,
                 title=str(llm_raw.get("plan_title") or "").strip() or None,
-                block_title=str(llm_raw.get("block_title") or "").strip() or None,
-                muscle=str(llm_raw.get("target_muscle") or "").strip() or None,
                 parse_engine="llm",
             )
 
@@ -1254,7 +1530,8 @@ def _parse_and_score(
     if mentions:
         for i, name in enumerate(mentions[:12]):
             snip = _snippet_for_name(segments, name)
-            hit = _match_exercise(session, name)
+            matched = _match_exercise(session, name)
+            hit = matched.get("hit")
             exercises.append(
                 _exercise_draft_row(
                     i=i,
@@ -1264,6 +1541,8 @@ def _parse_and_score(
                     segments=segments,
                     role="main" if i < 2 else ("assist" if i < 4 else "isolation"),
                     attach_demo=not bool(hit and hit.get("has_demo")),
+                    candidates=list(matched.get("candidates") or []),
+                    match_score=int(matched.get("match_score") or 0),
                 )
             )
     elif text:
@@ -1300,10 +1579,8 @@ def _parse_and_score(
 
     return _build_draft(
         task,
-        exercises,
+        [{"block_title": "", "target_muscle": "", "exercises": exercises}],
         title=None,
-        block_title=None,
-        muscle=None,
         parse_engine="heuristic",
     )
 
@@ -1335,8 +1612,15 @@ def _exercise_draft_row(
     attach_demo: bool,
     conf: float | None = None,
     source_kind: str = "spoken",
+    candidates: list[dict[str, Any]] | None = None,
+    match_score: int | None = None,
 ) -> dict[str, Any]:
-    confidence = float(conf if conf is not None else (hit["confidence"] if hit else 0.0))
+    score = int(
+        match_score
+        if match_score is not None
+        else (hit.get("score") if hit and hit.get("score") is not None else round(float(conf if conf is not None else (hit["confidence"] if hit else 0.0)) * 100))
+    )
+    confidence = score / 100.0
     spoken_at = float(snip.get("spoken_at") or snip.get("start") or 0)
     nearby = _nearby_lines(segments, spoken_at)
     cues = [
@@ -1350,6 +1634,7 @@ def _exercise_draft_row(
         if any(k in n["text"] for k in ("别", "不要", "错误", "避免", "翻", "打开太多"))
     ][:2]
     media_status = "library" if hit and hit.get("has_demo") else ("pending_sku" if not hit else "uncut")
+    cands = list(candidates or [])
     return {
         "id": f"row-{i}",
         "spoken_name": spoken,
@@ -1362,7 +1647,9 @@ def _exercise_draft_row(
         "target_reps": None,
         "sets_from_transcript": False,
         "source_kind": source_kind,
+        "match_score": score,
         "match_confidence": confidence,
+        "candidates": cands,
         "snippet": {
             "start": float(snip.get("start") or 0),
             "end": float(snip.get("end") or 5),
@@ -1377,6 +1664,9 @@ def _exercise_draft_row(
         "traffic": "red",
         "replace_demo": False,
         "attach_demo": attach_demo,
+        "cue_mode": "replace",
+        "cues_library_backup": None,
+        "cue_pairs": None,
     }
 
 
@@ -1399,40 +1689,17 @@ def _snippet_for_name(segments: list[dict[str, Any]], name: str) -> dict[str, fl
     return {"start": 0.0, "end": 5.0, "spoken_at": 0.0}
 
 
-def _match_exercise(session: Session, spoken: str) -> dict[str, Any] | None:
-    name = canonicalize_exercise(spoken)
-    ex = session.exec(select(Exercise).where(Exercise.name_zh == name)).first()
-    if not ex:
-        # 别名
-        alias = session.exec(select(ExerciseAlias).where(ExerciseAlias.alias == name)).first()
-        if alias:
-            ex = session.get(Exercise, alias.exercise_id)
-    if not ex:
-        # 模糊：包含
-        rows = session.exec(
-            select(Exercise).where(col(Exercise.name_zh).contains(spoken[:4])).limit(5)  # type: ignore[arg-type]
-        ).all()
-        ex = rows[0] if rows else None
-    if not ex:
-        return None
-    has_demo = bool(
-        session.exec(
-            select(ExerciseMedia).where(
-                ExerciseMedia.exercise_id == ex.id,
-                ExerciseMedia.role == "demo",
-                ExerciseMedia.status == "published",
-            )
-        ).first()
-    )
-    conf = 0.95 if ex.name_zh == name else 0.8
-    return {
-        "id": ex.id,
-        "name_zh": ex.name_zh,
-        "muscle": ex.muscle,
-        "gear": ex.gear,
-        "confidence": conf,
-        "has_demo": has_demo,
-    }
+def _match_exercise(
+    session: Session,
+    spoken: str,
+    *,
+    muscle_hint: str | None = None,
+) -> dict[str, Any]:
+    """百分制候选匹配。返回 {hit, candidates, match_score, ambiguous}。
+
+    含糊口播不自动绑；≥90 才预填 hit。旧调用只取 hit 时用 .get("hit")。
+    """
+    return resolve_spoken_match(session, spoken, muscle_hint=muscle_hint, limit=3)
 
 
 def preview_clip(
@@ -1469,24 +1736,37 @@ def quick_create_exercise(
     start: float | None = None,
     end: float | None = None,
     attach_demo: bool = True,
+    cues: list[Any] | None = None,
+    mistakes: list[Any] | None = None,
+    instructions: list[Any] | None = None,
+    write_cues: bool = False,
 ) -> dict[str, Any]:
     from app.services import admin_editor
 
     name = (spoken_name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="动作名不能为空")
-    created = admin_editor.create_exercise(
-        session,
-        {
-            "name_zh": name,
-            "muscle": muscle or "全身",
-            "gear": gear or "器械",
-            "modality": "抗阻",
-            "aliases": [name],
-            "coach_core": False,
-            "needs_review": False,
-        },
-    )
+    payload: dict[str, Any] = {
+        "name_zh": name,
+        "muscle": muscle or "全身",
+        "gear": gear or "器械",
+        "modality": "抗阻" if role != "warmup" else "灵活性",
+        "aliases": [name],
+        "coach_core": False,
+        "needs_review": False,
+    }
+    # 新建时可顺带写入要领；默认仍不写（仅本次），由 write_cues / 发布时 cue_mode 决定
+    if write_cues:
+        cue_texts = _line_texts(cues)
+        mistake_texts = _line_texts(mistakes)
+        instr = _line_texts(instructions) or cue_texts[:4]
+        if cue_texts:
+            payload["cues_zh"] = cue_texts
+        if mistake_texts:
+            payload["common_mistakes_zh"] = mistake_texts
+        if instr:
+            payload["instructions_zh"] = instr
+    created = admin_editor.create_exercise(session, payload)
     ex_id = created["id"]
     # 槽位角色
     ex = session.get(Exercise, ex_id)
@@ -1563,8 +1843,7 @@ def _attach_demo_media(
         ex.image_start = cover_url
         ex.updated_at = utcnow()
         session.add(ex)
-    # 把工坊 LLM 要点同步进 SKU（H5「动作要领 / 发力提示」）
-    _sync_sku_text_from_draft(session, task, exercise_id)
+    # 示范只写媒体；要领走抽屉写入
     session.commit()
     return {"demo_url": demo_url, "cover_url": cover_url}
 
@@ -1596,38 +1875,439 @@ def _line_texts(items: Any, *, limit: int = 6) -> list[str]:
     return out
 
 
-def _sync_sku_text_from_draft(
-    session: Session, task: StudioTask, exercise_id: str
-) -> dict[str, Any]:
-    """工坊草稿里的 cues/mistakes → Exercise.cues_zh / common_mistakes_zh / instructions_zh。
+def _merge_unique(old: list[Any], new: list[str], *, limit: int = 8) -> list[str]:
+    out: list[str] = []
+    for x in list(old or []) + list(new or []):
+        t = str(x or "").strip()
+        if t and t not in out:
+            out.append(t[:120])
+        if len(out) >= limit:
+            break
+    return out
 
-    以前只把示范媒体写进 SKU，LLM 要点留在草稿，SKU/H5 一直「暂无教案」。
+
+def _sync_sku_text_from_draft(
+    session: Session,
+    task: StudioTask,
+    exercise_id: str,
+    *,
+    mode: str = "replace",
+    row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按 cue_mode 把草稿要领写入动作库。
+
+    - none：不动库
+    - append：去重合并
+    - replace：先把旧值备份进草稿 cues_library_backup，再覆盖
     """
+    mode = (mode or "none").strip().lower()
+    if mode not in ("append", "replace"):
+        return {"ok": False, "reason": "cue_mode_none"}
+    draft_row = row or _draft_row_for_exercise(task, exercise_id)
+    ex = session.get(Exercise, exercise_id)
+    if not draft_row or not ex:
+        return {"ok": False, "reason": "no_draft_row"}
+
+    cues = _line_texts(draft_row.get("cues"))
+    mistakes = _line_texts(draft_row.get("mistakes"))
+    if not cues and not mistakes:
+        return {"ok": False, "reason": "empty_cues"}
+
+    backup = {
+        "cues_zh": list(ex.cues_zh or []),
+        "common_mistakes_zh": list(ex.common_mistakes_zh or []),
+        "instructions_zh": list(ex.instructions_zh or []),
+    }
+    if mode == "replace":
+        draft_row["cues_library_backup"] = backup
+        if cues:
+            ex.cues_zh = cues
+            ex.instructions_zh = cues[:4] if not (ex.instructions_zh or []) else list(ex.instructions_zh or [])
+            # 替换模式下教案也跟视频版走（有 cues 时）
+            ex.instructions_zh = cues[:4]
+        if mistakes:
+            ex.common_mistakes_zh = mistakes
+    else:  # append
+        if cues:
+            ex.cues_zh = _merge_unique(ex.cues_zh or [], cues)
+            if not (ex.instructions_zh or []):
+                ex.instructions_zh = cues[:4]
+            else:
+                ex.instructions_zh = _merge_unique(ex.instructions_zh or [], cues, limit=8)
+        if mistakes:
+            ex.common_mistakes_zh = _merge_unique(ex.common_mistakes_zh or [], mistakes)
+
+    ex.updated_at = utcnow()
+    session.add(ex)
+    return {
+        "ok": True,
+        "mode": mode,
+        "cues": list(ex.cues_zh or []),
+        "mistakes": list(ex.common_mistakes_zh or []),
+        "instructions": list(ex.instructions_zh or [])[:4],
+        "backup": backup if mode == "replace" else None,
+    }
+
+
+def restore_sku_cues_from_backup(
+    session: Session, *, task_id: int, exercise_id: str
+) -> dict[str, Any]:
+    """保留后端能力；产品方案 A 不做还原入口，前端勿调用。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
     row = _draft_row_for_exercise(task, exercise_id)
     ex = session.get(Exercise, exercise_id)
     if not row or not ex:
-        return {"ok": False, "reason": "no_draft_row"}
+        raise HTTPException(status_code=404, detail="动作或草稿行不存在")
+    backup = row.get("cues_library_backup")
+    if not isinstance(backup, dict):
+        raise HTTPException(status_code=400, detail="没有可还原的备份（需先做过替换写库）")
+    ex.cues_zh = list(backup.get("cues_zh") or [])
+    ex.common_mistakes_zh = list(backup.get("common_mistakes_zh") or [])
+    ex.instructions_zh = list(backup.get("instructions_zh") or [])
+    ex.updated_at = utcnow()
+    session.add(ex)
+    session.commit()
+    return {"ok": True, "exercise_id": exercise_id, "restored": backup}
 
-    cues = _line_texts(row.get("cues"))
-    mistakes = _line_texts(row.get("mistakes"))
-    changed = False
-    if cues:
-        ex.cues_zh = cues
-        # H5「动作要领」读 instructions；工坊 LLM 通常只给 cues → 空教案时用 cues 填
-        if not (ex.instructions_zh or []):
-            ex.instructions_zh = cues[:4]
-        changed = True
-    if mistakes:
-        ex.common_mistakes_zh = mistakes
-        changed = True
-    if changed:
-        ex.updated_at = utcnow()
-        session.add(ex)
+
+_CUE_PAIR_SYSTEM = """你是健身教案编辑。把「库内要领」与「本次视频抽出的要领」逐条配对。
+规则：
+1. 同一要点用 relation=replace，library_cue 填旧句、draft_cue 填视频句。
+2. 库里没有的视频要点用 relation=add，library_cue=null。
+3. 视频没提到、应保留的旧要点用 relation=keep，draft_cue=null。
+4. 禁止编造原文没有的句子；reason 一句话。
+只输出 JSON：
+{"pairs":[{"library_cue":string|null,"draft_cue":string|null,"relation":"replace"|"add"|"keep","reason":string}],
+ "summary":{"replace":n,"add":n,"keep":n,"result_total":n}}"""
+
+
+def _aggregate_cues_draft(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """现网 cues + mistakes → 统一视图（不新建列）。"""
+    out: list[dict[str, Any]] = []
+    for kind, key in (("cue", "cues"), ("mistake", "mistakes")):
+        for item in row.get(key) or []:
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+                if not text:
+                    continue
+                out.append(
+                    {
+                        "text": text[:120],
+                        "timestamp": item.get("source_at"),
+                        "source_segment": item.get("source_at"),
+                        "kind": kind,
+                    }
+                )
+            elif str(item or "").strip():
+                out.append(
+                    {
+                        "text": str(item).strip()[:120],
+                        "timestamp": None,
+                        "source_segment": None,
+                        "kind": kind,
+                    }
+                )
+    return out
+
+
+def _fallback_cue_pairs(
+    library: list[str], draft: list[str]
+) -> dict[str, Any]:
+    """配对失败：两列平铺，处理列待判断（前端可改 relation）。"""
+    pairs: list[dict[str, Any]] = []
+    for t in library:
+        pairs.append(
+            {
+                "library_cue": t,
+                "draft_cue": None,
+                "relation": "keep",
+                "reason": "待判断",
+                "pending": True,
+            }
+        )
+    for t in draft:
+        pairs.append(
+            {
+                "library_cue": None,
+                "draft_cue": t,
+                "relation": "add",
+                "reason": "待判断",
+                "pending": True,
+            }
+        )
     return {
-        "ok": changed,
-        "cues": cues,
-        "mistakes": mistakes,
+        "pairs": pairs,
+        "summary": {
+            "replace": 0,
+            "add": len(draft),
+            "keep": len(library),
+            "result_total": len(library) + len(draft),
+        },
+        "degraded": True,
+        "engine": "fallback",
+    }
+
+
+def pair_studio_cues(
+    session: Session,
+    *,
+    task_id: int,
+    row_id: str,
+    exercise_id: str | None = None,
+) -> dict[str, Any]:
+    """LLM 逐条配对；超时 8s 或失败则降级人工表。"""
+    import asyncio
+
+    from app.brain.llm import MockLLM, TEMPERATURE_STRUCTURED, get_llm
+
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    row = None
+    for block in (task.draft_json or {}).get("blocks") or []:
+        for ex in block.get("exercises") or []:
+            if isinstance(ex, dict) and str(ex.get("id") or "") == str(row_id):
+                row = ex
+                break
+        if row:
+            break
+    if not row:
+        raise HTTPException(status_code=404, detail="草稿行不存在")
+
+    eid = str(exercise_id or row.get("exercise_id") or "")
+    ex = session.get(Exercise, eid) if eid else None
+    library = [str(x).strip() for x in (ex.cues_zh or []) if str(x).strip()] if ex else []
+    if ex:
+        for x in ex.common_mistakes_zh or []:
+            t = str(x).strip()
+            if t and t not in library:
+                library.append(t)
+    draft_view = _aggregate_cues_draft(row)
+    draft_texts = [d["text"] for d in draft_view]
+
+    if not library and draft_texts:
+        pairs = [
+            {
+                "library_cue": None,
+                "draft_cue": t,
+                "relation": "add",
+                "reason": "库内为空，整表新增",
+            }
+            for t in draft_texts
+        ]
+        result = {
+            "pairs": pairs,
+            "summary": {
+                "replace": 0,
+                "add": len(pairs),
+                "keep": 0,
+                "result_total": len(pairs),
+            },
+            "degraded": False,
+            "engine": "empty_library",
+        }
+    elif not draft_texts:
+        result = _fallback_cue_pairs(library, [])
+        result["engine"] = "empty_draft"
+        result["degraded"] = False
+    else:
+        llm = get_llm()
+        result = None
+        if not isinstance(llm, MockLLM):
+            user = (
+                "库内要领：\n"
+                + "\n".join(f"- {t}" for t in library)
+                + "\n\n本次视频要领：\n"
+                + "\n".join(f"- {t}" for t in draft_texts)
+            )
+            try:
+                raw = _run_coro(
+                    asyncio.wait_for(
+                        llm.complete_json(
+                            _CUE_PAIR_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED
+                        ),
+                        timeout=8.0,
+                    )
+                )
+                if isinstance(raw, dict) and isinstance(raw.get("pairs"), list):
+                    pairs = []
+                    for p in raw["pairs"]:
+                        if not isinstance(p, dict):
+                            continue
+                        rel = str(p.get("relation") or "add").strip().lower()
+                        if rel not in ("replace", "add", "keep"):
+                            rel = "add"
+                        pairs.append(
+                            {
+                                "library_cue": (str(p["library_cue"]).strip() if p.get("library_cue") else None),
+                                "draft_cue": (str(p["draft_cue"]).strip() if p.get("draft_cue") else None),
+                                "relation": rel,
+                                "reason": str(p.get("reason") or "")[:80],
+                            }
+                        )
+                    if pairs:
+                        summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+                        result = {
+                            "pairs": pairs,
+                            "summary": {
+                                "replace": int(summary.get("replace") or sum(1 for x in pairs if x["relation"] == "replace")),
+                                "add": int(summary.get("add") or sum(1 for x in pairs if x["relation"] == "add")),
+                                "keep": int(summary.get("keep") or sum(1 for x in pairs if x["relation"] == "keep")),
+                                "result_total": int(
+                                    summary.get("result_total")
+                                    or sum(1 for x in pairs if x["relation"] in ("replace", "add", "keep"))
+                                ),
+                            },
+                            "degraded": False,
+                            "engine": "llm",
+                        }
+            except Exception:
+                result = None
+        if result is None:
+            result = _fallback_cue_pairs(library, draft_texts)
+
+    # 写回草稿行 cue_pairs
+    draft = dict(task.draft_json or {})
+    for block in draft.get("blocks") or []:
+        for ex in block.get("exercises") or []:
+            if isinstance(ex, dict) and str(ex.get("id") or "") == str(row_id):
+                ex["cue_pairs"] = result
+                break
+    task.draft_json = draft
+    task.updated_at = utcnow()
+    session.add(task)
+    session.commit()
+    return {
+        "ok": True,
+        "row_id": row_id,
+        "exercise_id": eid or None,
+        "library": library,
+        "draft": draft_view,
+        **result,
+    }
+
+
+def write_studio_cues(
+    session: Session,
+    *,
+    task_id: int,
+    row_id: str,
+    cue_mode: str = "replace",
+    pairs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """抽屉「把要领写进库」：按配对结果 + cue_mode 落库。"""
+    mode = (cue_mode or "replace").strip().lower()
+    if mode == "none":
+        return {"ok": False, "reason": "cue_mode_none", "message": "已选不入库"}
+    if mode not in ("append", "replace"):
+        raise HTTPException(status_code=400, detail="cue_mode 只能是 none/append/replace")
+
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    row = None
+    for block in (task.draft_json or {}).get("blocks") or []:
+        for ex in block.get("exercises") or []:
+            if isinstance(ex, dict) and str(ex.get("id") or "") == str(row_id):
+                row = ex
+                break
+        if row:
+            break
+    if not row:
+        raise HTTPException(status_code=404, detail="草稿行不存在")
+    eid = str(row.get("exercise_id") or "")
+    if not eid:
+        raise HTTPException(status_code=400, detail="请先绑定动作再写要领")
+    ex = session.get(Exercise, eid)
+    if not ex:
+        raise HTTPException(status_code=404, detail="动作不存在")
+
+    pair_blob = pairs if isinstance(pairs, list) else None
+    if pair_blob is None:
+        stored = row.get("cue_pairs")
+        if isinstance(stored, dict):
+            pair_blob = list(stored.get("pairs") or [])
+        elif isinstance(stored, list):
+            pair_blob = stored
+    if not pair_blob:
+        # 无配对则退回旧同步逻辑
+        synced = _sync_sku_text_from_draft(session, task, eid, mode=mode, row=row)
+        if synced.get("backup"):
+            row["cues_library_backup"] = {
+                **synced["backup"],
+                "replaced_at": utcnow().isoformat(),
+                "source_task_id": task_id,
+            }
+        draft = dict(task.draft_json or {})
+        task.draft_json = draft
+        session.add(task)
+        session.commit()
+        return {"ok": bool(synced.get("ok")), **synced}
+
+    backup = {
+        "cues_zh": list(ex.cues_zh or []),
+        "common_mistakes_zh": list(ex.common_mistakes_zh or []),
+        "instructions_zh": list(ex.instructions_zh or []),
+        "replaced_at": utcnow().isoformat(),
+        "source_task_id": task_id,
+    }
+
+    if mode == "append":
+        added = [
+            str(p.get("draft_cue") or "").strip()
+            for p in pair_blob
+            if str(p.get("relation") or "") == "add" and p.get("draft_cue")
+        ]
+        ex.cues_zh = _merge_unique(ex.cues_zh or [], added)
+        if added and not (ex.instructions_zh or []):
+            ex.instructions_zh = added[:4]
+    else:  # replace：按配对表换掉 + 追加新增；keep 保留
+        next_cues: list[str] = []
+        for p in pair_blob:
+            rel = str(p.get("relation") or "").strip().lower()
+            lib = str(p.get("library_cue") or "").strip()
+            dr = str(p.get("draft_cue") or "").strip()
+            if rel == "replace" and dr:
+                if dr not in next_cues:
+                    next_cues.append(dr[:120])
+            elif rel == "keep" and lib:
+                if lib not in next_cues:
+                    next_cues.append(lib[:120])
+            elif rel == "add" and dr:
+                if dr not in next_cues:
+                    next_cues.append(dr[:120])
+        # 若配对里没 keep 旧项，仍保留未出现在 pairs 里的旧 cues？方案 A：只信配对表
+        if next_cues:
+            ex.cues_zh = next_cues[:8]
+            ex.instructions_zh = next_cues[:4]
+        row["cues_library_backup"] = backup
+
+    # mistakes：视频 mistakes 在 append/replace 时合并或覆盖
+    draft_mistakes = _line_texts(row.get("mistakes"))
+    if draft_mistakes:
+        if mode == "append":
+            ex.common_mistakes_zh = _merge_unique(ex.common_mistakes_zh or [], draft_mistakes)
+        else:
+            ex.common_mistakes_zh = draft_mistakes[:8]
+
+    ex.updated_at = utcnow()
+    session.add(ex)
+    row["cue_mode"] = mode
+    draft = dict(task.draft_json or {})
+    task.draft_json = draft
+    task.updated_at = utcnow()
+    session.add(task)
+    session.commit()
+    return {
+        "ok": True,
+        "mode": mode,
+        "exercise_id": eid,
+        "cues": list(ex.cues_zh or []),
+        "mistakes": list(ex.common_mistakes_zh or []),
         "instructions": list(ex.instructions_zh or [])[:4],
+        "backup": backup if mode == "replace" else None,
     }
 
 
@@ -1720,6 +2400,7 @@ def confirm_plan(
                     detail=f"动作「{ex.get('spoken_name') or ex.get('exercise_name') or '?'}」未绑定 SKU，请先一键新建或搜库换绑",
                 )
 
+    # 方案 A：要领只在抽屉显式写入，发布不再批量同步
     # 仅存动作素材：不建计划，只把勾选的示范写入动作库
     mode = str(data.get("mode") or task.mode or "")
     if mode == "exercise_only":
@@ -1733,11 +2414,18 @@ def confirm_plan(
                 en = float(snip.get("end") or (st + 5))
                 _attach_demo_media(session, task, str(ex["exercise_id"]), st, en)
                 attached += 1
+        data["blocks"] = blocks_in
+        task.draft_json = data
         task.result_ref = {"mode": "exercise_only", "attached": attached}
         task.updated_at = utcnow()
         session.add(task)
         session.commit()
-        return {"ok": True, "plan_id": None, "block_ids": [], "attached": attached}
+        return {
+            "ok": True,
+            "plan_id": None,
+            "block_ids": [],
+            "attached": attached,
+        }
 
     # 同 batch 合并：收集同 batch 其它 done 任务
     batch_tasks = [task]
@@ -1856,8 +2544,11 @@ def confirm_plan(
                 tpl.is_published = True
             session.add(tpl)
 
+    data["blocks"] = blocks_in
+    task.draft_json = data
     for t in batch_tasks:
         t.result_ref = {"plan_id": plan_id, "block_ids": created_block_ids}
+        t.draft_json = data if t.id == task.id else t.draft_json
         t.updated_at = utcnow()
         session.add(t)
 
