@@ -14,7 +14,20 @@ let loadingCount = 0;
 let loadingText = "处理中…";
 const listeners = new Set<Listener>();
 
+// 快照必须缓存同一个对象引用：useSyncExternalStore 用 Object.is 比较，
+// 每次返回新对象会被判定为"永远在变"，导致 React 无限重渲染（首页白屏）。
+let snapshot = {
+  toasts,
+  loading: loadingCount > 0,
+  loadingText,
+};
+
 function emit() {
+  snapshot = {
+    toasts,
+    loading: loadingCount > 0,
+    loadingText,
+  };
   listeners.forEach((fn) => fn());
 }
 
@@ -26,11 +39,7 @@ export function subscribeFeedback(listener: Listener) {
 }
 
 export function getFeedbackSnapshot() {
-  return {
-    toasts,
-    loading: loadingCount > 0,
-    loadingText,
-  };
+  return snapshot;
 }
 
 function pushToast(kind: ToastKind, text: string, ms = 1600) {

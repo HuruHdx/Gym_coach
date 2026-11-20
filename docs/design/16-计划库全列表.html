@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="1180"
+      style="width:390px;height:1180px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 1110px; background: #f4f3f8; position: relative; overflow: hidden; border-radius: 24px; margin: 20px auto 0; }
+  .caption { width: 390px; margin: 14px auto 0; text-align: center; font-size: 12.5px; font-weight: 800; color: #54506b; }
+  .caption small { display: block; font-size: 10.5px; color: #8e8ba3; font-weight: 500; margin-top: 4px; }
+
+  .wrap { padding: 0 20px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding-top: 20px; }
+  .nav-back { width: 32px; height: 32px; border-radius: 10px; background: #fff; border: 1px solid #ece9f2; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; }
+  .nav-title { font-size: 17px; font-weight: 800; }
+
+  /* 搜索 + 切换 */
+  .search { margin-top: 16px; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #ece9f2; border-radius: 13px; padding: 11px 13px; }
+  .search svg { width: 16px; height: 16px; stroke: #9b97ad; flex: none; }
+  .search-ph { font-size: 13px; color: #9b97ad; }
+  .seg { display: flex; background: #ece9f2; border-radius: 12px; padding: 4px; margin-top: 12px; }
+  .seg-item { flex: 1; text-align: center; font-size: 13px; font-weight: 700; color: #6f6a8c; padding: 8px 0; border-radius: 9px; }
+  .seg-item.on { background: #fff; color: #17161c; box-shadow: 0 1px 3px rgba(23,22,28,.10); }
+  .seg-item.later { position: relative; }
+  .seg-item.later::after { content: "后期"; position: absolute; top: 2px; right: 8px; font-size: 8px; color: #9b97ad; }
+
+  .chips { display: flex; gap: 8px; margin-top: 14px; overflow: hidden; }
+  .chip { flex: none; font-size: 11.5px; font-weight: 700; color: #383448; background: #fff; border: 1px solid #e8e5f0; border-radius: 10px; padding: 7px 12px; }
+  .chip.on { background: #17161c; color: #fff; border-color: #17161c; }
+
+  .sec-head { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 10px; }
+  .sec-title { font-size: 14px; font-weight: 800; }
+  .sec-more { font-size: 11.5px; font-weight: 700; color: #6b46e5; }
+
+  .grid { display: flex; gap: 10px; }
+  .card { flex: 1; height: 168px; border-radius: 18px; padding: 13px; position: relative; overflow: hidden; color: #fff;
+    background: linear-gradient(165deg, #342c46 0%, #17161c 72%); display: flex; flex-direction: column; }
+  .card.alt { background: linear-gradient(165deg, #3b2f54 0%, #1d1830 72%); }
+  .badge { align-self: flex-start; font-size: 9.5px; font-weight: 700; background: rgba(255,255,255,.16); border-radius: 6px; padding: 3px 8px; }
+  .card-title { font-size: 17px; font-weight: 800; margin-top: auto; letter-spacing: -.01em; }
+  .card-sub { font-size: 10px; color: rgba(255,255,255,.62); margin-top: 5px; }
+  .card-foot { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+  .foot-chip { font-size: 9px; font-weight: 700; color: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.22); border-radius: 5px; padding: 2px 6px; }
+</style>
+</head>
+<body style="width:390px;height:1180px;">
+<main data-canvas-root style="width:390px;height:1180px;">
+  <div class="screen">
+    <div class="wrap">
+      <div class="nav">
+        <div class="nav-back">‹</div>
+        <div class="nav-title">计划库</div>
+      </div>
+
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <div class="search-ph">搜索训练计划</div>
+      </div>
+
+      <div class="seg">
+        <div class="seg-item on">锻炼</div>
+        <div class="seg-item later">营养计划</div>
+      </div>
+
+      <div class="chips">
+        <div class="chip on">全部</div>
+        <div class="chip">三分化</div>
+        <div class="chip">四分化</div>
+        <div class="chip">女性专项</div>
+        <div class="chip">增肌</div>
+        <div class="chip">新手入门</div>
+      </div>
+
+      <div class="sec-head">
+        <div class="sec-title">热门计划</div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <span class="badge">三分化 · 男</span>
+          <div class="card-title">热门三分化</div>
+          <div class="card-sub">教练编排 · 增肌 · 进阶</div>
+          <div class="card-foot"><span class="foot-chip">胸</span><span class="foot-chip">肩</span><span class="foot-chip">三头</span><span class="foot-chip">每周 3 练</span></div>
+        </div>
+        <div class="card alt">
+          <span class="badge">四分化 · 男</span>
+          <div class="card-title">经典四分化</div>
+          <div class="card-sub">教练编排 · 力量 · 中级</div>
+          <div class="card-foot"><span class="foot-chip">背</span><span class="foot-chip">腿</span><span class="foot-chip">肩</span><span class="foot-chip">每周 4 练</span></div>
+        </div>
+      </div>
+
+      <div class="sec-head">
+        <div class="sec-title">女性专项</div>
+      </div>
+      <div class="grid">
+        <div class="card alt">
+          <span class="badge">女生 · 三分化</span>
+          <div class="card-title">女生三分化</div>
+          <div class="card-sub">教练编排 · 塑形 · 新手</div>
+          <div class="card-foot"><span class="foot-chip">胸</span><span class="foot-chip">背</span><span class="foot-chip">腿</span><span class="foot-chip">每周 3 练</span></div>
+        </div>
+        <div class="card">
+          <span class="badge">女生 · 四分化</span>
+          <div class="card-title">女生四分化</div>
+          <div class="card-sub">教练编排 · 增肌 · 中级</div>
+          <div class="card-foot"><span class="foot-chip">臀</span><span class="foot-chip">腿</span><span class="foot-chip">肩</span><span class="foot-chip">每周 4 练</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">计划库全列表 `/plans`<small>搜索 + 锻炼/营养计划切换（营养后期）+ 分类 chips（分化/性别/目标/水平）+ 分组封面网格</small></div>
+</main>
+</body>
+</html>
