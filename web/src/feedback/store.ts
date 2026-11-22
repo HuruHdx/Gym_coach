@@ -14,7 +14,24 @@ let loadingCount = 0;
 let loadingText = "处理中…";
 const listeners = new Set<Listener>();
 
+type FeedbackSnapshot = {
+  toasts: ToastItem[];
+  loading: boolean;
+  loadingText: string;
+};
+
+let snapshot: FeedbackSnapshot = {
+  toasts,
+  loading: false,
+  loadingText,
+};
+
 function emit() {
+  snapshot = {
+    toasts,
+    loading: loadingCount > 0,
+    loadingText,
+  };
   listeners.forEach((fn) => fn());
 }
 
@@ -26,11 +43,7 @@ export function subscribeFeedback(listener: Listener) {
 }
 
 export function getFeedbackSnapshot() {
-  return {
-    toasts,
-    loading: loadingCount > 0,
-    loadingText,
-  };
+  return snapshot;
 }
 
 function pushToast(kind: ToastKind, text: string, ms = 1600) {
