@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from app.models import Exercise, ExerciseAlias, ExerciseMedia
@@ -50,6 +51,7 @@ _VARIANTS = (
     "平板",
     "平卧",
     "窄握",
+    "窄距",
     "宽握",
     "单臂",
     "单腿",
@@ -114,6 +116,46 @@ _SCORE_CORE = 55
 _SCORE_CONTAINS = 40
 _AUTO_BIND_MIN = 90
 _SUGGEST_MIN = 55
+
+# 字幕错字：同音，以及平翘舌（z/zh）听混。只在整名等长、逐字能对上、且库里唯一时才改。
+_ASR_SOUND = (
+    "剧距",
+    "做坐",
+    "滑划",
+    "传船",
+    "价架",
+    "载窄",
+    "元圆",
+)
+
+
+def _asr_same(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    return any(a in group and b in group for group in _ASR_SOUND)
+
+
+def suggest_asr_repair(spoken: str, catalog_names: list[str]) -> str | None:
+    """口播整名对不上库时，用同音/平翘舌找唯一标准名。对不上或有多个就不改。"""
+    norm = normalize_spoken_name(spoken)
+    if len(norm) < 2:
+        return None
+    catalog = []
+    for name in catalog_names:
+        n = normalize_spoken_name(name or "")
+        if n:
+            catalog.append(n)
+    if norm in catalog:
+        return None
+    hits: list[str] = []
+    for name in dict.fromkeys(catalog):
+        if len(name) != len(norm):
+            continue
+        if all(_asr_same(x, y) for x, y in zip(norm, name)):
+            hits.append(name)
+    if len(hits) == 1:
+        return hits[0]
+    return None
 
 
 def normalize_spoken_name(name: str) -> str:
@@ -322,6 +364,33 @@ def match_spoken_candidates(
         ex = item["ex"]
         out.append(_pack(ex, item["score"], item["reason"], has_demo=_has_demo(session, ex.id)))
     return out
+
+
+def repair_spoken_name(session: Session, spoken: str) -> str | None:
+    """库里没有这个原词时，按同音错字改成唯一的标准名。"""
+    norm = normalize_spoken_name(spoken)
+    if len(norm) < 2:
+        return None
+    exact = session.exec(
+        select(Exercise).where(
+            Exercise.name_zh == norm,  # type: ignore[arg-type]
+            Exercise.is_valid_exercise.is_(True),  # type: ignore[arg-type]
+        )
+    ).first()
+    if exact:
+        return None
+    parts = decompose_spoken_name(norm)
+    core = parts.get("core") or ""
+    if len(core) < 2:
+        return None
+    rows = session.exec(
+        select(Exercise).where(
+            Exercise.is_valid_exercise.is_(True),  # type: ignore[arg-type]
+            col(Exercise.name_zh).contains(core),  # type: ignore[arg-type]
+            func.char_length(Exercise.name_zh) == len(norm),
+        )
+    ).all()
+    return suggest_asr_repair(norm, [r.name_zh or "" for r in rows])
 
 
 def resolve_spoken_match(

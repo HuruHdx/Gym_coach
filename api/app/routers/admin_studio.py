@@ -201,6 +201,16 @@ def retranscribe(
     return studio_service.retranscribe(session, task_id)
 
 
+@router.post("/tasks/{task_id}/skip-transcribe")
+def skip_transcribe(
+    task_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    """长视频转写卡住：跳过字幕进工作台，改手填。"""
+    return studio_service.skip_transcribe(session, task_id)
+
+
 @router.post("/tasks/{task_id}/reparse")
 def reparse(
     task_id: int,

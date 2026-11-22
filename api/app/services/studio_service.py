@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import shutil
@@ -32,7 +33,7 @@ from app.models import (
 )
 from app.services.media_clip import ffmpeg_available, make_demo_pair
 from app.services.storage import save_public_asset
-from app.exercise_match import resolve_spoken_match
+from app.exercise_match import repair_spoken_name, resolve_spoken_match
 from app.taxonomy import canonicalize_exercise
 
 _API_ROOT = Path(__file__).resolve().parents[2]
@@ -204,12 +205,50 @@ def studio_deps() -> dict[str, Any]:
     }
 
 
-def _task_out(task: StudioTask) -> dict[str, Any]:
+def _hydrate_demo_covers(draft: dict[str, Any], session: Session | None) -> dict[str, Any]:
+    """clipped 但缺 demo_cover_url 时，用 SKU image_start 回填（旧草稿兼容）。"""
+    if not session or not isinstance(draft, dict):
+        return draft
+    need_ids: list[str] = []
+    for block in draft.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        for ex in block.get("exercises") or []:
+            if not isinstance(ex, dict):
+                continue
+            if (ex.get("media_status") != "clipped") or ex.get("demo_cover_url"):
+                continue
+            eid = str(ex.get("exercise_id") or "").strip()
+            if eid:
+                need_ids.append(eid)
+    if not need_ids:
+        return draft
+    rows = session.exec(select(Exercise).where(col(Exercise.id).in_(list(set(need_ids))))).all()
+    by_id = {str(r.id): r for r in rows}
+    changed = False
+    for block in draft.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        for ex in block.get("exercises") or []:
+            if not isinstance(ex, dict):
+                continue
+            if (ex.get("media_status") != "clipped") or ex.get("demo_cover_url"):
+                continue
+            sku = by_id.get(str(ex.get("exercise_id") or ""))
+            if sku and sku.image_start:
+                ex["demo_cover_url"] = sku.image_start
+                changed = True
+    return draft if changed else draft
+
+
+def _task_out(task: StudioTask, session: Session | None = None) -> dict[str, Any]:
     play_url = None
     if task.stored_path:
         p = task.stored_path.replace("\\", "/")
         play_url = p if p.startswith(("http://", "https://", "/static/")) else f"/static/{p}"
     draft = task.draft_json or {}
+    if isinstance(draft, dict):
+        draft = _hydrate_demo_covers(dict(draft), session)
     exercises = []
     if isinstance(draft, dict):
         for b in draft.get("blocks") or []:
@@ -247,6 +286,7 @@ def list_tasks(session: Session, *, limit: int = 50) -> dict[str, Any]:
             select(StudioTask).order_by(col(StudioTask.id).desc()).limit(max(1, min(200, limit)))
         ).all()
     )
+    # 列表不回填封面（省查询）；详情 get_task 才会 hydrate
     return {"items": [_task_out(t) for t in rows], "total": len(rows)}
 
 
@@ -254,7 +294,7 @@ def get_task(session: Session, task_id: int) -> dict[str, Any]:
     task = session.get(StudioTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return _task_out(task)
+    return _task_out(task, session)
 
 
 def ingest_batch(
@@ -436,6 +476,51 @@ def retranscribe(session: Session, task_id: int) -> dict[str, Any]:
     return get_task(session, task_id)
 
 
+def skip_transcribe(session: Session, task_id: int) -> dict[str, Any]:
+    """长视频转写卡住时：作废当前流水线，空字幕进工作台，改手填动作。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not _abs_video(task):
+        raise HTTPException(status_code=400, detail="还没有本地视频，请先下载或补传")
+    # 作废可能还在跑的旧线程
+    _bump_pipeline_run(session, task_id)
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    draft = task.draft_json if isinstance(task.draft_json, dict) else {}
+    if not (draft.get("blocks") or []):
+        draft = {
+            **draft,
+            "blocks": [
+                {
+                    "title": draft.get("plan_title") or "手动板块",
+                    "muscles": [],
+                    "exercises": [],
+                }
+            ],
+        }
+    _touch(
+        task,
+        status="done",
+        progress=100,
+        error=None,
+        draft_json=draft,
+        score={"red_count": 0, "amber_count": 0, "green_count": 0, "total": 0},
+        review_state="needs_review",
+        transcript_json={
+            "engine": "skipped",
+            "warning": "已跳过自动字幕（长视频转写太慢或卡住）。请在右栏手填动作，或稍后点「重跑字幕」。",
+            "segments": [],
+            "text": "",
+        },
+    )
+    _set_live(task, stage="done", percent=100, detail="已跳过字幕")
+    session.add(task)
+    session.commit()
+    return get_task(session, task_id)
+
+
 def attach_demo_now(
     session: Session,
     *,
@@ -460,6 +545,32 @@ def attach_demo_now(
     if not meta:
         raise HTTPException(status_code=400, detail="切片失败：本地视频不存在或 ffmpeg 出错")
     # 方案 A：立刻出库示范只写媒体；要领只在抽屉点「写进库」
+    # 封面/示范 URL 写回草稿，刷新后「本次产出」还能出缩略图
+    draft = dict(task.draft_json or {}) if isinstance(task.draft_json, dict) else {}
+    blocks = list(draft.get("blocks") or [])
+    changed = False
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        for ex in block.get("exercises") or []:
+            if not isinstance(ex, dict):
+                continue
+            if str(ex.get("exercise_id") or "") != str(exercise_id):
+                continue
+            snip = dict(ex.get("snippet") or {})
+            snip["start"] = float(start)
+            snip["end"] = float(end)
+            ex["snippet"] = snip
+            ex["media_status"] = "clipped"
+            ex["attach_demo"] = True
+            ex["demo_url"] = meta.get("demo_url")
+            ex["demo_cover_url"] = meta.get("cover_url")
+            changed = True
+    if changed:
+        draft["blocks"] = blocks
+        task.draft_json = draft
+        task.updated_at = utcnow()
+        session.add(task)
     session.commit()
     return {
         "ok": True,
@@ -553,34 +664,67 @@ def replace_source(
     return get_task(session, task_id)
 
 
+def _bump_pipeline_run(session: Session, task_id: int) -> int:
+    """每次启动流水线递增 run_id；旧线程发现对不上就自行退出，避免重跑叠跑。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        return 0
+    ref = dict(task.result_ref or {})
+    run_id = int(ref.get("pipeline_run") or 0) + 1
+    ref["pipeline_run"] = run_id
+    task.result_ref = ref
+    session.add(task)
+    session.commit()
+    return run_id
+
+
+def _pipeline_run_of(task: StudioTask | None) -> int:
+    if not task or not isinstance(task.result_ref, dict):
+        return 0
+    return int(task.result_ref.get("pipeline_run") or 0)
+
+
+def _pipeline_still_current(session: Session, task_id: int, run_id: int) -> bool:
+    task = session.get(StudioTask, task_id)
+    return bool(task) and _pipeline_run_of(task) == run_id
+
+
 def _spawn_pipeline(task_id: int) -> None:
-    t = threading.Thread(target=_run_pipeline_safe, args=(task_id,), daemon=True)
+    from app.db import engine
+
+    with Session(engine) as session:
+        run_id = _bump_pipeline_run(session, task_id)
+    t = threading.Thread(target=_run_pipeline_safe, args=(task_id, run_id), daemon=True)
     t.start()
 
 
-def _run_pipeline_safe(task_id: int) -> None:
+def _run_pipeline_safe(task_id: int, run_id: int = 0) -> None:
     from app.db import engine
 
     try:
         with Session(engine) as session:
-            _run_pipeline(session, task_id)
+            _run_pipeline(session, task_id, run_id=run_id)
     except Exception as e:  # noqa: BLE001
         with Session(engine) as session:
             task = session.get(StudioTask, task_id)
-            if task:
-                # 本地视频还在 → 多半是转字幕挂了，别伪装成「抓不到」
-                has_video = bool(_abs_video(task))
-                msg = str(e)[:500]
-                if has_video and "metadata_errors" in msg:
-                    msg = (
-                        "转字幕失败：faster-whisper 与本机 PyAV 版本不兼容（metadata_errors）。"
-                        "已修复兼容层，请点「重跑字幕」。"
-                    )
-                elif has_video:
-                    msg = f"转字幕/拆计划失败：{msg}"
-                _touch(task, status="failed", error=msg, progress=100)
-                session.add(task)
-                session.commit()
+            if not task:
+                return
+            # 已被更新一轮流水线取代 → 旧线程异常直接丢弃
+            if run_id and _pipeline_run_of(task) != run_id:
+                return
+            # 本地视频还在 → 多半是转字幕挂了，别伪装成「抓不到」
+            has_video = bool(_abs_video(task))
+            msg = str(e)[:500]
+            if has_video and "metadata_errors" in msg:
+                msg = (
+                    "转字幕失败：faster-whisper 与本机 PyAV 版本不兼容（metadata_errors）。"
+                    "已修复兼容层，请点「重跑字幕」。"
+                )
+            elif has_video:
+                msg = f"转字幕/拆计划失败：{msg}"
+            _touch(task, status="failed", error=msg, progress=100)
+            session.add(task)
+            session.commit()
 
 
 def _abs_video(task: StudioTask) -> Path | None:
@@ -595,9 +739,11 @@ def _abs_video(task: StudioTask) -> Path | None:
     return cand if cand.exists() else None
 
 
-def _run_pipeline(session: Session, task_id: int) -> None:
+def _run_pipeline(session: Session, task_id: int, run_id: int = 0) -> None:
     task = session.get(StudioTask, task_id)
     if not task:
+        return
+    if run_id and _pipeline_run_of(task) != run_id:
         return
 
     # 1) download
@@ -608,6 +754,8 @@ def _run_pipeline(session: Session, task_id: int) -> None:
         session.commit()
 
         def _on_download(meta: dict[str, Any]) -> None:
+            if not _pipeline_still_current(session, task_id, run_id):
+                return
             fresh = session.get(StudioTask, task_id)
             if not fresh:
                 return
@@ -618,6 +766,8 @@ def _run_pipeline(session: Session, task_id: int) -> None:
             session.commit()
 
         ok, err = _download_url(task, on_progress=_on_download)
+        if not _pipeline_still_current(session, task_id, run_id):
+            return
         session.refresh(task)
         if not ok:
             _touch(task, status="needs_manual_upload", progress=20, error=err)
@@ -642,21 +792,39 @@ def _run_pipeline(session: Session, task_id: int) -> None:
         session.commit()
         return
 
-    # 2) transcribe
+    # 2) transcribe（长视频会跑很久：进度必须随片段推进，不能钉死在 40%）
     _touch(task, status="transcribing", progress=40)
-    _set_live(task, stage="transcribing", percent=40)
+    _set_live(task, stage="transcribing", percent=40, detail="准备转写…")
     session.add(task)
     session.commit()
-    transcript = _transcribe(video)
+
+    def _on_transcribe(meta: dict[str, Any]) -> None:
+        if not _pipeline_still_current(session, task_id, run_id):
+            return
+        fresh = session.get(StudioTask, task_id)
+        if not fresh:
+            return
+        pct = int(meta.get("percent") or 40)
+        fresh.progress = max(40, min(72, pct))
+        _set_live(fresh, **meta)
+        session.add(fresh)
+        session.commit()
+
+    transcript = _transcribe(video, on_progress=_on_transcribe)
+    if not _pipeline_still_current(session, task_id, run_id):
+        return
+    task = session.get(StudioTask, task_id) or task
     task.transcript_json = transcript
-    task.progress = 65
+    task.progress = 72
 
     # 3) parse + score
     _touch(task, status="parsing", progress=75)
-    _set_live(task, stage="parsing", percent=75)
+    _set_live(task, stage="parsing", percent=75, detail="拆动作清单…")
     session.add(task)
     session.commit()
     draft, score = _parse_and_score(session, task, transcript)
+    if not _pipeline_still_current(session, task_id, run_id):
+        return
     if task.draft_json and isinstance(task.draft_json, dict):
         # 保留 ingest 时的 plan_title
         title = (task.draft_json or {}).get("plan_title")
@@ -982,11 +1150,92 @@ def _patch_av_open_compat() -> None:
     av.open = _open  # type: ignore[assignment]
 
 
-def _transcribe(video: Path) -> dict[str, Any]:
-    """优先 Faster-Whisper；没有则返回空字幕骨架，仍可人工审/启发式。"""
+_WHISPER_MODEL: Any = None
+_WHISPER_LOCK = threading.Lock()
+
+
+def _probe_duration_sec(path: Path) -> float | None:
+    """用 ffprobe 读时长；失败返回 None。"""
     try:
-        from faster_whisper import WhisperModel  # type: ignore
+        from app.services.media_clip import resolve_ffmpeg
+
+        ff = resolve_ffmpeg()
+        if not ff:
+            return None
+        # ffmpeg 同目录常有 ffprobe；没有则用 ffmpeg -i 解析 stderr
+        probe = str(Path(ff).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe"))
+        if Path(probe).exists():
+            out = subprocess.run(
+                [
+                    probe,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            val = float((out.stdout or "").strip() or 0)
+            return val if val > 0 else None
+        # 回退：ffmpeg -i
+        out = subprocess.run(
+            [ff, "-i", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out.stderr or "")
+        if not m:
+            return None
+        return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
     except Exception:
+        return None
+
+
+def _fmt_hms(sec: float) -> str:
+    s = max(0, int(sec))
+    h, rem = divmod(s, 3600)
+    m, ss = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{ss:02d}"
+    return f"{m:02d}:{ss:02d}"
+
+
+def _get_whisper_model() -> Any:
+    """进程内复用模型，避免每条任务重新加载 base 权重（长视频尤其明显）。"""
+    global _WHISPER_MODEL
+    with _WHISPER_LOCK:
+        if _WHISPER_MODEL is None:
+            from faster_whisper import WhisperModel  # type: ignore
+
+            _patch_av_open_compat()
+            _WHISPER_MODEL = WhisperModel("base", device="cpu", compute_type="int8")
+        return _WHISPER_MODEL
+
+
+def _transcribe(video: Path, on_progress: Any = None) -> dict[str, Any]:
+    """优先 Faster-Whisper；没有则返回空字幕骨架，仍可人工审/启发式。
+
+    on_progress(meta)：阶段/百分比回调。长视频转写会跑数分钟，必须推进进度，不能钉死 40%。
+    """
+    def _emit(**meta: Any) -> None:
+        if on_progress:
+            try:
+                on_progress(meta)
+            except Exception:
+                pass
+
+    try:
+        from faster_whisper import WhisperModel  # noqa: F401
+    except Exception:
+        _emit(stage="transcribing", percent=65, detail="未装 faster-whisper，已跳过")
         return {
             "engine": "none",
             "warning": "未安装 faster-whisper，已跳过自动字幕；可手动审或稍后安装",
@@ -994,7 +1243,10 @@ def _transcribe(video: Path) -> dict[str, Any]:
             "text": "",
         }
 
-    _patch_av_open_compat()
+    duration = _probe_duration_sec(video)
+    dur_label = _fmt_hms(duration) if duration else "未知时长"
+    _emit(stage="extract_audio", percent=42, detail=f"抽音轨中 · 视频 {dur_label}")
+
     # 先用 ffmpeg 抽 16k mono wav，绕开部分损坏容器；失败则直接喂原视频
     wav = video.with_suffix(".whisper16k.wav")
     audio_path = video
@@ -1003,6 +1255,10 @@ def _transcribe(video: Path) -> dict[str, Any]:
 
         ff = resolve_ffmpeg()
         if ff:
+            # 按时长放宽超时：约 2× 实时 + 3 分钟底；最长 30 分钟
+            extract_timeout = 1800
+            if duration:
+                extract_timeout = min(1800, max(300, int(duration * 2) + 180))
             subprocess.run(
                 [
                     ff,
@@ -1020,18 +1276,35 @@ def _transcribe(video: Path) -> dict[str, Any]:
                 ],
                 check=True,
                 capture_output=True,
-                timeout=600,
+                timeout=extract_timeout,
             )
             if wav.exists() and wav.stat().st_size > 44:
                 audio_path = wav
     except Exception:
         audio_path = video
 
-    model = WhisperModel("base", device="cpu", compute_type="int8")
+    _emit(stage="load_model", percent=48, detail="加载语音模型…")
+    model = _get_whisper_model()
+    _emit(
+        stage="transcribing",
+        percent=50,
+        detail=f"转写中 00:00 / {dur_label}" if duration else "转写中…",
+    )
+
     segments_out: list[dict[str, Any]] = []
     texts: list[str] = []
+    last_emit = 0.0
     try:
-        segs, _info = model.transcribe(str(audio_path), language="zh", vad_filter=True)
+        # beam_size=1 + 不依赖上文：CPU 上对 20+ 分钟片明显更快，健身房口播够用
+        segs, info = model.transcribe(
+            str(audio_path),
+            language="zh",
+            vad_filter=True,
+            beam_size=1,
+            best_of=1,
+            condition_on_previous_text=False,
+        )
+        total = float(getattr(info, "duration", 0) or 0) or (duration or 0.0)
         for s in segs:
             row = {
                 "start": round(float(s.start), 2),
@@ -1041,12 +1314,39 @@ def _transcribe(video: Path) -> dict[str, Any]:
             if row["text"]:
                 segments_out.append(row)
                 texts.append(row["text"])
+            now = time.monotonic()
+            if now - last_emit < 1.2:
+                continue
+            last_emit = now
+            end_t = float(s.end or 0)
+            if total > 0:
+                ratio = max(0.0, min(1.0, end_t / total))
+                pct = 50 + int(ratio * 22)  # 50→72
+                _emit(
+                    stage="transcribing",
+                    percent=pct,
+                    detail=f"转写中 {_fmt_hms(end_t)} / {_fmt_hms(total)} · 已 {len(segments_out)} 句",
+                    size=f"{len(segments_out)} 句",
+                )
+            else:
+                _emit(
+                    stage="transcribing",
+                    percent=min(70, 50 + len(segments_out) // 4),
+                    detail=f"转写中 · 已 {len(segments_out)} 句",
+                    size=f"{len(segments_out)} 句",
+                )
     finally:
         if wav.exists():
             try:
                 wav.unlink()
             except OSError:
                 pass
+    _emit(
+        stage="transcribing",
+        percent=72,
+        detail=f"转写完成 · {len(segments_out)} 句",
+        size=f"{len(segments_out)} 句",
+    )
     return {"engine": "faster-whisper", "segments": segments_out, "text": "\n".join(texts)}
 
 
@@ -1094,12 +1394,14 @@ _STUDIO_PARSE_SYSTEM = """你是健身房跟练视频拆课助手。根据带时
 2. spoken_name 用教练口中的标准动作名（如「高位下拉」「杠铃划船」），不要「上背部拉伸」这类含糊说法；看不清就写口语原词。
 3. target_muscle 只能是：胸/背/肩/腿/臂/核心。
 4. role：main / assist / isolation / warmup。
-5. spoken_at 是「讲到这个动作名」的秒数（字幕时间），不是示范画面起点。
+5. spoken_at = 正式讲/做该动作时的字幕秒数（报组次、讲要领、说「下一个/开始做」附近），不是示范画面逐帧起点。
+   - 禁止用片头「今天做哪些动作」报菜单的时间；同一动作名出现多次时，取正式训练段那一次。
 6. cues / mistakes 各 0～3 条，必须来自字幕里的要领/易错，并带 source_at（对应字幕秒数）；没有就空数组，禁止编造。
 7. tempo / intensity 有则摘一句，无则空字符串。
 8. 组次未提及时 target_sets/target_reps 置 null；热身尤其不要瞎填组次。
-9. 若下面给了「可对照动作名表」：字幕里的说法能对上表里某个标准名时，spoken_name 照抄表内标准名；对不上才写口语原词。
+9. 若下面给了「可对照动作名表」：字幕里的说法能对上表里某个标准名时（同音字、平翘舌听错也算对上），spoken_name 照抄表内标准名；对不上才写口语原词，禁止编一个库里没有的动作名。
 10. 混练视频按部位/阶段分块：每个 block 对应一段连续的训练内容（如 热身 / 胸日 / 背日）；单一部位视频可把热身单独一块或放在同块最前。
+11. 片头仅报菜名、没有进入该动作教学的，不要单独抽成一条；等真正讲到再抽。
 只输出 JSON：
 {
   "plan_title": "短标题",
@@ -1205,10 +1507,23 @@ def _normalize_llm_blocks(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def _llm_item_teach_score(item: dict[str, Any]) -> float:
+    """合并去重时优先正式教学段：有要领/组次的、时间更靠后的加分。"""
+    at = float(item.get("spoken_at") or 0)
+    cues_n = 0
+    for key in ("cues", "mistakes"):
+        raw = item.get(key)
+        if isinstance(raw, list):
+            cues_n += len(raw)
+    sets = item.get("target_sets")
+    has_sets = 1 if (isinstance(sets, int) and sets > 0) or (isinstance(sets, str) and str(sets).isdigit()) else 0
+    return cues_n * 100 + has_sets * 40 + at
+
+
 def _merge_llm_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """多块结果按 (部位, 动作名) 合并去重；spoken_at 取最早出现的一条。"""
+    """多块结果按 (部位, 动作名) 合并去重；优先正式教学段（有要领/组次、时间更靠后）。"""
     merged: list[dict[str, Any]] = []
-    seen: dict[tuple[str, str], int] = {}
+    seen: dict[tuple[str, str], tuple[int, int]] = {}
     for block in blocks:
         muscle = str(block.get("target_muscle") or "").strip()
         title = str(block.get("block_title") or "").strip()
@@ -1231,14 +1546,12 @@ def _merge_llm_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             key = (muscle, canonicalize_exercise(spoken))
             if key in seen:
-                # 重叠段重复命中：保留 spoken_at 更早的一条
-                existing = merged[seen[key]]["exercises"]
-                prev_at = float(existing[0].get("spoken_at") or 0)
-                cur_at = float(item.get("spoken_at") or 0)
-                if cur_at < prev_at:
-                    existing[0] = item
+                bi, ei = seen[key]
+                existing = merged[bi]["exercises"]
+                if _llm_item_teach_score(item) > _llm_item_teach_score(existing[ei]):
+                    existing[ei] = item
                 continue
-            seen[key] = bucket_idx
+            seen[key] = (bucket_idx, len(merged[bucket_idx]["exercises"]))
             merged[bucket_idx]["exercises"].append(item)
     return [b for b in merged if b.get("exercises")]
 
@@ -1373,6 +1686,7 @@ def _build_draft(
                 "exercises": exs,
             }
         )
+    _keep_snippets_on_own_action(exercise_rows)
     _finalize_exercise_traffic(exercise_rows)
     kept_title = None
     if isinstance(task.draft_json, dict):
@@ -1414,19 +1728,25 @@ def _parse_and_score(
     ensure_loaded()
 
     def _row_from_item(item: dict[str, Any], seq: int) -> dict[str, Any] | None:
-        spoken = str(item.get("spoken_name") or "").strip()
-        if not spoken:
+        raw_spoken = str(item.get("spoken_name") or "").strip()
+        if not raw_spoken:
             return None
+        # 字幕错字（载剧下拉）先改成库里唯一的标准名，再匹配；定位仍可用原词
+        repaired = repair_spoken_name(session, raw_spoken)
+        spoken = repaired or raw_spoken
         spoken_at = float(item.get("spoken_at") or 0)
         snip = {
-            "start": round(max(0.0, spoken_at - 1.0), 2),
+            "start": round(spoken_at, 2),
             "end": round(spoken_at + 5.0, 2),
             "spoken_at": round(spoken_at, 2),
         }
-        # 若字幕里能对准动作名，用更准的 spoken_at
+        # 字幕对齐优先取「正式教学段」命中，避免片头报菜名锁死在 00:00
         aligned = _snippet_for_name(segments, spoken) if segments else None
-        if aligned and abs(float(aligned.get("spoken_at") or 0) - spoken_at) < 45:
+        if not aligned and spoken != raw_spoken:
+            aligned = _snippet_for_name(segments, raw_spoken)
+        if aligned:
             snip = aligned
+            spoken_at = float(aligned.get("spoken_at") or spoken_at)
         muscle_hint = str(item.get("target_muscle") or "").strip() or None
         matched = _match_exercise(session, spoken, muscle_hint=muscle_hint if muscle_hint in _KNOWN_MUSCLES else None)
         hit = matched.get("hit")
@@ -1529,7 +1849,11 @@ def _parse_and_score(
     mentions = find_catalog_mentions_in_text(text) if text else []
     if mentions:
         for i, name in enumerate(mentions[:12]):
-            snip = _snippet_for_name(segments, name)
+            snip = _snippet_for_name(segments, name) or {
+                "start": 10.0 * i,
+                "end": 10.0 * i + 5,
+                "spoken_at": 10.0 * i,
+            }
             matched = _match_exercise(session, name)
             hit = matched.get("hit")
             exercises.append(
@@ -1549,11 +1873,8 @@ def _parse_and_score(
         parts = re.split(r"(?:第[一二三四五六七八九十\d]+个动作|下一个动作|正式组)", text)
         for i, part in enumerate(parts[1:7], start=0):
             spoken = (part.strip()[:40] or f"未识别动作{i+1}")
-            snip = (
-                _snippet_for_name(segments, spoken[:6])
-                if segments
-                else {"start": 10.0 * i, "end": 10.0 * i + 5, "spoken_at": 10.0 * i}
-            )
+            fallback = {"start": 10.0 * i, "end": 10.0 * i + 5, "spoken_at": 10.0 * i}
+            snip = (_snippet_for_name(segments, spoken[:6]) if segments else None) or fallback
             exercises.append(
                 _exercise_draft_row(
                     i=i,
@@ -1670,23 +1991,81 @@ def _exercise_draft_row(
     }
 
 
-def _snippet_for_name(segments: list[dict[str, Any]], name: str) -> dict[str, float]:
-    key = (name or "")[:4]
-    for seg in segments:
-        if key and key in str(seg.get("text") or ""):
-            start = float(seg.get("start") or 0)
-            end = float(seg.get("end") or (start + 5))
-            # spoken_at ≈ 他讲到这句的秒；选区给人拖，不直接当切片起点
-            mid = (start + end) / 2
-            return {
-                "start": round(max(0, mid - 2.5), 2),
-                "end": round(mid + 2.5, 2),
-                "spoken_at": round(start, 2),
-            }
-    if segments:
-        s0 = float(segments[0].get("start") or 0)
-        return {"start": s0, "end": s0 + 5, "spoken_at": s0}
-    return {"start": 0.0, "end": 5.0, "spoken_at": 0.0}
+_TEACH_HINTS = ("组", "次", "注意", "不要", "别", "感受", "保持", "开始", "来做", "要领")
+_INTRO_HINTS = ("今天", "安排", "几个动作", "分别是", "包括", "计划", "一共", "先说", "介绍")
+_NEXT_ACTION = re.compile(r"第[一二三四五六七八九十\d]+个动作|下一个动作|收尾动作|首先先做")
+_SNIPPET_MAX_SEC = 8.0
+
+
+def _snippet_for_name(segments: list[dict[str, Any]], name: str) -> dict[str, float] | None:
+    """在字幕里找动作名。选区从这一句开口起往后续讲，不往前倒进上一个动作。"""
+    key = (name or "").strip()
+    if len(key) < 2:
+        return None
+
+    hits: list[tuple[float, int, float]] = []
+    for i, seg in enumerate(segments):
+        text = str(seg.get("text") or "")
+        if key not in text:
+            continue
+        start = float(seg.get("start") or 0)
+        near = " ".join(
+            str(segments[j].get("text") or "")
+            for j in range(max(0, i - 1), min(len(segments), i + 3))
+        )
+        score = start / 1000.0  # 同质量时略偏后段
+        if any(k in near for k in _TEACH_HINTS):
+            score += 12
+        if any(k in near for k in _INTRO_HINTS):
+            score -= 8
+        if ("、" in text or "，" in text) and not any(k in near for k in _TEACH_HINTS):
+            score -= 4
+        hits.append((score, i, start))
+
+    if not hits:
+        return None
+    hits.sort(key=lambda x: x[0], reverse=True)
+    _score, idx, start = hits[0]
+    end_limit = start + _SNIPPET_MAX_SEC
+    end = float(segments[idx].get("end") or (start + 4))
+    for j in range(idx + 1, len(segments)):
+        text = str(segments[j].get("text") or "")
+        st = float(segments[j].get("start") or 0)
+        if st >= end_limit or _NEXT_ACTION.search(text):
+            break
+        end = float(segments[j].get("end") or (st + 1))
+    if end < start + 3:
+        end = min(end_limit, start + 4)
+    return {
+        "start": round(max(0, start), 2),
+        "end": round(end, 2),
+        "spoken_at": round(start, 2),
+    }
+
+
+def _keep_snippets_on_own_action(rows: list[dict[str, Any]]) -> None:
+    """选区不得早于本动作开口，也不得盖住下一条的开口。"""
+    ordered = sorted(rows, key=lambda r: float(r.get("spoken_at") or 0))
+    for i, row in enumerate(ordered):
+        at = float(row.get("spoken_at") or 0)
+        snip = dict(row.get("snippet") or {})
+        start = max(float(snip.get("start") or at), at)
+        end = float(snip.get("end") or (start + 5))
+        nxt = float(ordered[i + 1].get("spoken_at") or 0) if i + 1 < len(ordered) else None
+        if nxt and nxt > start:
+            end = min(end, nxt - 0.1)
+        if end < start + 2.5:
+            end = start + 2.5
+            if nxt and nxt > start:
+                end = min(end, nxt - 0.05)
+        if end <= start:
+            end = start + 2.5
+        row["snippet"] = {
+            "start": round(start, 2),
+            "end": round(end, 2),
+            "spoken_at": round(at, 2),
+        }
+        row["spoken_at"] = round(at, 2)
 
 
 def _match_exercise(
@@ -2416,7 +2795,8 @@ def confirm_plan(
                 attached += 1
         data["blocks"] = blocks_in
         task.draft_json = data
-        task.result_ref = {"mode": "exercise_only", "attached": attached}
+        task.result_ref = {"mode": "exercise_only", "attached": attached, "published": True}
+        task.review_state = "published"
         task.updated_at = utcnow()
         session.add(task)
         session.commit()
@@ -2546,9 +2926,15 @@ def confirm_plan(
 
     data["blocks"] = blocks_in
     task.draft_json = data
+    review = "published" if publish else "drafted"
     for t in batch_tasks:
-        t.result_ref = {"plan_id": plan_id, "block_ids": created_block_ids}
+        t.result_ref = {
+            "plan_id": plan_id,
+            "block_ids": created_block_ids,
+            "published": bool(publish),
+        }
         t.draft_json = data if t.id == task.id else t.draft_json
+        t.review_state = review
         t.updated_at = utcnow()
         session.add(t)
 
