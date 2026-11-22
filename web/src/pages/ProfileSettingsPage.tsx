@@ -11,7 +11,7 @@ import {
   type EquipmentTag,
 } from "../lib/profileOptions";
 import type { Profile } from "../types";
-import { toast } from "../feedback";
+import { feedbackError, toast } from "../feedback";
 
 type Props = { profile: Profile; onUpdated: () => void; onResetOnboarding: () => void };
 
@@ -212,7 +212,7 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
             await api("/api/profile", { method: "DELETE" });
             onResetOnboarding();
           } catch (e) {
-            alert(String(e));
+            toast.err(feedbackError(e));
           }
         }}
       >
@@ -288,7 +288,7 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
                   toast.ok("体重已记录");
                   setWeightOpen(false);
                 } catch (e) {
-                  alert(String(e));
+                  toast.err(feedbackError(e));
                 } finally {
                   setBusy(false);
                 }

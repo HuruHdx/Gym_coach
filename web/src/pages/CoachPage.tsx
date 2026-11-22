@@ -18,7 +18,7 @@ import { CoachMark } from "../components/CoachMark";
 import { DraftCard } from "../components/DraftCard";
 import { ExerciseRefCards } from "../components/ExerciseRefCards";
 import { MessageFeedback } from "../components/MessageFeedback";
-import { toast } from "../feedback";
+import { feedbackError, toast } from "../feedback";
 import type {
   AgentReply,
   Block,
@@ -440,7 +440,7 @@ export function CoachPage({ profile }: Props) {
       setHydrated(true);
       void qc.setQueryData(["chat-conversation", me?.id], next);
     } catch (e) {
-      alert(`无法开始新对话：${String(e)}`);
+      toast.err(`无法开始新对话：${feedbackError(e)}`);
     }
   }
 

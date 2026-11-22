@@ -78,7 +78,7 @@ export function ExercisesPage() {
         value={draftQ}
         onChange={(e) => setDraftQ(e.target.value)}
         placeholder="搜中文名 / 英文 / 别名 / ID"
-        className="mt-3 w-full rounded-xl border border-line bg-elevated px-3.5 py-2.5 text-sm outline-none placeholder:text-muted focus:border-ink"
+        className="mt-3 w-full rounded-xl border border-line bg-elevated px-3.5 py-2.5 text-base outline-none placeholder:text-muted focus:border-ink"
       />
 
       <div className="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto pb-1">

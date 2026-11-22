@@ -51,7 +51,7 @@ export function FeedbackHost() {
             <button
               type="button"
               className="absolute right-2.5 top-2 text-meta text-muted"
-              onClick={() => loading.hide()}
+              onClick={() => loading.forceHide()}
               aria-label="关闭遮罩"
             >
               ✕

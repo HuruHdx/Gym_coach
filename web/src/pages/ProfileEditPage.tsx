@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateWheelPickerSheet } from "../components/WheelPickerSheet";
 import { api } from "../lib/api";
+import { feedbackError, toast } from "../feedback";
 import {
   AVOID_PARTS,
   DAY_OPTIONS,
@@ -89,7 +90,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
     if (weightText.trim() !== "") {
       const weight = Number(weightText);
       if (!Number.isFinite(weight) || weight <= 30 || weight >= 300) {
-        alert("体重填 30 到 300 之间的公斤数，或留空");
+        toast.info("体重填 30 到 300 之间的公斤数，或留空");
         return;
       }
       weight_kg = Math.round(weight * 10) / 10;
@@ -97,7 +98,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
     let session_minutes: number | null = null;
     if (minuteText.trim() !== "") {
       if (minutes == null || !Number.isFinite(minutes) || minutes < 15 || minutes > 180) {
-        alert("单次时长填 15 到 180 分钟，或留空");
+        toast.info("单次时长填 15 到 180 分钟，或留空");
         return;
       }
       session_minutes = Math.round(minutes);
@@ -106,7 +107,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
     if (heightText.trim() !== "") {
       const height = Number(heightText);
       if (!Number.isFinite(height) || height <= 100 || height >= 250) {
-        alert("身高填 100 到 250 之间的厘米，或留空");
+        toast.info("身高填 100 到 250 之间的厘米，或留空");
         return;
       }
       height_cm = Math.round(height);
@@ -136,7 +137,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
       await onUpdated();
       navigate("/me");
     } catch (error) {
-      alert(String(error));
+      toast.err(feedbackError(error));
     } finally {
       setBusy(false);
     }
@@ -232,7 +233,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
             value={minuteText}
             placeholder="输入分钟"
             onChange={(event) => setMinuteText(event.target.value)}
-            className="min-w-0 flex-1 rounded-sm border border-line bg-bg px-3 py-2 text-sm font-semibold outline-none"
+            className="min-w-0 flex-1 rounded-sm border border-line bg-bg px-3 py-2 text-base font-semibold outline-none"
           />
           <span className="text-xs text-muted">分钟</span>
         </div>
@@ -275,7 +276,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
           value={note}
           placeholder="说明一下（可选）"
           onChange={(event) => setNote(event.target.value)}
-          className="mt-2.5 w-full rounded-sm border border-line bg-bg px-3 py-2.5 text-[13px] outline-none"
+          className="mt-2.5 w-full rounded-sm border border-line bg-bg px-3 py-2.5 text-base outline-none"
         />
       </Card>
 
@@ -288,7 +289,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
             value={weightText}
             placeholder="未填"
             onChange={(event) => setWeightText(event.target.value)}
-            className="w-20 rounded-sm border border-line bg-bg px-2.5 py-2 text-right text-sm font-semibold outline-none"
+            className="w-20 rounded-sm border border-line bg-bg px-2.5 py-2 text-right text-base font-semibold outline-none"
           />
           <span className="text-xs text-muted">kg</span>
         </BodyRow>
@@ -299,7 +300,7 @@ export function ProfileEditPage({ profile, onUpdated }: Props) {
             value={heightText}
             placeholder="未填"
             onChange={(event) => setHeightText(event.target.value)}
-            className="w-20 rounded-sm border border-line bg-bg px-2.5 py-2 text-right text-sm font-semibold outline-none"
+            className="w-20 rounded-sm border border-line bg-bg px-2.5 py-2 text-right text-base font-semibold outline-none"
           />
           <span className="text-xs text-muted">cm</span>
         </BodyRow>

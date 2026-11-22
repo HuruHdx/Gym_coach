@@ -81,7 +81,7 @@ export function TrainingPage() {
           className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
         >
           <p className="text-sm font-bold">动作分析</p>
-          <p className="mt-0.5 text-[10px] text-muted">练后复盘</p>
+          <p className="mt-0.5 text-[10px] text-muted">即将推出</p>
         </Link>
       </div>
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { feedbackError, toast } from "../feedback";
 import type { CardBlock, CardItem, TrainingSession } from "../types";
 import { MUSCLE_OPTIONS, rebuildSubtitle } from "../types";
 import { ReorderItem, ReorderList } from "./ReorderList";
@@ -111,7 +112,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
   function addCustom() {
     const name = newName.trim();
     if (!/^[\u4e00-\u9fffA-Za-z].{0,20}$/.test(name) || !/[\u4e00-\u9fffA-Za-z]{2,}/.test(name)) {
-      alert("动作名用中文或英文，至少两个字，不要只填数字。");
+      toast.info("动作名用中文或英文，至少两个字，不要只填数字。");
       return;
     }
     const id = `custom-${Date.now()}`;
@@ -130,7 +131,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
   async function adopt(forceReplaceDone = false) {
     const selected = card.items.filter((i) => i.selected);
     if (!selected.length) {
-      alert("至少勾选一个动作再采纳");
+      toast.info("至少勾选一个动作再采纳");
       return;
     }
     if (todayDone && !forceReplaceDone) {
@@ -181,7 +182,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
       };
       onAdopted(session, confirmedCard);
     } catch (e) {
-      alert(String(e));
+      toast.err(feedbackError(e));
     } finally {
       setBusy(false);
     }
@@ -442,7 +443,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
         {adding ? (
           <div className="mt-3 space-y-2">
             <input
-              className="w-full rounded-md border border-line bg-bg px-3 py-2 text-xs outline-none"
+              className="w-full rounded-md border border-line bg-bg px-3 py-2 text-base outline-none"
               placeholder="输入自定义动作名..."
               value={newName}
               onChange={(e) => setNewName(e.target.value)}

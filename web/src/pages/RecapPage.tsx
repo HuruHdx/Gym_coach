@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toPng } from "html-to-image";
 import { TrainingPoster, buildPosterModel } from "../components/TrainingPoster";
 import { api } from "../lib/api";
+import { feedbackError, toast } from "../feedback";
 import type { TrainingSession } from "../types";
 
 function coachText(summary?: string | null): string {
@@ -75,7 +75,7 @@ export function RecapPage() {
       link.href = dataUrl;
       link.click();
     } catch (error) {
-      alert(String(error));
+      toast.err(feedbackError(error));
     } finally {
       setSaving(false);
     }
@@ -85,7 +85,7 @@ export function RecapPage() {
     if (!current || busy) return;
     const minutes = Number(minuteDraft);
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 300) {
-      alert("填 1 到 300 分钟");
+      toast.info("填 1 到 300 分钟");
       return;
     }
     setBusy(true);
@@ -98,7 +98,7 @@ export function RecapPage() {
       qc.setQueryData(["training-today"], next);
       setEditingTime(false);
     } catch (error) {
-      alert(String(error));
+      toast.err(feedbackError(error));
     } finally {
       setBusy(false);
     }
@@ -115,7 +115,7 @@ export function RecapPage() {
       qc.setQueryData(["training-today"], next);
       setShowDetail(true);
     } catch (error) {
-      alert(String(error));
+      toast.err(feedbackError(error));
     } finally {
       setBusy(false);
     }
@@ -204,12 +204,6 @@ export function RecapPage() {
             </button>
           </div>
 
-          <Link
-            to="/training/form-check"
-            className="mt-4 block text-center text-[12px] font-semibold text-accent-text"
-          >
-            拍了这组视频？上传测速度衰减 →
-          </Link>
         </div>
       )}
     </div>

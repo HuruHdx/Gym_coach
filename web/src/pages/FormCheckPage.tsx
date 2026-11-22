@@ -12,21 +12,17 @@ export function FormCheckPage() {
           <h1 className="mt-1 font-display text-[26px] font-bold tracking-tight">动作分析</h1>
           <p className="mt-1 text-[12px] text-muted">练后上传侧视视频，看次数、节奏与速度衰减</p>
         </div>
-        <button
-          type="button"
-          disabled
-          className="shrink-0 rounded-md bg-accent/40 px-3 py-2 text-[12px] font-extrabold text-accent-ink opacity-60"
-        >
-          ＋ 上传
-        </button>
+        <span className="shrink-0 rounded-md border border-line bg-elevated px-2.5 py-1.5 text-[11px] font-extrabold text-muted">
+          即将推出
+        </span>
       </div>
 
       <div className="mt-8 rounded-2xl border border-dashed border-line bg-elevated px-4 py-10 text-center">
-        <p className="text-sm font-bold">还没有分析记录</p>
+        <p className="text-sm font-bold">分析管线还在路上</p>
         <p className="mt-2 text-[12px] leading-relaxed text-muted">
-          用系统相机侧视拍一组（卧推 / 深蹲 / 硬拉），回家 WiFi 再上传。
+          二期会支持侧视视频上传与速度衰减复盘。
           <br />
-          分析管线二期接入，入口先放在这里。
+          现在可以从训练记录回顾这场组次与重量。
         </p>
         <Link
           to="/training/records"

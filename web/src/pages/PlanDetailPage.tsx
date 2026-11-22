@@ -12,6 +12,7 @@ import {
   followPlan,
   unfollowPlan,
 } from "../lib/api";
+import { feedbackError, toast } from "../feedback";
 import type { CardBlock, PlanBlockDetail, TrainingSession } from "../types";
 
 export function PlanDetailPage() {
@@ -65,7 +66,7 @@ export function PlanDetailPage() {
       setDraft(res.card);
       setSheetOpen(true);
     } catch (e) {
-      alert(String(e));
+      toast.err(feedbackError(e));
     } finally {
       setExpandingId(null);
     }
@@ -85,8 +86,9 @@ export function PlanDetailPage() {
       }
       void qc.invalidateQueries({ queryKey: ["plan-detail", id] });
       void qc.invalidateQueries({ queryKey: ["plans-following"] });
+      toast.ok(isFollowing ? "已退出跟练" : "已加入跟练");
     } catch (e) {
-      alert(String(e));
+      toast.err(feedbackError(e));
     } finally {
       setFollowBusy(false);
     }
@@ -166,23 +168,28 @@ export function PlanDetailPage() {
           )}
         </div>
 
-        {multiBlock && (
-          <button
-            type="button"
-            disabled={followBusy}
-            onClick={() => void toggleFollow()}
-            className={`pressable mt-4 w-full rounded-md py-2.5 text-[13px] font-extrabold disabled:opacity-50 ${
-              isFollowing
-                ? "border border-line bg-elevated/90 text-ink"
-                : "bg-accent text-accent-ink"
-            }`}
-          >
-            {followBusy
-              ? "处理中…"
-              : isFollowing
-                ? "跟练中 · 退出"
-                : "加入跟练"}
-          </button>
+        <button
+          type="button"
+          disabled={followBusy}
+          onClick={() => void toggleFollow()}
+          className={`pressable mt-4 w-full rounded-md py-2.5 text-[13px] font-extrabold disabled:opacity-50 ${
+            isFollowing
+              ? "border border-line bg-elevated/90 text-ink"
+              : "bg-accent text-accent-ink"
+          }`}
+        >
+          {followBusy
+            ? "处理中…"
+            : isFollowing
+              ? "跟练中 · 退出"
+              : multiBlock
+                ? "加入跟练"
+                : "加入跟练 · 单日计划"}
+        </button>
+        {!multiBlock && !isFollowing && (
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            单日模板也可设为当前跟练，方便今日页记住你在练哪套。
+          </p>
         )}
       </div>
 

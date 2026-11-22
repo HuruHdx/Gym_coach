@@ -85,6 +85,12 @@ export const loading = {
     if (loadingCount === 0) loadingText = "处理中…";
     emit();
   },
+  /** 遮罩手动关闭：清零计数，避免与仍在跑的 wrap 错位 */
+  forceHide() {
+    loadingCount = 0;
+    loadingText = "处理中…";
+    emit();
+  },
   async wrap<T>(text: string, work: () => Promise<T>): Promise<T> {
     loading.show(text);
     try {
@@ -94,3 +100,16 @@ export const loading = {
     }
   },
 };
+
+/** 把 api 抛出的 `401: …` / `500: …` 收成短句，给 toast 用 */
+export function feedbackError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.startsWith("401")) return "登录已失效，请重新登录";
+  if (raw.startsWith("403")) return "没有权限做这件事";
+  const matched = raw.match(/^\d{3}:\s*([\s\S]*)$/);
+  if (matched) {
+    const body = matched[1].trim().replace(/\s+/g, " ");
+    return (body || "请求失败").slice(0, 120);
+  }
+  return raw.trim().slice(0, 160) || "出了点问题";
+}

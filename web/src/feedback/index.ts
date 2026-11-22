@@ -1,4 +1,4 @@
-export { toast, loading } from "./store";
+export { toast, loading, feedbackError } from "./store";
 export type { ToastKind, ToastItem } from "./store";
 export { FeedbackHost } from "./FeedbackHost";
 export { Spinner } from "./Spinner";

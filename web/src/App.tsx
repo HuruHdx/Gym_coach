@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, clearAuth, getToken, isAuthed } from "./lib/api";
+import { api, clearAuth, getToken, isAuthed, subscribeAuthInvalidated } from "./lib/api";
 import type { Profile } from "./types";
 import { AppShell } from "./components/AppShell";
 import { LoginPage } from "./pages/LoginPage";
@@ -34,6 +34,13 @@ export default function App() {
     enabled: authed,
     retry: false,
   });
+
+  useEffect(() => {
+    return subscribeAuthInvalidated(() => {
+      void qc.clear();
+      setAuthed(false);
+    });
+  }, [qc]);
 
   function enterAuthed() {
     // 换账号必须清缓存，否则「我的」/教练会闪旧用户数据

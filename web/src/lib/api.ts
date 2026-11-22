@@ -37,6 +37,21 @@ export function isAuthed(): boolean {
   return localStorage.getItem(AUTH_FLAG) === "1" && Boolean(getToken());
 }
 
+type AuthListener = () => void;
+const authInvalidatedListeners = new Set<AuthListener>();
+
+/** App 订阅：401 清本地态后强制回登录页 */
+export function subscribeAuthInvalidated(listener: AuthListener) {
+  authInvalidatedListeners.add(listener);
+  return () => {
+    authInvalidatedListeners.delete(listener);
+  };
+}
+
+function notifyAuthInvalidated() {
+  authInvalidatedListeners.forEach((fn) => fn());
+}
+
 /**
  * 业务请求：自动带 Authorization: Bearer <jwt>。
  * 401 清本地登录态，交给上层回登录页。
@@ -53,6 +68,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { ...init, headers });
   if (res.status === 401) {
     clearAuth();
+    notifyAuthInvalidated();
     const text = await res.text();
     throw new Error(`401: ${text || "unauthorized"}`);
   }

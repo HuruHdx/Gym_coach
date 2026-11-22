@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../lib/api";
+import { feedbackError, toast } from "../feedback";
 import { COACH_NAME } from "../lib/brand";
 import type { AgentReply } from "../types";
 
@@ -30,7 +31,7 @@ export function ComposeBar({
       setText("");
       onReply?.(reply);
     } catch (e) {
-      alert(String(e));
+      toast.err(feedbackError(e));
     } finally {
       setBusy(false);
     }
@@ -39,7 +40,7 @@ export function ComposeBar({
   return (
     <div className="flex items-center gap-2 rounded-md border border-line bg-elevated py-1.5 pl-3 pr-1.5">
       <input
-        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+        className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted"
         placeholder={placeholder}
         value={text}
         autoFocus={autoFocus}
@@ -72,7 +73,7 @@ export function useQuickSend() {
       sessionStorage.setItem("last_reply", JSON.stringify(reply));
       return reply;
     } catch (e) {
-      alert(String(e));
+      toast.err(feedbackError(e));
       return null;
     } finally {
       setBusy(false);
