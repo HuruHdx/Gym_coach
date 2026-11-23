@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="844"
+      style="width:390px;height:844px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 844px; background: #f4f3f8; position: relative; overflow: hidden; margin: 0 auto; }
+  .wrap { padding: 0 20px; }
+  .nav { display: flex; align-items: center; padding-top: 18px; }
+  .nav-back { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #6f6a8c; }
+  .nav-back i { font-style: normal; font-size: 17px; }
+  .h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; margin-top: 10px; }
+  .h1-sub { font-size: 12px; color: #9b97ad; margin-top: 4px; }
+
+  /* 搜索 */
+  .search { margin-top: 14px; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e8e5f0; border-radius: 12px; padding: 10px 13px; }
+  .search svg { width: 15px; height: 15px; stroke: #9b97ad; flex: none; }
+  .search span { font-size: 13px; color: #9b97ad; }
+
+  /* 一级肌群 chips（横滑） */
+  .chips { display: flex; gap: 8px; overflow: hidden; margin-top: 12px; }
+  .chip { flex: none; font-size: 11.5px; font-weight: 700; color: #6f6a8c; border: 1px solid #e8e5f0; background: #fff; border-radius: 8px; padding: 6px 12px; }
+  .chip.on { background: #17161c; color: #fff; border-color: #17161c; }
+
+  /* 二级筛选胶囊行 */
+  .filters { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .pill { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: #54506b; background: #fff; border: 1px solid #e8e5f0; border-radius: 9px; padding: 6px 11px; }
+  .pill .caret { font-size: 9px; color: #9b97ad; }
+  .pill.on { background: #f3effe; color: #6b46e5; border-color: #d9cff7; }
+  .pill-core { margin-left: auto; }
+  .pill-core.on { background: #6b46e5; color: #fff; border-color: #6b46e5; }
+
+  /* 已选条件小标签 */
+  .tags { display: flex; align-items: center; gap: 7px; margin-top: 10px; }
+  .tag { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: #6b46e5; background: #f3effe; border-radius: 7px; padding: 4px 8px; }
+  .tag i { font-style: normal; font-size: 11px; color: #9b97ad; }
+  .tag-clear { font-size: 10.5px; color: #9b97ad; font-weight: 600; }
+
+  /* 网格 */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+  .card { background: #fff; border: 1px solid #e8e5f0; border-radius: 16px; overflow: hidden; }
+  .card-img { height: 118px; background: #ece8f5; display: flex; align-items: center; justify-content: center; position: relative; }
+  .card-img svg.bar { width: 30px; height: 30px; stroke: #b3abc9; }
+  .core-tag { position: absolute; left: 8px; top: 8px; background: rgba(23,22,28,.85); color: #ece7fb; font-size: 9px; font-weight: 800; border-radius: 5px; padding: 2px 6px; }
+  .card-body { padding: 9px 11px 11px; }
+  .card-name { font-size: 13px; font-weight: 700; }
+  .card-meta { font-size: 10px; color: #9b97ad; margin-top: 3px; }
+</style>
+</head>
+<body style="width:390px;height:844px;">
+<main data-canvas-root style="width:390px;height:844px;">
+  <div class="screen">
+    <div class="wrap">
+      <div class="nav"><div class="nav-back"><i>‹</i> 训练</div></div>
+      <div class="h1">动作库</div>
+      <div class="h1-sub">128 个动作</div>
+
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>搜中文名 / 英文 / 别名</span>
+      </div>
+
+      <!-- 一级：肌群 -->
+      <div class="chips">
+        <div class="chip on">全部</div><div class="chip">胸</div><div class="chip">背</div>
+        <div class="chip">腿</div><div class="chip">肩</div><div class="chip">臂</div>
+        <div class="chip">核心</div>
+      </div>
+
+      <!-- 二级：器械 / 课型 / 主力（收纳成一行胶囊，不堆横滑） -->
+      <div class="filters">
+        <div class="pill on">器械 · 自由重量 <span class="caret">▾</span></div>
+        <div class="pill on">课型 · 抗阻 <span class="caret">▾</span></div>
+        <div class="pill pill-core">只看主力</div>
+      </div>
+
+      <!-- 已选条件可清除 -->
+      <div class="tags">
+        <span class="tag">自由重量 <i>×</i></span>
+        <span class="tag">抗阻 <i>×</i></span>
+        <span class="tag-clear">清除全部</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="card-img"><span class="core-tag">主力</span><svg class="bar" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="card-body"><div class="card-name">杠铃平板卧推</div><div class="card-meta">胸 · 胸中部 · 自由重量</div></div>
+        </div>
+        <div class="card">
+          <div class="card-img"><svg class="bar" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="card-body"><div class="card-name">哑铃上斜卧推</div><div class="card-meta">胸 · 胸上部 · 自由重量</div></div>
+        </div>
+        <div class="card">
+          <div class="card-img"><span class="core-tag">主力</span><svg class="bar" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="card-body"><div class="card-name">杠铃深蹲</div><div class="card-meta">腿 · 股四头 · 自由重量</div></div>
+        </div>
+        <div class="card">
+          <div class="card-img"><svg class="bar" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="card-body"><div class="card-name">哑铃划船</div><div class="card-meta">背 · 背阔肌 · 自由重量</div></div>
+        </div>
+        <div class="card">
+          <div class="card-img"><svg class="bar" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="card-body"><div class="card-name">坐姿哑铃推举</div><div class="card-meta">肩 · 三角肌 · 自由重量</div></div>
+        </div>
+        <div class="card">
+          <div class="card-img"><svg class="bar" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="card-body"><div class="card-name">哑铃弯举</div><div class="card-meta">臂 · 肱二头 · 自由重量</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

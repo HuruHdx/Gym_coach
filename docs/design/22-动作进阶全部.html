@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="844"
+      style="width:390px;height:844px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 844px; background: #f4f3f8; position: relative; overflow: hidden; margin: 0 auto; }
+  .wrap { padding: 0 20px; }
+  .nav { display: flex; align-items: center; padding-top: 18px; }
+  .nav-back { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #6f6a8c; }
+  .nav-back i { font-style: normal; font-size: 17px; }
+  .h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; margin-top: 10px; }
+  .h1-sub { font-size: 12px; color: #9b97ad; margin-top: 4px; }
+
+  .chips { display: flex; gap: 8px; overflow: hidden; margin-top: 14px; }
+  .chip { flex: none; font-size: 11.5px; font-weight: 700; color: #6f6a8c; border: 1px solid #e8e5f0; background: #fff; border-radius: 8px; padding: 6px 12px; }
+  .chip.on { background: #17161c; color: #fff; border-color: #17161c; }
+
+  .filter-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .trend-chips { display: flex; gap: 7px; overflow: hidden; flex: 1; }
+  .tchip { flex: none; font-size: 10.5px; font-weight: 700; color: #6f6a8c; border: 1px solid #e8e5f0; background: #fff; border-radius: 7px; padding: 5px 10px; }
+  .tchip.on { background: #f3effe; color: #6b46e5; border-color: #d9cff7; }
+  .sort { flex: none; display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; color: #6f6a8c; }
+  .sort .caret { font-size: 9px; color: #9b97ad; }
+
+  .list { border-top: 1px solid #e8e5f0; margin-top: 14px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
+  .row + .row { border-top: 1px solid #e8e5f0; }
+  .row-main { flex: 1; min-width: 0; }
+  .row-name { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; }
+  .pr-tag { background: #17161c; color: #ece7fb; font-size: 9px; font-weight: 800; padding: 2px 5px; border-radius: 4px; }
+  .row-sub { font-size: 10.5px; color: #9b97ad; margin-top: 3px; }
+  .row-load { font-size: 12px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .row-1rm { font-size: 10px; color: #9b97ad; margin-top: 2px; }
+  .row-spark { width: 64px; flex: none; }
+</style>
+</head>
+<body style="width:390px;height:844px;">
+<main data-canvas-root style="width:390px;height:844px;">
+  <div class="screen">
+    <div class="wrap">
+      <div class="nav"><div class="nav-back"><i>‹</i> 训练</div></div>
+      <div class="h1">动作进阶</div>
+      <div class="h1-sub">我练过的动作 · 重量走势与估算 1RM</div>
+
+      <!-- 一级：肌群 -->
+      <div class="chips">
+        <div class="chip on">全部</div><div class="chip">胸</div><div class="chip">背</div>
+        <div class="chip">腿</div><div class="chip">肩</div><div class="chip">臂</div>
+        <div class="chip">核心</div>
+      </div>
+
+      <!-- 二级：趋势筛选 + 排序 -->
+      <div class="filter-row">
+        <div class="trend-chips">
+          <div class="tchip on">全部</div><div class="tchip">进步</div>
+          <div class="tchip">持平</div><div class="tchip">回落</div><div class="tchip">新练</div>
+        </div>
+        <div class="sort">最近训练 <span class="caret">▾</span></div>
+      </div>
+
+      <div class="list">
+        <div class="row">
+          <div class="row-main">
+            <div class="row-name">平板杠铃卧推 <span class="pr-tag">PR</span></div>
+            <div class="row-sub">胸 · 水平推</div>
+            <div class="row-load">上次 60 kg × 8</div>
+            <div class="row-1rm">估算 1RM 73 kg</div>
+          </div>
+          <svg class="row-spark" viewBox="0 0 64 28" fill="none" preserveAspectRatio="none">
+            <path d="M4 20 L16 18 L28 16 L40 13 L52 10 L60 8" stroke="#1f8a53" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="row">
+          <div class="row-main">
+            <div class="row-name">高位下拉</div>
+            <div class="row-sub">背 · 垂直拉</div>
+            <div class="row-load">上次 55 kg × 10</div>
+            <div class="row-1rm">估算 1RM 66 kg</div>
+          </div>
+          <svg class="row-spark" viewBox="0 0 64 28" fill="none" preserveAspectRatio="none">
+            <path d="M4 21 L16 19 L28 18 L40 15 L52 13 L60 11" stroke="#1f8a53" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="row">
+          <div class="row-main">
+            <div class="row-name">杠铃深蹲</div>
+            <div class="row-sub">腿 · 复合</div>
+            <div class="row-load">上次 80 kg × 6</div>
+            <div class="row-1rm">估算 1RM 97 kg</div>
+          </div>
+          <svg class="row-spark" viewBox="0 0 64 28" fill="none" preserveAspectRatio="none">
+            <path d="M4 16 L16 17 L28 15 L40 16 L52 14 L60 15" stroke="#9b97ad" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="row">
+          <div class="row-main">
+            <div class="row-name">坐姿哑铃推举</div>
+            <div class="row-sub">肩 · 推举</div>
+            <div class="row-load">上次 20 kg × 10</div>
+            <div class="row-1rm">估算 1RM 24 kg</div>
+          </div>
+          <svg class="row-spark" viewBox="0 0 64 28" fill="none" preserveAspectRatio="none">
+            <path d="M4 14 L16 15 L28 13 L40 15 L52 14 L60 15" stroke="#9b97ad" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="row">
+          <div class="row-main">
+            <div class="row-name">绳索下压</div>
+            <div class="row-sub">臂 · 绳索</div>
+            <div class="row-load">上次 25 kg × 12</div>
+            <div class="row-1rm">估算 1RM 29 kg</div>
+          </div>
+          <svg class="row-spark" viewBox="0 0 64 28" fill="none" preserveAspectRatio="none">
+            <path d="M4 18 L16 16 L28 17 L40 14 L52 15 L60 12" stroke="#1f8a53" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

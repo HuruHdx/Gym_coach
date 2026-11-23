@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="1020"
+      style="width:390px;height:1020px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 1020px; background: #f4f3f8; position: relative; overflow: hidden; margin: 0 auto; }
+  .wrap { padding: 0 20px; }
+  .nav { display: flex; align-items: center; padding-top: 18px; }
+  .nav-back { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #6f6a8c; }
+  .nav-back i { font-style: normal; font-size: 17px; }
+
+  .muscle { margin-top: 14px; font-size: 10.5px; font-weight: 700; letter-spacing: .12em; color: #9b97ad; }
+  .title-row { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+  .title { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+  .pr-tag { background: #17161c; color: #ece7fb; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 5px; }
+
+  /* 趋势结论条 */
+  .verdict { margin-top: 15px; background: #f3effe; border-radius: 16px; padding: 14px 15px; }
+  .verdict-main { font-size: 15px; font-weight: 800; color: #17161c; }
+  .verdict-sub { font-size: 11.5px; color: #6b46e5; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .verdict-sub span { color: #9b97ad; font-weight: 600; }
+
+  .sec-title { font-size: 12.5px; font-weight: 800; color: #54506b; margin: 20px 0 8px; }
+
+  .chart-card { border-top: 1px solid #e8e5f0; padding-top: 6px; }
+  .chart-card svg { display: block; width: 100%; height: auto; }
+
+  /* 下次建议 */
+  .advice { border: 1px solid #e8e5f0; background: #fff; border-radius: 16px; padding: 14px 15px; }
+  .advice-head { display: flex; align-items: center; justify-content: space-between; }
+  .advice-label { font-size: 12px; font-weight: 800; color: #54506b; }
+  .advice-kind { font-size: 9px; font-weight: 700; color: #9b97ad; border: 1px dashed #d9d4ea; border-radius: 6px; padding: 2px 7px; }
+  .advice-main { margin-top: 8px; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .advice-main small { font-size: 11px; font-weight: 600; color: #9b97ad; margin-left: 3px; }
+  .advice-reason { margin-top: 6px; font-size: 11px; color: #6f6a8c; line-height: 1.6; }
+
+  .history { border-top: 1px solid #e8e5f0; }
+  .h-row { padding: 13px 0; }
+  .h-row + .h-row { border-top: 1px solid #e8e5f0; }
+  .h-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .h-date { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .h-split { font-size: 10.5px; color: #9b97ad; margin-top: 3px; }
+  .h-load { text-align: right; }
+  .h-load b { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .h-delta { font-size: 10.5px; font-weight: 700; margin-top: 3px; }
+  .h-delta.up { color: #1f8a53; }
+  .h-delta.flat { color: #9b97ad; }
+  .h-sets { margin-top: 7px; font-size: 11px; color: #6f6a8c; font-variant-numeric: tabular-nums; line-height: 1.6; }
+
+  .entry { margin-top: 20px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e8e5f0; padding: 14px 0 0; }
+  .entry-main { font-size: 13.5px; font-weight: 700; }
+  .entry-sub { font-size: 10.5px; color: #9b97ad; margin-top: 3px; }
+  .chev { color: #c6c1da; font-size: 16px; }
+</style>
+</head>
+<body style="width:390px;height:1020px;">
+<main data-canvas-root style="width:390px;height:1020px;">
+  <div class="screen">
+    <div class="wrap">
+      <div class="nav"><div class="nav-back"><i>‹</i> 返回</div></div>
+
+      <div class="muscle">胸 · 水平推</div>
+      <div class="title-row"><div class="title">杠铃平板卧推</div><span class="pr-tag">PR</span></div>
+
+      <!-- 趋势结论：一句话判断 + 关键变化 -->
+      <div class="verdict">
+        <div class="verdict-main">稳步加重，状态在上升</div>
+        <div class="verdict-sub">55 → 60 kg <span>·</span> 连续 2 场加重 <span>·</span> 最好 65 kg</div>
+      </div>
+
+      <div class="sec-title">重量走势</div>
+      <div class="chart-card">
+        <svg viewBox="0 0 350 150" fill="none" preserveAspectRatio="xMidYMid meet">
+          <line x1="28" y1="14" x2="340" y2="14" stroke="#e8e5f0" stroke-dasharray="3 4"/>
+          <line x1="28" y1="52" x2="340" y2="52" stroke="#e8e5f0" stroke-dasharray="3 4"/>
+          <line x1="28" y1="90" x2="340" y2="90" stroke="#e8e5f0" stroke-dasharray="3 4"/>
+          <line x1="28" y1="128" x2="340" y2="128" stroke="#e8e5f0" stroke-dasharray="3 4"/>
+          <text x="20" y="18" text-anchor="end" font-size="9" fill="#9b97ad">65</text>
+          <text x="20" y="56" text-anchor="end" font-size="9" fill="#9b97ad">60</text>
+          <text x="20" y="94" text-anchor="end" font-size="9" fill="#9b97ad">55</text>
+          <text x="20" y="132" text-anchor="end" font-size="9" fill="#9b97ad">50</text>
+          <path d="M28,90 L90.4,71 L152.8,90 L215.2,71 L277.6,52 L340,52 L340,128 L28,128 Z" fill="#6b46e5" fill-opacity="0.10"/>
+          <path d="M28,90 L90.4,71 L152.8,90 L215.2,71 L277.6,52 L340,52" stroke="#6b46e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="28" cy="90" r="4" fill="#fff" stroke="#6b46e5" stroke-width="2"/>
+          <circle cx="90.4" cy="71" r="4" fill="#fff" stroke="#6b46e5" stroke-width="2"/>
+          <circle cx="152.8" cy="90" r="4" fill="#fff" stroke="#6b46e5" stroke-width="2"/>
+          <circle cx="215.2" cy="71" r="4" fill="#fff" stroke="#6b46e5" stroke-width="2"/>
+          <circle cx="277.6" cy="52" r="4" fill="#fff" stroke="#6b46e5" stroke-width="2"/>
+          <circle cx="340" cy="52" r="4.5" fill="#6b46e5" stroke="#6b46e5" stroke-width="2"/>
+          <text x="340" y="42" text-anchor="end" font-size="10" font-weight="800" fill="#17161c">60</text>
+          <text x="28" y="145" text-anchor="middle" font-size="9" fill="#9b97ad">11-03</text>
+          <text x="152.8" y="145" text-anchor="middle" font-size="9" fill="#9b97ad">11-09</text>
+          <text x="277.6" y="145" text-anchor="middle" font-size="9" fill="#9b97ad">11-16</text>
+        </svg>
+      </div>
+
+      <!-- 下次建议：列表和历史都给不了的决策层 -->
+      <div class="sec-title">下次建议</div>
+      <div class="advice">
+        <div class="advice-head">
+          <div class="advice-label">本场之后怎么练</div>
+          <span class="advice-kind">规则建议</span>
+        </div>
+        <div class="advice-main">62.5 kg <small>× 8 · 4 组</small></div>
+        <div class="advice-reason">上次 8 次完成、主观感觉轻松，次数有余量，可加 2.5 kg；若动作变形或次数掉到 6 次以内，退回 60 kg 维持。</div>
+      </div>
+
+      <div class="sec-title">每次做组</div>
+      <div class="history">
+        <div class="h-row">
+          <div class="h-top">
+            <div>
+              <div class="h-date">11-19</div>
+              <div class="h-split">胸肩三头 · 4 组完成</div>
+            </div>
+            <div class="h-load">
+              <b>60 kg × 8</b>
+              <div class="h-delta up">较上场 +2.5 kg</div>
+            </div>
+          </div>
+          <div class="h-sets">60kg×8 · 57.5kg×10 · 55kg×10 · 55kg×10</div>
+        </div>
+        <div class="h-row">
+          <div class="h-top">
+            <div>
+              <div class="h-date">11-16</div>
+              <div class="h-split">胸肩三头 · 4 组完成</div>
+            </div>
+            <div class="h-load">
+              <b>57.5 kg × 8</b>
+              <div class="h-delta flat">较上场持平</div>
+            </div>
+          </div>
+          <div class="h-sets">57.5kg×8 · 55kg×10 · 55kg×10 · 52.5kg×10</div>
+        </div>
+        <div class="h-row">
+          <div class="h-top">
+            <div>
+              <div class="h-date">11-13</div>
+              <div class="h-split">胸肩三头 · 3 组完成</div>
+            </div>
+            <div class="h-load">
+              <b>57.5 kg × 10</b>
+              <div class="h-delta up">较上场 +2.5 kg</div>
+            </div>
+          </div>
+          <div class="h-sets">57.5kg×10 · 55kg×10 · 52.5kg×12</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div>
+          <div class="entry-main">查看动作要领</div>
+          <div class="entry-sub">发力提示 · 常见错误 · 示范图</div>
+        </div>
+        <div class="chev">›</div>
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>
