@@ -20,69 +20,48 @@
   .nav-back { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #6f6a8c; }
   .nav-back i { font-style: normal; font-size: 17px; }
 
-  /* 计划封面 */
-  .cover { margin-top: 12px; height: 164px; border-radius: 18px; position: relative; overflow: hidden; color: #fff;
-    background: linear-gradient(165deg, #38304a 0%, #17161c 78%); padding: 14px 16px; display: flex; flex-direction: column; }
+  /* 计划封面：只压标题与标签，不堆统计 */
+  .cover { margin-top: 12px; height: 172px; border-radius: 18px; position: relative; overflow: hidden; color: #fff;
+    background: linear-gradient(150deg, #2f2a3d 0%, #17161c 80%); padding: 16px; display: flex; flex-direction: column; }
   .cover-tags { display: flex; gap: 6px; }
   .cover-tag { font-size: 9.5px; font-weight: 700; background: rgba(255,255,255,.16); border-radius: 6px; padding: 3px 8px; }
   .cover-tag.level { background: transparent; border: 1px solid rgba(255,255,255,.28); }
-  .cover-title { font-size: 26px; font-weight: 800; letter-spacing: -.02em; margin-top: auto; }
-  .cover-author { font-size: 10.5px; color: rgba(255,255,255,.6); margin-top: 5px; }
-  .cover-stats { display: flex; gap: 14px; margin-top: 9px; font-size: 11.5px; color: rgba(255,255,255,.82); font-weight: 600; }
-  .cover-stats b { font-weight: 800; color: #fff; }
+  .cover-title { font-size: 25px; font-weight: 800; letter-spacing: -.02em; margin-top: auto; }
 
-  .desc { margin-top: 12px; font-size: 12px; line-height: 1.65; color: #6f6a8c; }
-  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  /* 计划本身属性：一行，扁平 */
+  .meta-row { display: flex; gap: 16px; margin-top: 13px; font-size: 12px; font-weight: 700; color: #383448; }
+  .meta-row span small { font-size: 10.5px; color: #9b97ad; font-weight: 600; margin-left: 2px; }
+  .desc { margin-top: 10px; font-size: 12px; line-height: 1.65; color: #6f6a8c; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
   .tag { font-size: 10px; font-weight: 700; color: #6f6a8c; border: 1px solid #e8e5f0; border-radius: 6px; padding: 3px 7px; background: #fff; }
 
-  .sec-head { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 2px; }
+  .sec-head { display: flex; align-items: center; margin: 20px 0 2px; }
   .sec-title { font-size: 12.5px; font-weight: 800; color: #54506b; }
-  .sec-more { font-size: 11.5px; font-weight: 700; color: #6b46e5; }
 
-  /* 板块行（扁平 + 发丝线） */
+  /* 板块行：扁平 + 发丝线，无状态标 */
   .blocks { border-top: 1px solid #e8e5f0; margin-top: 6px; }
-  .block { display: flex; align-items: center; gap: 12px; padding: 13px 0; }
+  .block { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
   .block + .block { border-top: 1px solid #e8e5f0; }
-  .block-no { width: 20px; flex: none; font-size: 15px; font-weight: 800; color: #9b97ad; font-variant-numeric: tabular-nums; }
+  .block-no { width: 18px; flex: none; font-size: 15px; font-weight: 800; color: #9b97ad; font-variant-numeric: tabular-nums; }
   .block-main { flex: 1; min-width: 0; }
-  .block-title-row { display: flex; align-items: center; gap: 6px; }
   .block-title { font-size: 14.5px; font-weight: 800; }
-  .badge { font-size: 9px; font-weight: 800; border-radius: 4px; padding: 2px 5px; }
-  .badge.today { background: #6b46e5; color: #fff; }
-  .badge.done { background: #eafaf1; color: #1f8a53; }
   .block-meta { font-size: 10.5px; color: #9b97ad; margin-top: 4px; }
   .block-chev { color: #c6c1da; font-size: 16px; flex: none; }
-
-  .prog { margin-top: 18px; border-top: 1px solid #e8e5f0; padding-top: 13px; }
-  .prog-row { display: flex; justify-content: space-between; font-size: 11px; color: #6f6a8c; padding: 4px 0; }
-  .prog-row b { color: #17161c; font-weight: 800; }
-  .prog-bar { height: 3px; border-radius: 2px; background: #eee9fb; margin-top: 8px; position: relative; }
-  .prog-bar::after { content: ""; position: absolute; left: 0; top: 0; height: 3px; width: 66%; border-radius: 2px; background: #6b46e5; }
-
-  .last { margin-top: 16px; border-top: 1px solid #e8e5f0; padding-top: 12px; font-size: 10.5px; color: #9b97ad; line-height: 1.7; }
-  .last b { color: #54506b; font-weight: 700; }
 
   .cta { position: absolute; left: 20px; right: 20px; bottom: 26px; background: #6b46e5; color: #fff; font-size: 15px; font-weight: 800; text-align: center; padding: 14px 0; border-radius: 15px; }
   .cta-note { position: absolute; left: 20px; right: 20px; bottom: 8px; text-align: center; font-size: 9.5px; color: #9b97ad; }
 
-  /* 右屏：板块展开 */
+  /* 右屏：板块动作清单 */
   .block-head { margin-top: 12px; }
   .bh-title { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
-  .bh-src { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 11.5px; color: #6f6a8c; font-weight: 600; }
-  .bh-stats { display: flex; gap: 13px; margin-top: 10px; font-size: 12px; font-weight: 700; color: #383448; }
-  .bh-stats small { font-size: 10.5px; color: #9b97ad; font-weight: 600; }
-  .bh-note { margin-top: 10px; font-size: 11px; color: #6f6a8c; line-height: 1.6; }
+  .bh-meta { display: flex; gap: 13px; margin-top: 9px; font-size: 12px; font-weight: 700; color: #383448; }
+  .bh-meta small { font-size: 10.5px; color: #9b97ad; font-weight: 600; }
 
-  .ex-list { border-top: 1px solid #e8e5f0; margin-top: 14px; }
-  .ex { display: flex; align-items: center; gap: 11px; padding: 10px 0; }
+  .ex-list { border-top: 1px solid #e8e5f0; margin-top: 16px; }
+  .ex { display: flex; align-items: center; gap: 11px; padding: 12px 0; }
   .ex + .ex { border-top: 1px solid #e8e5f0; }
-  .ex-thumb { width: 40px; height: 40px; border-radius: 11px; flex: none; display: flex; align-items: center; justify-content: center; }
-  .ex-thumb svg { width: 19px; height: 19px; stroke: #fff; }
-  .t1 { background: linear-gradient(135deg,#cdbcf7,#a98fe9); }
-  .t2 { background: linear-gradient(135deg,#c9dcf8,#96bdf1); }
-  .t3 { background: linear-gradient(135deg,#c3ecd7,#8fd6b4); }
-  .t4 { background: linear-gradient(135deg,#f9d9c9,#f0ad8d); }
-  .t5 { background: linear-gradient(135deg,#f6c9e0,#e793bd); }
+  .ex-thumb { width: 42px; height: 42px; border-radius: 11px; flex: none; background: #ece8f5; display: flex; align-items: center; justify-content: center; }
+  .ex-thumb svg { width: 19px; height: 19px; stroke: #b3abc9; }
   .ex-main { flex: 1; min-width: 0; }
   .ex-name-row { display: flex; align-items: center; gap: 6px; }
   .ex-name { font-size: 13.5px; font-weight: 700; }
@@ -91,34 +70,34 @@
   .ex-sets { flex: none; text-align: right; }
   .ex-sets b { font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .ex-sets span { display: block; font-size: 9.5px; color: #9b97ad; margin-top: 2px; }
-  .ex-edit { flex: none; font-size: 10.5px; font-weight: 800; color: #6b46e5; border: 1px solid #ddd6f3; background: #fff; border-radius: 8px; padding: 4px 8px; margin-left: 4px; }
+  .ex-chev { color: #c6c1da; font-size: 15px; flex: none; margin-left: 2px; }
 </style>
 </head>
 <body style="width:820px;height:900px;">
 <main data-canvas-root style="width:820px;height:900px;">
   <div class="stage">
 
-    <!-- 左：计划详情（整份计划 + 板块列表） -->
+    <!-- 左：计划详情（浏览态，只含计划本身信息） -->
     <div class="screen">
       <div class="wrap">
         <div class="nav"><div class="nav-back"><i>‹</i> 计划库</div></div>
 
         <div class="cover">
           <div class="cover-tags">
-            <span class="cover-tag">热门三分化</span>
+            <span class="cover-tag">三分化</span>
             <span class="cover-tag">增肌</span>
             <span class="cover-tag level">进阶</span>
           </div>
           <div class="cover-title">热门三分化</div>
-          <div class="cover-author">教练编排 · 贺东旭</div>
-          <div class="cover-stats">
-            <span>每周 <b>3</b> 练</span>
-            <span><b>3</b> 个板块</span>
-            <span>约 <b>60</b> 分钟</span>
-          </div>
         </div>
 
-        <div class="desc">推、拉、腿三分化，适合每周能练 3 次的进阶者；同一部位隔 48 小时再练。</div>
+        <div class="meta-row">
+          <span>3<small>板块</small></span>
+          <span>16<small>动作</small></span>
+          <span>约 60<small>分钟/场</small></span>
+        </div>
+
+        <div class="desc">推、拉、腿三分化；同一部位间隔恢复后再练，循环节奏以模板说明为准。</div>
 
         <div class="tag-row">
           <span class="tag">胸</span><span class="tag">肩</span><span class="tag">背</span>
@@ -126,18 +105,12 @@
           <span class="tag">杠铃</span><span class="tag">哑铃</span><span class="tag">绳索</span>
         </div>
 
-        <div class="sec-head">
-          <div class="sec-title">训练板块</div>
-          <div class="sec-more">跟练中 ›</div>
-        </div>
+        <div class="sec-head"><div class="sec-title">训练板块</div></div>
         <div class="blocks">
           <div class="block">
             <div class="block-no">1</div>
             <div class="block-main">
-              <div class="block-title-row">
-                <span class="block-title">胸肩三头</span>
-                <span class="badge today">推荐今日</span>
-              </div>
+              <div class="block-title">胸肩三头</div>
               <div class="block-meta">5 个动作 · 16 组 · 约 60 分钟</div>
             </div>
             <div class="block-chev">›</div>
@@ -145,10 +118,7 @@
           <div class="block">
             <div class="block-no">2</div>
             <div class="block-main">
-              <div class="block-title-row">
-                <span class="block-title">背 + 二头</span>
-                <span class="badge done">本周已练 ✓</span>
-              </div>
+              <div class="block-title">背 + 二头</div>
               <div class="block-meta">6 个动作 · 18 组 · 约 70 分钟</div>
             </div>
             <div class="block-chev">›</div>
@@ -156,102 +126,88 @@
           <div class="block">
             <div class="block-no">3</div>
             <div class="block-main">
-              <div class="block-title-row"><span class="block-title">腿 + 肩</span></div>
+              <div class="block-title">腿 + 肩</div>
               <div class="block-meta">5 个动作 · 15 组 · 约 65 分钟</div>
             </div>
             <div class="block-chev">›</div>
           </div>
         </div>
-
-        <div class="prog">
-          <div class="sec-head" style="margin-top:0;">
-            <div class="sec-title">本周进度</div>
-            <div class="sec-more">2 / 3 板块</div>
-          </div>
-          <div class="prog-bar"></div>
-          <div class="prog-row" style="margin-top:9px;"><span>已完成</span><b>胸肩三头 · 背 + 二头</b></div>
-          <div class="prog-row"><span>下周起手</span><b>腿 + 肩</b></div>
-        </div>
       </div>
       <div class="cta">加入跟练</div>
-      <div class="cta-note">跟练后每周按板块顺序推进，也可单次直接练</div>
+      <div class="cta-note">跟练进度与状态在「我的计划」里查看，本页只展示计划本身</div>
     </div>
 
-    <!-- 右：板块展开（动作清单） -->
+    <!-- 右：板块动作清单 -->
     <div class="screen">
       <div class="wrap">
         <div class="nav"><div class="nav-back"><i>‹</i> 热门三分化</div></div>
 
         <div class="block-head">
           <div class="bh-title">胸肩三头</div>
-          <div class="bh-src">第 1 个板块 <span class="badge today">推荐今日</span></div>
-          <div class="bh-stats">
+          <div class="bh-meta">
             <span>5 <small>动作</small></span>
             <span>16 <small>组</small></span>
             <span>约 60 <small>分钟</small></span>
           </div>
-          <div class="bh-note">胸为主，肩和三头收尾；组数、重量可按今天的状态调。</div>
         </div>
 
         <div class="ex-list">
           <div class="ex">
-            <div class="ex-thumb t1"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+            <div class="ex-thumb"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
             <div class="ex-main">
               <div class="ex-name-row"><span class="ex-name">杠铃平板卧推</span><span class="warm">热身 1 组</span></div>
-              <div class="ex-meta">胸 · 自由重量 · 上次 60 kg × 8</div>
+              <div class="ex-meta">胸 · 自由重量</div>
             </div>
             <div class="ex-sets"><b>4 组</b><span>8-12 次</span></div>
-            <div class="ex-edit">调</div>
+            <div class="ex-chev">›</div>
           </div>
           <div class="ex">
-            <div class="ex-thumb t2"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+            <div class="ex-thumb"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
             <div class="ex-main">
               <div class="ex-name-row"><span class="ex-name">哑铃上斜卧推</span></div>
-              <div class="ex-meta">胸上部 · 自由重量 · 上次 22 kg × 10</div>
+              <div class="ex-meta">胸上部 · 自由重量</div>
             </div>
             <div class="ex-sets"><b>4 组</b><span>10-12 次</span></div>
-            <div class="ex-edit">调</div>
+            <div class="ex-chev">›</div>
           </div>
           <div class="ex">
-            <div class="ex-thumb t3"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+            <div class="ex-thumb"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
             <div class="ex-main">
               <div class="ex-name-row"><span class="ex-name">双杠臂屈伸</span></div>
-              <div class="ex-meta">胸下部 · 自重 · 上次 10 次</div>
+              <div class="ex-meta">胸下部 · 自重</div>
             </div>
             <div class="ex-sets"><b>3 组</b><span>10-12 次</span></div>
-            <div class="ex-edit">调</div>
+            <div class="ex-chev">›</div>
           </div>
           <div class="ex">
-            <div class="ex-thumb t4"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+            <div class="ex-thumb"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
             <div class="ex-main">
               <div class="ex-name-row"><span class="ex-name">坐姿哑铃推举</span></div>
-              <div class="ex-meta">肩 · 自由重量 · 上次 20 kg × 10</div>
+              <div class="ex-meta">肩 · 自由重量</div>
             </div>
             <div class="ex-sets"><b>3 组</b><span>10-12 次</span></div>
-            <div class="ex-edit">调</div>
+            <div class="ex-chev">›</div>
           </div>
           <div class="ex">
-            <div class="ex-thumb t5"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+            <div class="ex-thumb"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
             <div class="ex-main">
               <div class="ex-name-row"><span class="ex-name">绳索下压</span></div>
-              <div class="ex-meta">臂 · 绳索 · 上次 25 kg × 12</div>
+              <div class="ex-meta">臂 · 绳索</div>
             </div>
             <div class="ex-sets"><b>3 组</b><span>12 次</span></div>
-            <div class="ex-edit">调</div>
+            <div class="ex-chev">›</div>
           </div>
         </div>
-
-        <div class="last">上次练这场 <b>11-19</b> · 60 分钟 · 16 组<br>卧推 <b>60 kg × 8</b>（本场 PR）</div>
       </div>
       <div class="cta">采纳为今日计划</div>
-      <div class="cta-note">点「调」改组数 / 重量 / 换动作，只影响今天这场</div>
+      <div class="cta-note">采纳后进草稿，可调组数 / 重量 / 换动作，只影响今天这场</div>
     </div>
 
   </div>
 
   <div class="stage">
-    <div class="caption">计划详情 `/plans/:id`<small>封面图 + 计划元信息 + 部位器械标签 + 板块列表（扁平发丝线）</small></div>
-    <div class="caption">板块展开（动作清单）<small>缩略图 / 组×次数 / 热身 / 上次记录；「调」进草稿，只覆盖本次</small></div>
+    <div class="caption">计划详情 `/plans/:id`（浏览态）<small>封面 + 计划属性 + 板块列表；不含跟练进度与个人记录</small></div>
+    <div class="caption">板块动作清单<small>缩略图 / 肌群器械 / 组×次 / 热身；行点进动作详情</small></div>
   </div>
 </main>
 </body>
