@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="884"
+      style="width:390px;height:884px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 844px; background: #f4f3f8; position: relative; overflow: hidden; border-radius: 24px; margin: 20px auto 0; }
+  .caption { width: 390px; margin: 12px auto 0; text-align: center; font-size: 12.5px; font-weight: 800; color: #54506b; }
+  .caption small { display: block; font-size: 10.5px; color: #8e8ba3; font-weight: 500; margin-top: 4px; }
+
+  .wrap { padding: 0 20px; }
+  .card { background: #fff; border: 1px solid #ece9f2; border-radius: 16px; }
+
+  .nav { display: flex; align-items: center; justify-content: space-between; padding-top: 18px; }
+  .nav-back { width: 32px; height: 32px; border-radius: 10px; background: #fff; border: 1px solid #ece9f2; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; }
+  .nav-title { font-size: 12px; font-weight: 700; color: #9b97ad; }
+  .nav-ph { width: 32px; }
+
+  .detail-title { font-size: 30px; font-weight: 800; letter-spacing: -.02em; margin-top: 14px; }
+  .detail-src { font-size: 12px; color: #6f6a8c; font-weight: 600; margin-top: 6px; }
+  .detail-stats { display: flex; gap: 14px; margin-top: 12px; }
+  .stat { font-size: 12px; color: #383448; font-weight: 700; }
+  .stat small { color: #9b97ad; font-weight: 600; }
+
+  .week-strip { display: flex; gap: 6px; margin-top: 16px; }
+  .day { flex: 1; text-align: center; padding: 8px 0; border-radius: 10px; font-size: 11px; font-weight: 700; color: #6f6a8c; background: #fff; border: 1px solid #ece9f2; }
+  .day.on { background: #17161c; color: #fff; border-color: #17161c; }
+
+  .block-head { display: flex; align-items: baseline; gap: 10px; margin: 20px 0 8px; }
+  .block-no { font-size: 22px; font-weight: 800; color: #6b46e5; font-variant-numeric: tabular-nums; }
+  .block-title { font-size: 15px; font-weight: 800; }
+  .block-sub { font-size: 10.5px; color: #9b97ad; margin-top: 2px; }
+
+  .ex-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .ex-row + .ex-row { border-top: 1px solid #e8e5f0; }
+  .ex-thumb { width: 44px; height: 44px; border-radius: 12px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .ex-thumb svg { width: 20px; height: 20px; stroke: #fff; }
+  .t1 { background: linear-gradient(135deg,#cdbcf7,#a98fe9); }
+  .t2 { background: linear-gradient(135deg,#c9dcf8,#96bdf1); }
+  .t3 { background: linear-gradient(135deg,#c3ecd7,#8fd6b4); }
+  .t4 { background: linear-gradient(135deg,#f9d9c9,#f0ad8d); }
+  .t5 { background: linear-gradient(135deg,#f6c9e0,#e793bd); }
+  .ex-main { flex: 1; min-width: 0; }
+  .ex-name { font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .warm-tag { font-size: 9px; font-weight: 700; color: #9b97ad; border: 1px dashed #d9d4ea; border-radius: 5px; padding: 1px 5px; }
+  .ex-plan { font-size: 10.5px; color: #9b97ad; margin-top: 3px; }
+  .ex-chev { color: #c6c1da; font-size: 16px; flex: none; }
+
+  .cta { position: absolute; left: 20px; right: 20px; bottom: 22px; background: #6b46e5; color: #fff; font-size: 15px; font-weight: 800; text-align: center; padding: 14px 0; border-radius: 15px; }
+  .cta-hint { position: absolute; left: 20px; right: 20px; bottom: 4px; text-align: center; font-size: 9.5px; color: #9b97ad; }
+</style>
+</head>
+<body style="width:390px;height:884px;">
+<main data-canvas-root style="width:390px;height:884px;">
+  <div class="screen">
+    <div class="wrap">
+      <div class="nav">
+        <div class="nav-back">‹</div>
+        <div class="nav-title">计划详情</div>
+        <div class="nav-ph"></div>
+      </div>
+
+      <div class="detail-title">胸肩三头</div>
+      <div class="detail-src">热门模板 · 第 1 个板块</div>
+      <div class="detail-stats">
+        <div class="stat">5 <small>动作</small></div>
+        <div class="stat">16 <small>组</small></div>
+        <div class="stat">约 60 <small>分钟</small></div>
+      </div>
+
+      <div class="week-strip">
+        <div class="day">一</div>
+        <div class="day">二</div>
+        <div class="day on">三</div>
+        <div class="day">四</div>
+        <div class="day">五</div>
+        <div class="day">六</div>
+        <div class="day">日</div>
+      </div>
+
+      <div class="block-head">
+        <div class="block-no">1</div>
+        <div>
+          <div class="block-title">胸肩三头</div>
+          <div class="block-sub">5 个动作 · 约 55–75 分钟</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ex-row">
+          <div class="ex-thumb t1"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="ex-main">
+            <div class="ex-name">杠铃平板卧推 <span class="warm-tag">含 1 组热身</span></div>
+            <div class="ex-plan">3 组 · 12 / 10 / 8 次</div>
+          </div>
+          <div class="ex-chev">›</div>
+        </div>
+        <div class="ex-row">
+          <div class="ex-thumb t2"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="ex-main">
+            <div class="ex-name">哑铃上斜卧推</div>
+            <div class="ex-plan">4 组 · 12 次</div>
+          </div>
+          <div class="ex-chev">›</div>
+        </div>
+        <div class="ex-row">
+          <div class="ex-thumb t3"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="ex-main">
+            <div class="ex-name">双杠臂屈伸</div>
+            <div class="ex-plan">4 组 · 12 次</div>
+          </div>
+          <div class="ex-chev">›</div>
+        </div>
+        <div class="ex-row">
+          <div class="ex-thumb t4"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="ex-main">
+            <div class="ex-name">杠铃仰卧臂屈伸</div>
+            <div class="ex-plan">4 组 · 15 次</div>
+          </div>
+          <div class="ex-chev">›</div>
+        </div>
+        <div class="ex-row">
+          <div class="ex-thumb t5"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="ex-main">
+            <div class="ex-name">哑铃侧平举</div>
+            <div class="ex-plan">3 组 · 10 + 10 次</div>
+          </div>
+          <div class="ex-chev">›</div>
+        </div>
+      </div>
+    </div>
+    <div class="cta">采纳为今日计划</div>
+    <div class="cta-hint">采纳后回到今日页，点「开始这场」开练</div>
+  </div>
+
+  <div class="caption">计划详情 `/plans/:id`<small>编号板块 + 动作行（缩略图 / 组次 / 热身标注，点行进动作详情）+ 底部固定 CTA</small></div>
+</main>
+</body>
+</html>
