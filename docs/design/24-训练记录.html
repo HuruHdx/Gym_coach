@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="860" data-canvas-height="940"
+      style="width:860px;height:940px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .stage { display: flex; gap: 20px; padding: 20px 20px 0; }
+  .screen { width: 390px; height: 844px; background: #f4f3f8; position: relative; overflow: hidden; border-radius: 24px; }
+  .caption { width: 390px; text-align: center; font-size: 12.5px; font-weight: 800; color: #54506b; padding-top: 12px; }
+  .caption small { display: block; font-size: 10.5px; color: #8e8ba3; font-weight: 500; margin-top: 4px; }
+
+  .wrap { padding: 0 20px; }
+  .nav { display: flex; align-items: center; padding-top: 18px; }
+  .nav-back { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #6f6a8c; }
+  .nav-back i { font-style: normal; font-size: 17px; }
+  .h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; margin-top: 10px; }
+  .h1-sub { font-size: 12px; color: #9b97ad; margin-top: 4px; }
+
+  /* 概览三格 */
+  .overview { display: flex; margin-top: 14px; background: #fff; border: 1px solid #e8e5f0; border-radius: 16px; overflow: hidden; }
+  .ov-cell { flex: 1; padding: 14px 8px; text-align: center; }
+  .ov-cell + .ov-cell { border-left: 1px solid #e8e5f0; }
+  .ov-num { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ov-num small { font-size: 11px; font-weight: 700; color: #9b97ad; margin-left: 1px; }
+  .ov-label { font-size: 10.5px; color: #9b97ad; margin-top: 3px; }
+
+  /* 场次列表 */
+  .list { margin-top: 16px; }
+  .s-row { padding: 15px 0; }
+  .s-row + .s-row { border-top: 1px solid #e8e5f0; }
+  .s-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .s-title { font-size: 14.5px; font-weight: 800; }
+  .s-progress { font-size: 11.5px; font-weight: 700; color: #6f6a8c; font-variant-numeric: tabular-nums; flex: none; }
+  .s-facts { margin-top: 5px; font-size: 11px; color: #9b97ad; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+  .trend { font-weight: 800; font-size: 11px; }
+  .trend.up { color: #1f8a53; }
+  .trend.down { color: #d9534f; }
+  .trend.flat { color: #9b97ad; }
+  .s-result { margin-top: 6px; font-size: 11.5px; font-weight: 800; color: #6b46e5; }
+  .empty { margin-top: 26px; font-size: 12px; color: #9b97ad; line-height: 1.7; text-align: center; }
+
+  /* 抽屉态 */
+  .scrim { position: absolute; inset: 0; background: rgba(23,22,28,.38); }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: #f4f3f8; border-radius: 24px 24px 0 0; max-height: 88%; display: flex; flex-direction: column; }
+  .sheet-head { padding: 16px 20px 0; }
+  .sheet-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .sheet-date { font-size: 10.5px; font-weight: 700; letter-spacing: .12em; color: #9b97ad; }
+  .sheet-title { font-size: 20px; font-weight: 800; margin-top: 4px; }
+  .sheet-close { flex: none; width: 30px; height: 30px; border-radius: 9px; border: 1px solid #e8e5f0; background: #fff; display: grid; place-items: center; color: #6f6a8c; font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .chip { font-size: 10.5px; font-weight: 700; color: #6f6a8c; background: #fff; border: 1px solid #e8e5f0; border-radius: 8px; padding: 5px 10px; }
+  .chip.ok { color: #1f8a53; background: rgba(31,138,83,.08); border-color: rgba(31,138,83,.18); }
+  .sheet-body { padding: 16px 20px 0; overflow: hidden; }
+  .sec-label { font-size: 10.5px; font-weight: 800; letter-spacing: .12em; color: #9b97ad; }
+  .ex { margin-top: 12px; background: #fff; border: 1px solid #e8e5f0; border-radius: 16px; padding: 12px 13px; }
+  .ex-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .ex-name { font-size: 13.5px; font-weight: 800; }
+  .ex-muscle { font-size: 10px; color: #9b97ad; font-weight: 600; margin-left: 5px; }
+  .ex-delta { font-size: 10.5px; font-weight: 800; flex: none; margin-top: 2px; }
+  .ex-delta.up { color: #1f8a53; }
+  .ex-delta.flat { color: #9b97ad; }
+  .ex-sub { margin-top: 4px; font-size: 10.5px; color: #9b97ad; }
+  .ex-sets { margin-top: 8px; border-top: 1px solid #f0edf6; padding-top: 8px; font-size: 11px; color: #54506b; line-height: 1.8; font-variant-numeric: tabular-nums; }
+  .summary { margin-top: 16px; background: #fff; border: 1px solid #e8e5f0; border-radius: 16px; padding: 13px 14px; }
+  .summary p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.7; color: #17161c; }
+  .sheet-foot { padding: 14px 20px 22px; }
+  .foot-btn { height: 44px; border-radius: 13px; border: 1px solid #e8e5f0; background: #fff; font-size: 13.5px; font-weight: 800; color: #54506b; display: grid; place-items: center; }
+</style>
+</head>
+<body style="width:860px;height:940px;">
+<main data-canvas-root style="width:860px;height:940px;">
+  <div class="stage">
+
+    <!-- 一：记录列表 -->
+    <div class="screen">
+      <div class="wrap">
+        <div class="nav"><div class="nav-back"><i>‹</i> 训练</div></div>
+        <div class="h1">训练记录</div>
+        <div class="h1-sub">近 30 天</div>
+
+        <div class="overview">
+          <div class="ov-cell"><div class="ov-num">8<small> 场</small></div><div class="ov-label">训练场次</div></div>
+          <div class="ov-cell"><div class="ov-num">11.5<small> h</small></div><div class="ov-label">总时长</div></div>
+          <div class="ov-cell"><div class="ov-num">92<small>%</small></div><div class="ov-label">完成率</div></div>
+        </div>
+
+        <div class="list">
+          <div class="s-row">
+            <div class="s-top">
+              <div class="s-title">胸肩三头 · 11-19</div>
+              <div class="s-progress">16/18 组</div>
+            </div>
+            <div class="s-facts">5 个动作 · 62 分钟 · 容量 <span class="trend up">↑</span></div>
+            <div class="s-result">卧推破纪录 · +2.5 kg</div>
+          </div>
+          <div class="s-row">
+            <div class="s-top">
+              <div class="s-title">背 + 二头 · 11-16</div>
+              <div class="s-progress">18/18 组</div>
+            </div>
+            <div class="s-facts">6 个动作 · 70 分钟 · 容量 <span class="trend up">↑</span></div>
+            <div class="s-result">高位下拉 +2.5 kg</div>
+          </div>
+          <div class="s-row">
+            <div class="s-top">
+              <div class="s-title">腿 + 肩 · 11-13</div>
+              <div class="s-progress">15/15 组</div>
+            </div>
+            <div class="s-facts">5 个动作 · 65 分钟 · 容量 <span class="trend flat">—</span></div>
+          </div>
+          <div class="s-row">
+            <div class="s-top">
+              <div class="s-title">胸肩三头 · 11-09</div>
+              <div class="s-progress">15/16 组</div>
+            </div>
+            <div class="s-facts">5 个动作 · 58 分钟 · 容量 <span class="trend down">↓</span></div>
+          </div>
+        </div>
+
+        <div class="empty">更早的记录向上滚动加载；<br>还没有训练时不放假数据。</div>
+      </div>
+    </div>
+
+    <!-- 二：场次抽屉 -->
+    <div class="screen">
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="sheet-head">
+          <div class="sheet-top">
+            <div>
+              <div class="sheet-date">2025-11-19</div>
+              <div class="sheet-title">胸肩三头</div>
+            </div>
+            <div class="sheet-close">×</div>
+          </div>
+          <div class="chips">
+            <span class="chip ok">已完成</span>
+            <span class="chip">16/18 组</span>
+            <span class="chip">62 分钟</span>
+          </div>
+        </div>
+
+        <div class="sheet-body">
+          <div class="sec-label">动作组次 · 5</div>
+
+          <div class="ex">
+            <div class="ex-top">
+              <div class="ex-name">杠铃平板卧推<span class="ex-muscle">胸</span></div>
+              <div class="ex-delta up">+2.5 kg</div>
+            </div>
+            <div class="ex-sub">本场最高 60 kg · 上场 57.5 kg · 4 组</div>
+            <div class="ex-sets">60kg × 8 · 轻松<br>57.5kg × 10 · 55kg × 10 · 55kg × 10</div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-top">
+              <div class="ex-name">高位下拉<span class="ex-muscle">背</span></div>
+              <div class="ex-delta up">+2.5 kg</div>
+            </div>
+            <div class="ex-sub">本场最高 55 kg · 上场 52.5 kg · 4 组</div>
+            <div class="ex-sets">55kg × 10 · 52.5kg × 12 · 52.5kg × 12 · 50kg × 12</div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-top">
+              <div class="ex-name">哑铃侧平举<span class="ex-muscle">肩</span></div>
+              <div class="ex-delta flat">持平</div>
+            </div>
+            <div class="ex-sub">本场最高 12 kg · 上场 12 kg · 3 组</div>
+            <div class="ex-sets">12kg × 12 · 12kg × 12 · 10kg × 12</div>
+          </div>
+
+          <div class="summary">
+            <div class="sec-label">教练总结</div>
+            <p>卧推冲到 60kg 完成 8 次，状态在线；侧平举可以再放慢下落控制。下一场胸推维持 60kg，次数稳住再考虑加重。</p>
+          </div>
+        </div>
+
+        <div class="sheet-foot">
+          <div class="foot-btn">关闭</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="stage">
+    <div class="caption">训练记录列表 `/training/records`<small>近 30 天概览（场次/时长/完成率）· 场次行：完成度 · 事实 · 突破句 · 点开场次抽屉</small></div>
+    <div class="caption">场次抽屉（现有 SessionDetailSheet 深化）<small>动作分组 + 每组明细 + 上场对比 + 教练总结；历史场次底部关闭，今日场次回今日/海报</small></div>
+  </div>
+</main>
+</body>
+</html>

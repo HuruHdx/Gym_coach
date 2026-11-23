@@ -14,6 +14,7 @@ let loadingCount = 0;
 let loadingText = "处理中…";
 const listeners = new Set<Listener>();
 
+<<<<<<< HEAD
 type FeedbackSnapshot = {
   toasts: ToastItem[];
   loading: boolean;
@@ -23,6 +24,13 @@ type FeedbackSnapshot = {
 let snapshot: FeedbackSnapshot = {
   toasts,
   loading: false,
+=======
+// 快照必须缓存同一个对象引用：useSyncExternalStore 用 Object.is 比较，
+// 每次返回新对象会被判定为"永远在变"，导致 React 无限重渲染（首页白屏）。
+let snapshot = {
+  toasts,
+  loading: loadingCount > 0,
+>>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
   loadingText,
 };
 

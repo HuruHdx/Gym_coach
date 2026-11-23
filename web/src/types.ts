@@ -80,6 +80,7 @@ export type SetLog = {
   completed: boolean;
   feeling?: string | null;
   note?: string | null;
+  is_warmup?: boolean;
 };
 
 export type TrainingSession = {

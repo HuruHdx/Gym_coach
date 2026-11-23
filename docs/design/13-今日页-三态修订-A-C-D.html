@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="1250" data-canvas-height="1000"
+      style="width:1250px;height:1000px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .stage { display: flex; gap: 20px; padding: 20px 20px 0; }
+  .screen { width: 390px; height: 844px; background: #f4f3f8; position: relative; overflow: hidden; border-radius: 24px; }
+  .caption { width: 390px; text-align: center; font-size: 12.5px; font-weight: 800; color: #54506b; padding-top: 14px; }
+  .caption small { display: block; font-size: 10.5px; color: #8e8ba3; font-weight: 500; margin-top: 4px; }
+
+  .wrap { padding: 0 20px; }
+  .brand { font-size: 11px; letter-spacing: .14em; color: #9b97ad; font-weight: 700; padding-top: 20px; }
+  .head-row { display: flex; align-items: flex-start; justify-content: space-between; margin-top: 8px; }
+  .h1 { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+  .head-date { font-size: 12px; font-weight: 600; color: #9b97ad; padding-top: 8px; }
+  .clock-col { text-align: right; }
+  .clock-label { font-size: 10px; font-weight: 700; color: #9b97ad; letter-spacing: .08em; }
+  .clock { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1.1; margin-top: 2px; }
+  .end-btn { display: inline-block; margin-top: 6px; border: 1px solid #d9d4ea; background: rgba(255,255,255,.7); color: #6b46e5; font-size: 11px; font-weight: 700; padding: 5px 11px; border-radius: 9px; }
+
+  .hero { position: relative; overflow: hidden; border-radius: 20px; padding: 14px 16px; margin-top: 12px;
+    background: linear-gradient(135deg, #eee7fc 0%, #f6f2fd 52%, #ffffff 100%); border: 1px solid #ece9f2; }
+
+  .seg { display: flex; background: rgba(255,255,255,.65); border: 1px solid rgba(255,255,255,.9); border-radius: 12px; padding: 4px; }
+  .seg-item { flex: 1; text-align: center; font-size: 13px; font-weight: 700; color: #9b97ad; padding: 8px 0; border-radius: 9px; }
+  .seg-item.on { background: #fff; color: #17161c; box-shadow: 0 1px 3px rgba(23,22,28,.10); }
+
+  .src-line { font-size: 12px; color: #6f6a8c; font-weight: 600; margin-top: 12px; }
+  .title-row { display: flex; align-items: flex-start; justify-content: space-between; margin-top: 6px; }
+  .title { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+  .tag { background: #ece7fb; color: #6b46e5; font-size: 10px; font-weight: 700; padding: 4px 9px; border-radius: 6px; margin-top: 8px; }
+  .tag.done { background: #eafaf1; color: #1f8a53; }
+  .sub { font-size: 12px; color: #6f6a8c; margin-top: 6px; }
+
+  /* 空态 */
+  .idle-art { margin: 6px auto 14px; width: 132px; height: 108px; }
+  .idle-title { font-size: 23px; font-weight: 800; letter-spacing: -.01em; text-align: center; }
+  .idle-sub { font-size: 12.5px; color: #6f6a8c; line-height: 1.7; text-align: center; margin-top: 8px; padding: 0 10px; }
+  .idle-cta { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .btn-main { flex: 1; background: #6b46e5; color: #fff; font-size: 15px; font-weight: 800; text-align: center; padding: 13px 0; border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .btn-main .arrow { width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; }
+  .btn-main .arrow svg { width: 12px; height: 12px; stroke: #fff; }
+  .btn-ghost { background: rgba(255,255,255,.7); border: 1px solid #d9d4ea; color: #17161c; font-size: 13px; font-weight: 700; text-align: center; padding: 13px 0; border-radius: 14px; }
+
+  /* 当前动作 */
+  .cur-head { display: flex; gap: 14px; margin-top: 14px; }
+  .thumb-lg { width: 56px; height: 56px; border-radius: 16px; flex: none; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg,#cdbcf7,#a98fe9); }
+  .thumb-lg svg { width: 28px; height: 28px; stroke: #fff; }
+  .cur-name { font-size: 21px; font-weight: 800; letter-spacing: -.01em; }
+  .cur-sub { font-size: 11.5px; color: #6f6a8c; margin-top: 6px; line-height: 1.6; }
+  .cur-sub b { color: #17161c; }
+  .cue { margin-top: 12px; display: flex; gap: 8px; align-items: flex-start; }
+  .cue-tag { flex: none; font-size: 10px; font-weight: 800; color: #6b46e5; padding-top: 2px; letter-spacing: .04em; }
+  .cue-text { flex: 1; font-size: 12px; line-height: 1.65; color: #383448; }
+  .cue-more { margin-top: 6px; font-size: 11px; font-weight: 700; color: #6b46e5; }
+  .bar-track { margin-top: 14px; height: 4px; background: #e6e2f0; border-radius: 2px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 13%; background: #6b46e5; border-radius: 2px; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 11px; color: #9b97ad; margin-top: 8px; }
+  .cta-row { margin-top: 14px; }
+
+  /* D 教练总结 */
+  .summary-head { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .state-pill { flex: none; font-size: 10px; font-weight: 800; color: #6b46e5; background: #ece7fb; border-radius: 6px; padding: 3px 8px; }
+  .summary { margin-top: 6px; font-size: 11.5px; line-height: 1.6; color: #383448; }
+  .summary b { color: #6b46e5; font-weight: 700; }
+  .mini-row { display: flex; margin-top: 12px; border-top: 1px solid #ece9f2; padding-top: 12px; }
+  .mini { flex: 1; }
+  .mini + .mini { border-left: 1px solid #ece9f2; padding-left: 12px; }
+  .mini-label { font-size: 10px; color: #9b97ad; font-weight: 600; }
+  .mini-value { font-size: 15px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .mini-value small { font-size: 10px; font-weight: 600; color: #9b97ad; }
+  .recap-entry { margin-top: 14px; font-size: 12px; font-weight: 700; color: #6b46e5; }
+
+  /* 身体数据卡片 */
+  .sec-head { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 10px; }
+  .sec-title { font-size: 12.5px; font-weight: 800; color: #54506b; }
+  .sec-more { font-size: 11.5px; font-weight: 700; color: #6b46e5; }
+  .grid { display: flex; gap: 8px; }
+  .grid .card { flex: 1; }
+  .card { background: #fff; border: 1px solid #ece9f2; border-radius: 16px; padding: 11px 12px; }
+  .card-label { font-size: 10.5px; color: #9b97ad; font-weight: 600; }
+  .card-value { font-size: 18px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .card-value small { font-size: 11px; font-weight: 600; color: #9b97ad; margin-left: 2px; }
+  .card-sub { font-size: 10.5px; font-weight: 700; margin-top: 2px; }
+  .card-sub.down { color: #1f8a53; }
+  .card-sub.flat { color: #9b97ad; }
+  .spark { margin-top: 6px; width: 100%; height: 16px; }
+  .ring-wrap { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+  .ring { position: relative; width: 42px; height: 42px; flex: none; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ring-meta { min-width: 0; }
+  .ring-meta .big { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ring-meta .small { font-size: 10.5px; color: #9b97ad; margin-top: 2px; }
+
+  /* 清单 */
+  .list-head { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 2px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+  .row + .row { border-top: 1px solid #e8e5f0; }
+  .thumb { width: 36px; height: 36px; border-radius: 11px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .thumb svg { width: 18px; height: 18px; stroke: #fff; }
+  .t1 { background: linear-gradient(135deg,#cdbcf7,#a98fe9); }
+  .t2 { background: linear-gradient(135deg,#c9dcf8,#96bdf1); }
+  .t3 { background: linear-gradient(135deg,#c3ecd7,#8fd6b4); }
+  .t4 { background: linear-gradient(135deg,#f9d9c9,#f0ad8d); }
+  .t5 { background: linear-gradient(135deg,#f6c9e0,#e793bd); }
+  .main { flex: 1; min-width: 0; }
+  .name { font-size: 14px; font-weight: 700; }
+  .name.cur { color: #6b46e5; }
+  .plan { font-size: 10.5px; color: #9b97ad; margin-top: 3px; }
+  .state { width: 20px; height: 20px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; }
+  .state.done { background: #eafaf1; color: #1f8a53; }
+  .state.cur { background: #ece7fb; color: #6b46e5; }
+  .state.todo { border: 1.5px solid #d9d4ea; background: transparent; color: #c6c1da; }
+  .count { font-size: 12px; font-weight: 700; color: #9b97ad; font-variant-numeric: tabular-nums; flex: none; width: 34px; text-align: right; }
+
+  /* 推荐排课 */
+  .chip-sec { margin-top: 20px; }
+  .chips { display: flex; gap: 8px; margin-top: 10px; }
+  .chip { flex: 1; text-align: center; font-size: 11.5px; font-weight: 700; color: #383448; background: #fff; border: 1px solid #e8e5f0; border-radius: 12px; padding: 11px 6px; line-height: 1.45; }
+
+  .tabbar { position: absolute; left: 0; bottom: 0; width: 390px; height: 62px; background: rgba(255,255,255,.94); border-top: 1px solid #ece9f2; display: flex; align-items: center; }
+  .tab { flex: 1; text-align: center; font-size: 12.5px; color: #9b97ad; font-weight: 600; }
+  .tab.on { color: #17161c; font-weight: 800; }
+  .tab.on::after { content: ""; display: block; width: 22px; height: 3px; background: #6b46e5; border-radius: 2px; margin: 4px auto 0; }
+</style>
+</head>
+<body style="width:1250px;height:1000px;">
+<main data-canvas-root style="width:1250px;height:1000px;">
+  <div class="stage">
+
+    <!-- A：无计划空态 -->
+    <div class="screen">
+      <div class="wrap">
+        <div class="brand">GYM COACH</div>
+        <div class="head-row">
+          <div class="h1">今日</div>
+          <div class="head-date">10月28日 周二</div>
+        </div>
+
+        <div class="hero">
+          <div class="seg">
+            <div class="seg-item on">训练</div>
+            <div class="seg-item">饮食</div>
+          </div>
+          <svg class="idle-art" viewBox="0 0 132 108" fill="none">
+            <ellipse cx="66" cy="90" rx="40" ry="8" fill="#6b46e5" opacity=".08"/>
+            <circle cx="66" cy="46" r="34" fill="#6b46e5" opacity=".10"/>
+            <circle cx="66" cy="46" r="22" fill="#6b46e5" opacity=".10"/>
+            <path d="M46 46h40M53 38v16M46 41v10M79 41v10" stroke="#6b46e5" stroke-width="3.5" stroke-linecap="round" opacity=".4"/>
+            <path d="M92 20l4-4M36 20l-4-4" stroke="#6b46e5" stroke-width="2" stroke-linecap="round" opacity=".25"/>
+          </svg>
+          <div class="idle-title">今天还没有安排训练</div>
+          <div class="idle-sub">根据你的目标、伤痛和店里器械，<br>让 AI 排一场今天就能练的课</div>
+          <div class="idle-cta">
+            <div class="btn-main">AI 生成今日计划
+              <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg></span>
+            </div>
+            <div class="btn-ghost">从热门计划挑选 ›</div>
+          </div>
+        </div>
+
+        <div class="sec-head">
+          <div class="sec-title">身体数据</div>
+          <div class="sec-more">编辑 ›</div>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <div class="card-label">体重</div>
+            <div class="card-value">69.3<small>kg</small></div>
+            <div class="card-sub down">↓ 0.4 kg / 7天</div>
+            <svg class="spark" viewBox="0 0 100 28" fill="none" preserveAspectRatio="none">
+              <path d="M4 10 L17 12 L31 9 L45 11 L59 8 L73 10 L87 7 L96 6" stroke="#1f8a53" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="96" cy="6" r="2.4" fill="#1f8a53"/>
+            </svg>
+          </div>
+          <div class="card">
+            <div class="card-label">本周训练</div>
+            <div class="ring-wrap">
+              <div class="ring">
+                <svg width="42" height="42" viewBox="0 0 48 48">
+                  <circle cx="24" cy="24" r="19" stroke="#ece9f2" stroke-width="5" fill="none"/>
+                  <circle cx="24" cy="24" r="19" stroke="#6b46e5" stroke-width="5" fill="none" stroke-linecap="round" stroke-dasharray="29.9 119.4"/>
+                </svg>
+                <div class="ring-num">1/4</div>
+              </div>
+              <div class="ring-meta">
+                <div class="big">1 场</div>
+                <div class="small">PR 深蹲 57.5 kg</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chip-sec">
+          <div class="sec-title">推荐排课</div>
+          <div class="chips">
+            <div class="chip">今天只有<br>30 分钟</div>
+            <div class="chip">练胸 ·<br>器械优先</div>
+            <div class="chip">按上次记录<br>续排一场</div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar"><div class="tab on">今日</div><div class="tab">教练</div><div class="tab">训练</div><div class="tab">我的</div></div>
+    </div>
+
+    <!-- C：训练中 -->
+    <div class="screen">
+      <div class="wrap">
+        <div class="brand">GYM COACH</div>
+        <div class="head-row">
+          <div class="h1">今日</div>
+          <div class="clock-col">
+            <div class="clock-label">本场用时</div>
+            <div class="clock">12:34</div>
+            <div class="end-btn">结束这场</div>
+          </div>
+        </div>
+
+        <div class="hero">
+          <div class="seg">
+            <div class="seg-item on">训练</div>
+            <div class="seg-item">饮食</div>
+          </div>
+          <div class="cur-head">
+            <div class="thumb-lg"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+            <div class="main">
+              <div class="cur-name">平板杠铃卧推</div>
+              <div class="cur-sub">第 <b>2 / 4</b> 组 · 计划 60 kg × 8 次<br>上次 8 次</div>
+            </div>
+          </div>
+          <div class="cue">
+            <span class="cue-tag">提示</span>
+            <span class="cue-text">沉肩收住肩胛，下放至胸中部；推起时呼气，手臂不要完全锁肘。</span>
+          </div>
+          <div class="cue-more">完整要领 · 常见错误 ›</div>
+          <div class="bar-track"><div class="bar-fill"></div></div>
+          <div class="bar-label"><span>2 / 16 组 · 13%</span><span>还剩 4 个动作</span></div>
+          <div class="cta-row">
+            <div class="btn-main">完成这组</div>
+          </div>
+        </div>
+
+        <div class="list-head">
+          <div class="sec-title">本场动作</div>
+          <div class="sec-more">排序 ›</div>
+        </div>
+        <div class="row">
+          <div class="thumb t1"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name cur">平板杠铃卧推</div><div class="plan">胸 · 自由重量</div></div>
+          <div class="state cur">2</div>
+          <div class="count">2/4</div>
+        </div>
+        <div class="row">
+          <div class="thumb t2"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">上斜哑铃卧推</div><div class="plan">胸上部 · 自由重量</div></div>
+          <div class="state todo"></div>
+          <div class="count">0/3</div>
+        </div>
+        <div class="row">
+          <div class="thumb t3"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">坐姿哑铃推举</div><div class="plan">肩 · 自由重量</div></div>
+          <div class="state todo"></div>
+          <div class="count">0/3</div>
+        </div>
+        <div class="row">
+          <div class="thumb t4"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">绳索下压</div><div class="plan">臂 · 绳索</div></div>
+          <div class="state todo"></div>
+          <div class="count">0/3</div>
+        </div>
+        <div class="row">
+          <div class="thumb t5"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">哑铃侧平举</div><div class="plan">肩 · 自由重量</div></div>
+          <div class="state todo"></div>
+          <div class="count">0/3</div>
+        </div>
+      </div>
+      <div class="tabbar"><div class="tab on">今日</div><div class="tab">教练</div><div class="tab">训练</div><div class="tab">我的</div></div>
+    </div>
+
+    <!-- D：已完成（轻量小结） -->
+    <div class="screen">
+      <div class="wrap">
+        <div class="brand">GYM COACH</div>
+        <div class="head-row">
+          <div class="h1">今日</div>
+          <div class="head-date">10月28日 周二</div>
+        </div>
+
+        <div class="hero">
+          <div class="seg">
+            <div class="seg-item on">训练</div>
+            <div class="seg-item">饮食</div>
+          </div>
+          <div class="src-line">自定义计划 · 本场已结束</div>
+          <div class="title-row">
+            <div class="title">胸肩三头</div>
+            <div class="tag done">已完成</div>
+          </div>
+          <div class="sub">5 动作 · 16 组 · 62 分钟</div>
+          <div class="summary-head">
+            <div class="sec-title">教练总结</div>
+            <span class="state-pill">突破</span>
+          </div>
+          <div class="summary"><b>卧推</b>小幅上涨，肩推下放再控制一点，下次可加 <b>2.5 kg</b>；<b>PR 卧推 60 kg</b>。</div>
+          <div class="mini-row">
+            <div class="mini"><div class="mini-label">完成组数</div><div class="mini-value">16<small> 组</small></div></div>
+            <div class="mini"><div class="mini-label">训练时长</div><div class="mini-value">62<small> 分钟</small></div></div>
+            <div class="mini"><div class="mini-label">本场状态</div><div class="mini-value">突破</div></div>
+          </div>
+          <div class="recap-entry">查看完整总结和海报 ›</div>
+        </div>
+
+        <div class="list-head">
+          <div class="sec-title">本场动作</div>
+        </div>
+        <div class="row">
+          <div class="thumb t1"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">平板杠铃卧推</div><div class="plan">胸 · 60 kg × 8</div></div>
+          <div class="state done">✓</div>
+          <div class="count">4/4</div>
+        </div>
+        <div class="row">
+          <div class="thumb t2"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">上斜哑铃卧推</div><div class="plan">胸上部 · 22 kg × 10</div></div>
+          <div class="state done">✓</div>
+          <div class="count">3/3</div>
+        </div>
+        <div class="row">
+          <div class="thumb t3"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">坐姿哑铃推举</div><div class="plan">肩 · 20 kg × 10</div></div>
+          <div class="state done">✓</div>
+          <div class="count">3/3</div>
+        </div>
+        <div class="row">
+          <div class="thumb t4"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">绳索下压</div><div class="plan">臂 · 绳索 × 12</div></div>
+          <div class="state done">✓</div>
+          <div class="count">3/3</div>
+        </div>
+        <div class="row">
+          <div class="thumb t5"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/></svg></div>
+          <div class="main"><div class="name">哑铃侧平举</div><div class="plan">肩 · 10 kg × 12</div></div>
+          <div class="state done">✓</div>
+          <div class="count">3/3</div>
+        </div>
+      </div>
+      <div class="tabbar"><div class="tab on">今日</div><div class="tab">教练</div><div class="tab">训练</div><div class="tab">我的</div></div>
+    </div>
+
+  </div>
+
+  <div class="stage">
+    <div class="caption">A 无计划空态<small>身体数据图形化（体重折线 + 本周圆盘）；推荐排课快捷场景</small></div>
+    <div class="caption">C 训练中<small>结束这场为次级小按钮；当前动作大卡 + 一条提示；清单可点进详情</small></div>
+    <div class="caption">D 已完成 · 教练总结<small>突破动作/重量/PR 加粗变色；完成组数/时长/状态；完整海报在结算页</small></div>
+  </div>
+</main>
+</body>
+</html>

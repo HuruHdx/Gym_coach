@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+<<<<<<< HEAD
 import { feedbackError, toast } from "../feedback";
 import type { CardBlock, CardItem, TrainingSession } from "../types";
+=======
+import type { AgentReply, CardBlock, CardItem, TrainingSession } from "../types";
+>>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
 import { MUSCLE_OPTIONS, rebuildSubtitle } from "../types";
 import { ReorderItem, ReorderList } from "./ReorderList";
 import { WeightStepper } from "./WeightStepper";
@@ -152,6 +156,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
       const planType = typeof card.meta?.plan_type === "string" ? card.meta.plan_type : null;
       const splitFromMeta =
         typeof card.meta?.split_label === "string" ? card.meta.split_label : null;
+      const coachQuote = extractCoachQuote(card, planType, planTemplateId);
       const session = await api<TrainingSession>("/api/training/adopt", {
         method: "POST",
         body: JSON.stringify({
@@ -167,6 +172,7 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
           plan_template_id: planTemplateId,
           plan_block_id: planBlockId,
           plan_type: planType,
+          coach_quote: coachQuote,
         }),
       });
       sessionStorage.removeItem("last_reply");
@@ -525,4 +531,32 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
       )}
     </>
   );
+}
+
+/** B2 引语：优先 meta，其次教练回复首句；模板场次不写。 */
+function extractCoachQuote(
+  card: CardBlock,
+  planType: string | null,
+  planTemplateId: string | null,
+): string | null {
+  if (planTemplateId || planType === "framework" || planType === "fixed") return null;
+  const fromMeta = card.meta?.coach_quote ?? card.meta?.quote ?? card.meta?.rationale;
+  if (typeof fromMeta === "string" && fromMeta.trim()) {
+    return fromMeta.trim().slice(0, 200);
+  }
+  try {
+    const raw = sessionStorage.getItem("last_reply");
+    if (!raw) return null;
+    const reply = JSON.parse(raw) as AgentReply;
+    const text = (reply.blocks || [])
+      .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
+      .map((b) => b.text.trim())
+      .filter(Boolean)
+      .join(" ");
+    if (!text) return null;
+    const first = text.split(/[。！？\n]/)[0]?.trim() || text;
+    return first.slice(0, 200);
+  } catch {
+    return null;
+  }
 }

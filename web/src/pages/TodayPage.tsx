@@ -2,21 +2,47 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
+<<<<<<< HEAD
 import { api, expandPlan, fetchFollowing, fetchPlans } from "../lib/api";
 import { feedbackError, toast } from "../feedback";
 import { COACH_NAME } from "../lib/brand";
 import type { CardBlock, SetLog, TrainingSession } from "../types";
+=======
+import { api, expandPlan, fetchFollowing, fetchPlanDetail } from "../lib/api";
+import type {
+  CardBlock,
+  PlanBlockDetail,
+  Profile,
+  SetLog,
+  TrainingDashboard,
+  TrainingSession,
+} from "../types";
+>>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
 import { WeightStepper } from "../components/WeightStepper";
 import { RepsStepper } from "../components/RepsStepper";
 import { ReorderItem, ReorderList } from "../components/ReorderList";
 import { DraftCard } from "../components/DraftCard";
+import { Sparkline } from "../components/dashboard/TrainingDashboard";
+import {
+  buildMuscleGap,
+  buildRestHints,
+  lastCompletedReps,
+  lastRepsForSet,
+} from "../lib/todayHints";
 
 const COACH_CHIPS = [
-  { label: "今天只有30分钟", prompt: "今天只有30分钟，帮我排一场高效训练" },
-  { label: "练胸·器械优先", prompt: "今天练胸，器械优先" },
-  { label: "按上次记录续排", prompt: "按我上次训练记录帮我续排今天这场" },
-  { label: "全身快速练", prompt: "帮我排一场全身快速练，控制在45分钟内" },
+  { label: "今天只有\n30 分钟", prompt: "今天只有30分钟，帮我排一场高效训练" },
+  { label: "练胸 ·\n器械优先", prompt: "今天练胸，器械优先" },
+  { label: "按上次记录\n续排一场", prompt: "按我上次训练记录帮我续排今天这场" },
 ] as const;
+
+const THUMB_TONES = [
+  "from-[#cdbcf7] to-[#a98fe9]",
+  "from-[#c9dcf8] to-[#96bdf1]",
+  "from-[#c3ecd7] to-[#8fd6b4]",
+  "from-[#f9d9c9] to-[#f0ad8d]",
+  "from-[#f6c9e0] to-[#e793bd]",
+];
 
 export function TodayPage() {
   const navigate = useNavigate();
@@ -38,6 +64,9 @@ export function TodayPage() {
   orderRef.current = order;
   const [revising, setRevising] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
+  const [blockPickerOpen, setBlockPickerOpen] = useState(false);
+  const [draft, setDraft] = useState<CardBlock | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   useEffect(() => {
     setLocal(session ?? null);
   }, [session]);
@@ -64,6 +93,52 @@ export function TodayPage() {
       groups.find((g) => g.sets.some((s) => !s.completed))?.name ?? groups[0]?.name ?? null;
     setOpenName(firstOpen);
   }, [groups, pickedOpen]);
+
+  const { data: historySessions = [] } = useQuery({
+    queryKey: ["training-sessions"],
+    queryFn: () => api<TrainingSession[]>("/api/training/sessions?limit=40"),
+  });
+  const { data: following } = useQuery({
+    queryKey: ["plans-following"],
+    queryFn: fetchFollowing,
+  });
+
+  const exerciseNames = useMemo(() => groups.map((g) => g.name), [groups]);
+  const { data: resolvedThumbs } = useQuery({
+    queryKey: ["exercise-resolve", exerciseNames.join("|")],
+    queryFn: () =>
+      api<{
+        items: Record<string, { id?: string; name_zh?: string; thumb_url?: string | null }>;
+      }>(`/api/exercises/resolve?names=${encodeURIComponent(exerciseNames.join(","))}`),
+    enabled: exerciseNames.length > 0,
+  });
+  const thumbByName = useMemo(() => {
+    const map = new Map<string, { thumb?: string | null; id?: string | null }>();
+    for (const [name, item] of Object.entries(resolvedThumbs?.items || {})) {
+      map.set(name, { thumb: item.thumb_url, id: item.id });
+    }
+    return map;
+  }, [resolvedThumbs]);
+
+  const currentGroup =
+    groups.find((g) => g.sets.some((s) => !s.completed)) ?? groups[groups.length - 1] ?? null;
+  const currentSet = currentGroup?.sets.find((s) => !s.completed) ?? null;
+  const currentMeta = currentGroup ? thumbByName.get(currentGroup.name) : undefined;
+
+  const { data: currentDetail } = useQuery({
+    queryKey: ["catalog-exercise-cue", currentMeta?.id],
+    queryFn: () =>
+      api<{ cues_zh?: string[]; id: string }>(
+        `/api/exercises/${encodeURIComponent(currentMeta!.id!)}`,
+      ),
+    enabled: Boolean(currentMeta?.id) && local?.status === "active",
+  });
+  const currentCue = currentDetail?.cues_zh?.[0] || null;
+
+  const prevReps = useMemo(() => {
+    if (!currentGroup) return null;
+    return lastCompletedReps(historySessions, currentGroup.name, local?.id);
+  }, [historySessions, currentGroup, local?.id]);
 
   const patchSet = useCallback(
     async (setId: number, body: Record<string, unknown>) => {
@@ -189,6 +264,10 @@ export function TodayPage() {
     return <TodayIdleWorkbench />;
   }
 
+  if (local.source === "rest" && local.status === "done") {
+    return <TodayRestDone split={local.split_label} summary={local.summary} />;
+  }
+
   const pct =
     local.progress.total > 0
       ? Math.round((local.progress.done / local.progress.total) * 100)
@@ -197,12 +276,8 @@ export function TodayPage() {
   const locked = isDone && !revising;
   const seconds = elapsedSeconds(local, now);
   const exerciseCount = groups.length;
-  const planTypeLabel =
-    local.plan_type === "framework" || local.plan_type === "fixed"
-      ? "计划场次"
-      : local.plan_type === "custom"
-        ? "自定义"
-        : "今日计划";
+  const isCoachPlan = local.plan_type === "custom" || (!local.plan_template_id && local.plan_type !== "framework" && local.plan_type !== "fixed");
+  const sourceLine = buildSourceLine(local, following ?? null);
   const muscleSummary = [
     ...new Set(groups.map((g) => g.sets[0]?.muscle).filter(Boolean) as string[]),
   ]
@@ -230,96 +305,276 @@ export function TodayPage() {
     }
   }
 
+  async function completeCurrentSet() {
+    if (!currentSet || locked) return;
+    const defaultReps = parseDefaultReps(currentSet.target_reps);
+    const patch: Record<string, unknown> = { completed: true };
+    if (currentSet.actual_reps == null) patch.actual_reps = defaultReps;
+    if (currentSet.actual_weight == null && currentSet.target_weight != null) {
+      patch.actual_weight = currentSet.target_weight;
+    }
+    try {
+      await patchSet(currentSet.id, patch);
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
+  const remainMoves = groups.filter((g) => g.sets.some((s) => !s.completed)).length;
+  const outcomeLabel = local.session_outcome || (isDone ? "完成" : null);
+  const dateLabel = formatTodayLabel();
+
   return (
-    <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
-      <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
-        Gym Coach
-      </p>
-      <div className="flex items-end justify-between gap-3">
-        <h1 className="font-display text-[26px] font-bold tracking-tight">今日</h1>
-        <Link to="/plans" className="text-[12px] font-bold text-muted">
-          换计划
-        </Link>
-      </div>
-
-      <div className="mt-3 rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-elevated to-elevated p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold tracking-wide text-muted">{planTypeLabel}</p>
-            <h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight">
-              {local.split_label || "训练"}
-            </h2>
-            <p className="mt-1 text-[12px] text-muted">
-              <span className="num">
-                {exerciseCount} 动作 · {local.progress.total} 组
-              </span>
-              {muscleSummary ? ` · ${muscleSummary}` : ""}
+    <div className="flex min-h-full flex-col px-5 pb-6 pt-4 rise-in">
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Gym Coach</p>
+      <div className="mt-1.5 flex items-start justify-between gap-3">
+        <h1 className="font-display text-[28px] font-extrabold tracking-tight">今日</h1>
+        {running && !isDone ? (
+          <div className="text-right">
+            <p className="text-[10px] font-bold tracking-wide text-muted">本场用时</p>
+            <p className="font-num mt-0.5 text-[26px] font-extrabold leading-none tracking-tight">
+              {formatClock(seconds)}
             </p>
+            <button
+              type="button"
+              onClick={() => void completeSession()}
+              className="pressable mt-1.5 rounded-lg border border-line bg-elevated/80 px-2.5 py-1 text-[11px] font-bold text-accent-text"
+            >
+              结束这场
+            </button>
           </div>
-          <span
-            className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
-              isDone ? "bg-ok/15 text-ok" : "bg-accent/40 text-accent-ink"
-            }`}
-          >
-            {isDone ? "已完成" : "执行中"}
-          </span>
-        </div>
-
-        <div className="bar-track mt-3">
-          <i style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />
-        </div>
-        <p className="mt-1.5 text-xs text-muted">
-          {local.progress.done}/{local.progress.total} 组 · {pct}%
-          {isDone && !revising ? " · 已锁定，展开可回看" : ""}
-          {revising ? " · 修正中，改完请重新生成总结" : ""}
-        </p>
-
-        {!isDone && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-line bg-bg/70 px-3 py-2.5">
-            <div>
-              <p className="text-[11px] font-bold tracking-wide text-muted">训练计时</p>
-              <p className="font-display text-2xl font-extrabold tabular-nums num">
-                {formatClock(seconds)}
-              </p>
-            </div>
-            {!running ? (
-              <button
-                type="button"
-                disabled={timerBusy}
-                onClick={() => void startTimer()}
-                className="pressable rounded-md bg-accent px-4 py-2 text-sm font-extrabold text-accent-ink disabled:opacity-50"
-              >
-                开始训练
-              </button>
-            ) : (
-              <span className="rounded-md bg-ok/15 px-3 py-1.5 text-xs font-bold text-ok">计时中</span>
-            )}
-          </div>
+        ) : (
+          <p className="pt-2 text-[12px] font-semibold text-muted">{dateLabel}</p>
         )}
       </div>
 
-      {isDone && (
-        <p className="mt-3 text-xs text-muted">
-          训练时长{" "}
-          {local.duration_minutes != null && local.duration_minutes >= 1
-            ? `${local.duration_minutes} 分钟`
-            : "还没记"}
-          。结算页可以改。
-        </p>
+      {/* Hero：D 已完成 / C 训练中 / B 有计划未开练 */}
+      <div className="mt-3 overflow-hidden rounded-[20px] border border-line bg-gradient-to-br from-[var(--hero-a)] via-[#f6f2fd] to-elevated p-4">
+        <TodaySeg />
+
+        {isDone ? (
+          <>
+            <p className="mt-3 text-[12px] font-semibold text-muted">
+              {sourceLine} · 本场已结束
+            </p>
+            <div className="mt-1.5 flex items-start justify-between gap-2">
+              <h2 className="font-display text-[26px] font-extrabold tracking-tight">
+                {local.split_label || "训练"}
+              </h2>
+              <span className="mt-2 shrink-0 rounded-md bg-ok/15 px-2 py-1 text-[10px] font-bold text-ok">
+                已完成
+              </span>
+            </div>
+            <p className="mt-1.5 text-[12px] text-muted">
+              <span className="num">
+                {exerciseCount} 动作 · {local.progress.done} 组
+                {local.duration_minutes != null && local.duration_minutes >= 1
+                  ? ` · ${local.duration_minutes} 分钟`
+                  : ""}
+              </span>
+            </p>
+            {(local.summary || outcomeLabel) && (
+              <>
+                <div className="mt-2.5 flex items-center justify-between gap-2">
+                  <p className="text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">
+                    教练总结
+                  </p>
+                  {outcomeLabel && (
+                    <span className="rounded-md bg-tint px-2 py-0.5 text-[10px] font-extrabold text-accent-text">
+                      {outcomeLabel}
+                    </span>
+                  )}
+                </div>
+                {local.summary && (
+                  <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink">
+                    <HighlightedSummary text={local.summary} />
+                  </p>
+                )}
+              </>
+            )}
+            <div className="mt-3 flex border-t border-line pt-3">
+              <MiniStat label="完成组数" value={`${local.progress.done}`} unit="组" />
+              <MiniStat
+                label="训练时长"
+                value={
+                  local.duration_minutes != null && local.duration_minutes >= 1
+                    ? String(local.duration_minutes)
+                    : "—"
+                }
+                unit="分钟"
+              />
+              <MiniStat label="本场状态" value={outcomeLabel || "完成"} />
+            </div>
+            <Link to="/recap" className="mt-3.5 inline-block text-[12px] font-bold text-accent-text">
+              查看完整总结和海报 ›
+            </Link>
+          </>
+        ) : running && currentGroup && currentSet ? (
+          <>
+            <div className="mt-3.5 flex gap-3.5">
+              <ThumbTile
+                src={currentMeta?.thumb}
+                tone={0}
+                size="lg"
+                onClick={() =>
+                  currentMeta?.id &&
+                  navigate(`/exercises/${encodeURIComponent(currentMeta.id)}`)
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[21px] font-extrabold tracking-tight">
+                  {currentGroup.name}
+                </p>
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
+                  第{" "}
+                  <b className="text-ink">
+                    {currentSet.set_index} / {currentGroup.sets.length}
+                  </b>{" "}
+                  组 · 计划{" "}
+                  <b className="text-ink">
+                    {currentSet.target_weight != null ? `${currentSet.target_weight} kg` : "自重"} ×{" "}
+                    {currentSet.target_reps || "—"}
+                  </b>
+                  {prevReps != null ? (
+                    <>
+                      <br />
+                      上次 {prevReps} 次
+                    </>
+                  ) : null}
+                </p>
+              </div>
+            </div>
+            {currentCue && (
+              <div className="mt-3 flex gap-2">
+                <span className="shrink-0 pt-0.5 text-[10px] font-extrabold tracking-wide text-accent-text">
+                  提示
+                </span>
+                <p className="text-[12px] leading-relaxed text-ink/90">{currentCue}</p>
+              </div>
+            )}
+            {currentMeta?.id && (
+              <button
+                type="button"
+                onClick={() => navigate(`/exercises/${encodeURIComponent(currentMeta.id!)}`)}
+                className="mt-1.5 text-[11px] font-bold text-accent-text"
+              >
+                完整要领 · 常见错误 ›
+              </button>
+            )}
+            <div className="mt-3.5 h-1 overflow-hidden rounded-full bg-line">
+              <div
+                className="h-full rounded-full bg-accent transition-all"
+                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-[11px] text-muted">
+              <span className="num">
+                {local.progress.done} / {local.progress.total} 组 · {pct}%
+              </span>
+              <span>还剩 {remainMoves} 个动作</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void completeCurrentSet()}
+              className="pressable mt-3.5 flex w-full items-center justify-center rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink"
+            >
+              完成这组
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="mt-3 text-[12px] font-semibold text-muted">{sourceLine}</p>
+            <div className="mt-1.5 flex items-start justify-between gap-2">
+              <h2 className="font-display text-[26px] font-extrabold tracking-tight">
+                {local.split_label || "训练"}
+              </h2>
+              <span className="mt-2 shrink-0 rounded-md bg-tint px-2 py-1 text-[10px] font-bold text-accent-text">
+                今天
+              </span>
+            </div>
+            <p className="mt-1.5 text-[12px] text-muted">
+              {exerciseCount} 动作 · {local.progress.total} 组
+              {muscleSummary ? ` · ${muscleSummary}` : ""}
+            </p>
+            {isCoachPlan && local.note ? (
+              <p className="mt-2 text-[12px] leading-relaxed text-muted">
+                「{local.note.length > 72 ? `${local.note.slice(0, 72)}…` : local.note}」
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={timerBusy}
+              onClick={() => void startTimer()}
+              className="pressable mt-4 w-full rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink disabled:opacity-50"
+            >
+              开始这场
+            </button>
+            {following?.active_plan_id ? (
+              <button
+                type="button"
+                onClick={() => setBlockPickerOpen(true)}
+                className="pressable mt-2.5 w-full rounded-[14px] border border-line bg-elevated/80 py-3 text-[13px] font-bold text-ink"
+              >
+                今天想练别的？
+              </button>
+            ) : isCoachPlan ? (
+              <Link
+                to="/coach"
+                className="pressable mt-2.5 block w-full rounded-[14px] border border-line bg-elevated/80 py-3 text-center text-[13px] font-bold text-ink"
+              >
+                重新排 ›
+              </Link>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      {blockPickerOpen && following?.active_plan_id && (
+        <BlockPickerSheet
+          planId={following.active_plan_id}
+          currentBlockId={local.plan_block_id}
+          onClose={() => setBlockPickerOpen(false)}
+          onPicked={(card) => {
+            setBlockPickerOpen(false);
+            setDraft(card);
+            setSheetOpen(true);
+          }}
+        />
+      )}
+      {draft && sheetOpen && (
+        <TodayDraftSheet
+          onClose={() => {
+            setSheetOpen(false);
+            setDraft(null);
+          }}
+        >
+          <DraftCard
+            card={draft}
+            onChange={setDraft}
+            todayStatus={isDone ? "done" : "active"}
+            onAdopted={() => {
+              void qc.invalidateQueries({ queryKey: ["training-today"] });
+              void qc.invalidateQueries({ queryKey: ["plans-following"] });
+              setSheetOpen(false);
+              setDraft(null);
+              void refetch();
+            }}
+          />
+        </TodayDraftSheet>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-2">
-        <p className="text-xs font-bold text-muted">动作列表 ({groups.length})</p>
-        {groups.length > 1 && (
+      <div className="mt-3.5 flex items-center justify-between">
+        <p className="text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">本场动作</p>
+        {groups.length > 1 && !locked && (
           <button
             type="button"
-            className="text-xs font-bold text-accent underline"
+            className="text-[11.5px] font-bold text-accent-text"
             onClick={() => {
               setPickedOpen(true);
               setOpenName(openName ? null : (groups[0]?.name ?? null));
             }}
           >
-            {openName ? "全部收起" : "展开首项"}
+            排序 ›
           </button>
         )}
       </div>
@@ -329,14 +584,20 @@ export function TodayPage() {
           ids={groups.map((g) => g.name)}
           labelOf={(id) => id}
           onReorder={setOrder}
-          className="mt-2 space-y-2.5"
+          className="divide-y divide-line border-t border-line"
         >
-          {groups.map((g) => (
+          {groups.map((g, idx) => (
             <ReorderItem key={g.name} id={g.name}>
-              <ExerciseCard
+              <FlatExerciseRow
                 group={g}
+                active={!isDone && currentGroup?.name === g.name}
+                tone={idx % THUMB_TONES.length}
+                thumb={thumbByName.get(g.name)?.thumb}
+                exerciseId={thumbByName.get(g.name)?.id}
                 open={openName === g.name}
                 locked={locked}
+                historySessions={historySessions}
+                excludeSessionId={local.id}
                 onToggle={() => {
                   setPickedOpen(true);
                   setOpenName(openName === g.name ? null : g.name);
@@ -347,13 +608,19 @@ export function TodayPage() {
           ))}
         </ReorderList>
       ) : (
-        <div className="mt-2 space-y-2.5">
-          {groups.map((g) => (
-            <ExerciseCard
+        <div className="divide-y divide-line border-t border-line">
+          {groups.map((g, idx) => (
+            <FlatExerciseRow
               key={g.name}
               group={g}
+              active={!isDone && currentGroup?.name === g.name}
+              tone={idx % THUMB_TONES.length}
+              thumb={thumbByName.get(g.name)?.thumb}
+              exerciseId={thumbByName.get(g.name)?.id}
               open={openName === g.name}
               locked={locked}
+              historySessions={historySessions}
+              excludeSessionId={local.id}
               onToggle={() => {
                 setPickedOpen(true);
                 setOpenName(openName === g.name ? null : g.name);
@@ -412,36 +679,8 @@ export function TodayPage() {
         </div>
       )}
 
-      {!isDone && (
-        <div className="mt-6 flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => void completeSession()}
-            className="pressable w-full rounded-md bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink"
-          >
-            完成训练 · 写入记忆
-          </button>
-          <button
-            type="button"
-            className="text-xs font-bold text-muted underline"
-            onClick={() => refetch()}
-          >
-            刷新
-          </button>
-        </div>
-      )}
-
       {isDone && !revising && (
-        <>
-          <Link
-            to="/recap"
-            className="pressable mt-6 block overflow-hidden rounded-2xl bg-ink p-5 text-accent-ink"
-          >
-            <p className="text-micro font-semibold uppercase tracking-[0.2em] text-accent-ink opacity-70">Done</p>
-            <h2 className="mt-2 font-display text-display font-semibold">今日总结已生成</h2>
-            <p className="mt-2 text-sm opacity-70">点开看教练对这场的判断。</p>
-            <p className="mt-4 text-sm font-semibold text-accent-ink">查看结算 →</p>
-          </Link>
+        <div className="mt-5">
           <DoneNextHint />
           <button
             type="button"
@@ -450,7 +689,7 @@ export function TodayPage() {
           >
             记错了？修正本场记录
           </button>
-        </>
+        </div>
       )}
 
       {isDone && revising && (
@@ -491,26 +730,78 @@ function DoneNextHint() {
   );
 }
 
-/** 状态 A：今日未开练 — 跟练主卡 + 轻量换计划 */
+/** 状态 A / 跟练待开练：无今日 session */
 function TodayIdleWorkbench() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [draft, setDraft] = useState<CardBlock | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [blockPickerOpen, setBlockPickerOpen] = useState(false);
+  const [restBusy, setRestBusy] = useState(false);
 
   const followingQuery = useQuery({
     queryKey: ["plans-following"],
     queryFn: fetchFollowing,
   });
-  const plansQuery = useQuery({
-    queryKey: ["plans", "featured"],
-    queryFn: () => fetchPlans({}),
-  });
-
   const following = followingQuery.data;
   const nextBlock = following?.week?.next_block ?? null;
-  const featured = (plansQuery.data?.items ?? []).slice(0, 2);
+  const hasFollowReady = Boolean(following?.active_plan_id && nextBlock);
+
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => api<Profile>("/api/profile"),
+  });
+  const { data: weightHistory = [] } = useQuery({
+    queryKey: ["weight-history"],
+    queryFn: () => api<{ weight_kg: number; recorded_at: string }[]>("/api/profile/weight-history?limit=8"),
+  });
+  const { data: dashboard } = useQuery({
+    queryKey: ["training-dashboard", "week"],
+    queryFn: () => api<TrainingDashboard>("/api/training/dashboard?period=week"),
+  });
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["training-sessions"],
+    queryFn: () => api<TrainingSession[]>("/api/training/sessions?limit=40"),
+  });
+
+  const weightPoints = useMemo(
+    () => weightHistory.map((p) => p.weight_kg).filter((n) => Number.isFinite(n)),
+    [weightHistory],
+  );
+  const latestWeight =
+    weightPoints.length > 0
+      ? weightPoints[weightPoints.length - 1]
+      : profile?.weight_kg ?? null;
+  const weightDelta = useMemo(() => {
+    if (weightPoints.length < 2) return null;
+    return Math.round((weightPoints[weightPoints.length - 1] - weightPoints[0]) * 10) / 10;
+  }, [weightPoints]);
+
+  const trained = dashboard?.week.trained_days ?? 0;
+  const target = dashboard?.week.target_days || profile?.days_per_week || 3;
+  const prLift = (dashboard?.key_lifts || []).find((l) => l.is_pr) ?? dashboard?.key_lifts?.[0] ?? null;
+  const muscleGap = useMemo(() => buildMuscleGap(dashboard?.muscle_pulse), [dashboard?.muscle_pulse]);
+  const restHints = useMemo(
+    () => buildRestHints(sessions, { targetDays: target, trainedDays: trained }),
+    [sessions, target, trained],
+  );
+  const suggestRestDay = trained >= target && target > 0 && !hasFollowReady;
+
+  async function markRest() {
+    if (restBusy) return;
+    setRestBusy(true);
+    try {
+      await api<TrainingSession>("/api/training/rest-today", { method: "POST" });
+      void qc.invalidateQueries({ queryKey: ["training-today"] });
+      void qc.invalidateQueries({ queryKey: ["training-sessions"] });
+      void qc.invalidateQueries({ queryKey: ["training-dashboard"] });
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setRestBusy(false);
+    }
+  }
 
   async function startNextBlock() {
     if (!following?.active_plan_id || !nextBlock || starting) return;
@@ -527,101 +818,174 @@ function TodayIdleWorkbench() {
   }
 
   return (
-    <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
-      <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
-        Gym Coach
-      </p>
-      <h1 className="font-display text-[26px] font-bold tracking-tight">今日</h1>
+    <div className="flex min-h-full flex-col px-5 pb-6 pt-4 rise-in">
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Gym Coach</p>
+      <div className="mt-1.5 flex items-start justify-between gap-3">
+        <h1 className="font-display text-[28px] font-extrabold tracking-tight">今日</h1>
+        <p className="pt-2 text-[12px] font-semibold text-muted">{formatTodayLabel()}</p>
+      </div>
 
-      {/* 1. 今日待练 Hero */}
-      {following?.active_plan_id && nextBlock ? (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-elevated to-elevated p-4">
-          <p className="text-[11px] font-bold tracking-wide text-muted">
-            {following.plan?.title || "跟练计划"}
-            {following.week.progress_label ? (
-              <>
-                {" · "}
-                <span className="num">{following.week.progress_label}</span>
-              </>
-            ) : null}
-            {following.week.week_cycle_done ? " · 本周已轮完，可再练" : ""}
-          </p>
-          <div className="mt-1 flex items-start justify-between gap-2">
-            <h2 className="font-display text-[26px] font-extrabold tracking-tight">
-              {nextBlock.title}
-            </h2>
-            <span className="shrink-0 rounded-md bg-tint px-2 py-1 text-[10px] font-bold text-accent-text">
-              今天
-            </span>
-          </div>
-          <p className="mt-1 text-[12px] text-muted">
-            {nextBlock.exercise_count ? (
-              <>
-                <span className="num">{nextBlock.exercise_count}</span> 动作
-              </>
-            ) : (
-              "—"
-            )}
-            {nextBlock.minutes_label ? (
-              <>
-                {" · "}
-                <span className="num">{nextBlock.minutes_label}</span>
-              </>
-            ) : null}
-            {(nextBlock.muscles || []).length > 0 ? ` · ${(nextBlock.muscles || []).join(" · ")}` : ""}
-          </p>
-          {following.week.total_blocks > 0 && (
-            <p className="mt-2 text-[11px] text-muted">
-              第{" "}
-              <span className="num">
-                {Math.min(following.week.completed_count + 1, following.week.total_blocks)}
-              </span>{" "}
-              / <span className="num">{following.week.total_blocks}</span> 个板块
+      <div className="mt-3 overflow-hidden rounded-[20px] border border-line bg-gradient-to-br from-[var(--hero-a)] via-[#f6f2fd] to-elevated p-4">
+        <TodaySeg />
+
+        {hasFollowReady && nextBlock ? (
+          <>
+            <p className="mt-3 text-[12px] font-semibold text-muted">
+              {following?.plan?.title || "跟练计划"}
+              {following?.week.progress_label ? ` · ${following.week.progress_label}` : ""}
+              {following?.week.week_cycle_done ? " · 本周已轮完，可再练" : ""}
             </p>
+            <div className="mt-1.5 flex items-start justify-between gap-2">
+              <h2 className="font-display text-[26px] font-extrabold tracking-tight">
+                {nextBlock.title}
+              </h2>
+              <span className="mt-2 shrink-0 rounded-md bg-tint px-2 py-1 text-[10px] font-bold text-accent-text">
+                今天
+              </span>
+            </div>
+            <p className="mt-1.5 text-[12px] text-muted">
+              {nextBlock.exercise_count ? (
+                <>
+                  <span className="num">{nextBlock.exercise_count}</span> 动作
+                </>
+              ) : (
+                "—"
+              )}
+              {nextBlock.minutes_label ? (
+                <>
+                  {" · "}
+                  <span className="num">{nextBlock.minutes_label}</span>
+                </>
+              ) : null}
+              {(nextBlock.muscles || []).length > 0
+                ? ` · ${(nextBlock.muscles || []).join(" · ")}`
+                : ""}
+            </p>
+            {(nextBlock.preview_names || []).length > 0 && (
+              <p className="mt-2 truncate text-[11.5px] text-muted">
+                {(nextBlock.preview_names || []).slice(0, 4).join(" · ")}
+              </p>
+            )}
+            <div className="mt-4 flex flex-col gap-2.5">
+              <button
+                type="button"
+                disabled={starting}
+                onClick={() => void startNextBlock()}
+                className="pressable flex w-full items-center justify-center gap-2 rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink disabled:opacity-50"
+              >
+                {starting ? "展开中…" : "开始这场"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBlockPickerOpen(true)}
+                className="pressable flex w-full items-center justify-center rounded-[14px] border border-line bg-elevated/80 py-3 text-[13px] font-bold text-ink"
+              >
+                今天想练别的？
+              </button>
+            </div>
+          </>
+        ) : suggestRestDay ? (
+          <>
+            <IdleArt />
+            <h2 className="text-center font-display text-[23px] font-extrabold tracking-tight">
+              休息 · 建议
+            </h2>
+            <p className="mt-2 px-2.5 text-center text-[12.5px] leading-relaxed text-muted">
+              这周够了，歇一天也行
+              <br />
+              本周 {trained} / {target} 练已达标
+            </p>
+            <div className="mt-4 flex flex-col gap-2.5">
+              <button
+                type="button"
+                disabled={restBusy}
+                onClick={() => void markRest()}
+                className="pressable flex w-full items-center justify-center rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink disabled:opacity-50"
+              >
+                {restBusy ? "记录中…" : "记今天休息"}
+              </button>
+              <Link
+                to="/coach"
+                className="pressable flex w-full items-center justify-center rounded-[14px] border border-line bg-elevated/80 py-3 text-[13px] font-bold text-ink"
+              >
+                还是想练 ›
+              </Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <IdleArt />
+            <h2 className="text-center font-display text-[23px] font-extrabold tracking-tight">
+              今天还没有安排训练
+            </h2>
+            <p className="mt-2 px-2.5 text-center text-[12.5px] leading-relaxed text-muted">
+              根据你的目标、伤痛和店里器械，
+              <br />
+              让 AI 排一场今天就能练的课
+            </p>
+            <div className="mt-4 flex flex-col gap-2.5">
+              <Link
+                to="/coach"
+                className="pressable flex w-full items-center justify-center gap-2 rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink"
+              >
+                AI 生成今日计划
+                <span className="grid h-[22px] w-[22px] place-items-center rounded-full bg-white/20">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
+                  </svg>
+                </span>
+              </Link>
+              <Link
+                to="/plans"
+                className="pressable flex w-full items-center justify-center rounded-[14px] border border-line bg-elevated/80 py-3 text-[13px] font-bold text-ink"
+              >
+                从热门计划挑选 ›
+              </Link>
+            </div>
+          </>
+        )}
+      </div>
+
+      {muscleGap && (
+        <div className="mt-4 rounded-2xl border border-line bg-elevated px-3.5 py-3">
+          <p className="text-[12.5px] font-extrabold text-ink">{muscleGap.headline}</p>
+          <p className="mt-1 text-[11px] text-muted">{muscleGap.detail}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {muscleGap.rows.slice(0, 6).map((row) => (
+              <span
+                key={row.muscle}
+                className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] font-bold text-muted"
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${row.ready ? "bg-ok" : "bg-line"}`}
+                  aria-hidden
+                />
+                {row.muscle} {row.days}d
+              </span>
+            ))}
+          </div>
+          {restHints.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {restHints.map((h) => (
+                <p key={h.text} className="text-[11.5px] font-semibold text-accent-text">
+                  {h.text}
+                </p>
+              ))}
+            </div>
           )}
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              disabled={starting}
-              onClick={() => void startNextBlock()}
-              className="pressable flex-1 rounded-md bg-accent py-3 text-sm font-extrabold text-accent-ink disabled:opacity-50"
-            >
-              {starting ? "展开中…" : "开始这场"}
-            </button>
-            <Link
-              to={`/plans/${encodeURIComponent(following.active_plan_id)}`}
-              className="pressable shrink-0 rounded-md border border-line bg-elevated px-3 py-3 text-sm font-bold text-ink"
-            >
-              换个板块
-            </Link>
-          </div>
         </div>
-      ) : (
-        <div className="mt-4 rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-4">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-muted">Ready</p>
-          <h2 className="mt-2 font-display text-2xl font-extrabold tracking-tight">
-            还没定今日课
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed text-muted">
-            让{COACH_NAME}按你状态排一场，或挑一套固定计划跟练。
-          </p>
-          <div className="mt-4 space-y-2">
-            <Link
-              to="/coach"
-              className="pressable inline-flex w-full items-center justify-center rounded-md bg-accent py-3.5 text-sm font-extrabold text-accent-ink"
-            >
-              让{COACH_NAME}排今天这场
-            </Link>
-            <Link
-              to="/plans"
-              className="pressable inline-flex w-full items-center justify-center rounded-md border border-line bg-elevated py-3 text-sm font-bold text-ink"
-            >
-              挑一套固定计划跟练
-            </Link>
-          </div>
+      )}
+      {!muscleGap && restHints.length > 0 && (
+        <div className="mt-4 space-y-1">
+          {restHints.map((h) => (
+            <p key={h.text} className="text-[11.5px] font-semibold text-accent-text">
+              {h.text}
+            </p>
+          ))}
         </div>
       )}
 
+<<<<<<< HEAD
       {/* 2. 本周 + 部位间隔（P2 接口未就绪时显示空态，不用假数据） */}
       <div className="mt-4 grid grid-cols-2 gap-2.5">
         <div className="rounded-xl border border-line bg-elevated p-3">
@@ -653,70 +1017,80 @@ function TodayIdleWorkbench() {
         <p className="text-xs font-bold text-muted">想换一套？</p>
         <Link to="/plans" className="text-[12px] font-bold text-accent-text">
           全部 &gt;
+=======
+      {/* 身体数据 */}
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">身体数据</p>
+        <Link to="/me/settings" className="text-[11.5px] font-bold text-accent-text">
+          编辑 ›
+>>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
         </Link>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2.5">
-        {plansQuery.isLoading && (
-          <p className="col-span-2 text-sm text-muted">加载计划…</p>
-        )}
-        {featured.map((plan) => (
-          <Link
-            key={plan.id}
-            to={`/plans/${encodeURIComponent(plan.id)}`}
-            className="pressable relative min-h-[150px] overflow-hidden rounded-xl border border-line"
-          >
-            <div
-              className="absolute inset-0 bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg"
-              style={
-                plan.cover_url
-                  ? {
-                      backgroundImage: `linear-gradient(to top, rgba(23,22,28,.80) 0%, rgba(23,22,28,.24) 48%, rgba(23,22,28,.06) 100%), url(${plan.cover_url})`,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
-                    }
-                  : undefined
-              }
-            />
-            <div className="relative flex h-full min-h-[150px] flex-col justify-between p-3">
-              <span className="w-fit rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold text-white">
-                {plan.scene_tag || plan.badge_label || "计划"}
-              </span>
-              <div>
-                <h3 className="font-display text-sm font-semibold tracking-tight text-white">
-                  {plan.title}
-                </h3>
-                <p className="mt-0.5 truncate text-[9px] text-white/70">
-                  {plan.split_summary || plan.subtitle || `每周 ${plan.days_per_week} 练`}
-                </p>
-              </div>
+      <div className="mt-2.5 flex gap-2">
+        <div className="flex-1 rounded-2xl border border-line bg-elevated px-3 py-2.5">
+          <p className="text-[10.5px] font-semibold text-muted">体重</p>
+          <p className="font-num mt-1 text-[18px] font-extrabold tracking-tight">
+            {latestWeight != null ? latestWeight.toFixed(1) : "—"}
+            <small className="ml-0.5 text-[11px] font-semibold text-muted">kg</small>
+          </p>
+          {weightDelta != null ? (
+            <p
+              className={`mt-0.5 text-[10.5px] font-bold ${
+                weightDelta < 0 ? "text-ok" : weightDelta > 0 ? "text-muted" : "text-muted"
+              }`}
+            >
+              {weightDelta === 0
+                ? "持平"
+                : `${weightDelta > 0 ? "↑" : "↓"} ${Math.abs(weightDelta)} kg`}
+            </p>
+          ) : (
+            <p className="mt-0.5 text-[10.5px] font-bold text-muted">去设置里记一笔</p>
+          )}
+          <div className="mt-1.5">
+            <Sparkline values={weightPoints} />
+          </div>
+        </div>
+        <div className="flex-1 rounded-2xl border border-line bg-elevated px-3 py-2.5">
+          <p className="text-[10.5px] font-semibold text-muted">本周训练</p>
+          <div className="mt-1 flex items-center gap-3">
+            <BodyWeekRing trained={trained} target={target} />
+            <div className="min-w-0">
+              <p className="font-num text-[17px] font-extrabold">{trained} 场</p>
+              <p className="mt-0.5 truncate text-[10.5px] text-muted">
+                {prLift
+                  ? `PR ${prLift.exercise_name.length > 4 ? prLift.exercise_name.slice(0, 4) : prLift.exercise_name} ${prLift.load}`
+                  : `目标 ${target} 场`}
+              </p>
             </div>
-          </Link>
-        ))}
-        {!plansQuery.isLoading && featured.length === 0 && (
-          <p className="col-span-2 text-sm text-muted">暂无计划</p>
-        )}
+          </div>
+        </div>
       </div>
 
-      {/* 4. 找教练快捷胶囊（保留 3 个高频） */}
-      <p className="mt-6 text-xs font-bold text-muted">一句话改课</p>
-      <div className="chipbar no-scrollbar mt-2 flex gap-1.5 overflow-x-auto pb-1">
-        {COACH_CHIPS.slice(0, 3).map((chip) => (
-          <button
-            key={chip.label}
-            type="button"
-            onClick={() => {
-              try {
-                sessionStorage.setItem("coach_prefill", chip.prompt);
-              } catch {
-                /* ignore */
-              }
-              navigate("/coach");
-            }}
-            className="pressable shrink-0 rounded-md border border-line bg-elevated px-3 py-2 text-[12px] font-bold text-ink"
-          >
-            {chip.label}
-          </button>
-        ))}
+      <div className="mt-5">
+        <p className="text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">推荐排课</p>
+        <div className="mt-2.5 flex gap-2">
+          {COACH_CHIPS.map((chip) => (
+            <button
+              key={chip.label}
+              type="button"
+              onClick={() => {
+                try {
+                  sessionStorage.setItem("coach_prefill", chip.prompt);
+                } catch {
+                  /* ignore */
+                }
+                navigate("/coach");
+              }}
+              className="pressable flex-1 rounded-xl border border-line bg-elevated px-1.5 py-2.5 text-center text-[11.5px] font-bold leading-snug text-ink"
+            >
+              {chip.label.split("\n").map((line) => (
+                <span key={line} className="block">
+                  {line}
+                </span>
+              ))}
+            </button>
+          ))}
+        </div>
       </div>
 
       {draft && sheetOpen && (
@@ -739,8 +1113,161 @@ function TodayIdleWorkbench() {
           />
         </TodayDraftSheet>
       )}
+
+      {blockPickerOpen && following?.active_plan_id && (
+        <BlockPickerSheet
+          planId={following.active_plan_id}
+          currentBlockId={nextBlock?.id}
+          onClose={() => setBlockPickerOpen(false)}
+          onPicked={(card) => {
+            setBlockPickerOpen(false);
+            setDraft(card);
+            setSheetOpen(true);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function TodayRestDone({
+  split,
+  summary,
+}: {
+  split?: string | null;
+  summary?: string | null;
+}) {
+  return (
+    <div className="flex min-h-full flex-col px-5 pb-6 pt-4 rise-in">
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Gym Coach</p>
+      <div className="mt-1.5 flex items-start justify-between gap-3">
+        <h1 className="font-display text-[28px] font-extrabold tracking-tight">今日</h1>
+        <p className="pt-2 text-[12px] font-semibold text-muted">{formatTodayLabel()}</p>
+      </div>
+      <div className="mt-3 overflow-hidden rounded-[20px] border border-line bg-gradient-to-br from-[var(--hero-a)] via-[#f6f2fd] to-elevated p-4">
+        <TodaySeg />
+        <p className="mt-3 text-[12px] font-semibold text-muted">休息日</p>
+        <h2 className="mt-1.5 font-display text-[26px] font-extrabold tracking-tight">
+          {split || "休息"}
+        </h2>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-muted">
+          {summary || "今天记为休息日，不算进本周训练次数。"}
+        </p>
+        <Link
+          to="/coach"
+          className="pressable mt-4 inline-flex w-full items-center justify-center rounded-[14px] border border-line bg-elevated/80 py-3 text-[13px] font-bold text-ink"
+        >
+          还是想练 ›
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function BlockPickerSheet({
+  planId,
+  currentBlockId,
+  onClose,
+  onPicked,
+}: {
+  planId: string;
+  currentBlockId?: number | null;
+  onClose: () => void;
+  onPicked: (card: CardBlock) => void;
+}) {
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ["plan-detail", planId],
+    queryFn: () => fetchPlanDetail(planId),
+  });
+  const blocks: PlanBlockDetail[] = data?.blocks || [];
+
+  async function pick(blockId: number) {
+    if (busyId != null) return;
+    setBusyId(blockId);
+    try {
+      const res = await expandPlan(planId, blockId);
+      onPicked(res.card);
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex flex-col justify-end">
+      <button
+        type="button"
+        aria-label="关闭"
+        className="absolute inset-0 bg-scrim"
+        onClick={onClose}
+      />
+      <div className="relative z-[1] max-h-[80dvh] overflow-y-auto rounded-t-2xl border border-line bg-bg px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-xs font-bold text-muted">今天想练别的？选一个板块</p>
+          <button type="button" className="text-xs font-bold text-accent-text" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        {isLoading && <p className="py-6 text-center text-sm text-muted">加载板块…</p>}
+        <ul className="divide-y divide-line border-t border-line">
+          {blocks.map((block) => {
+            const active = block.id === currentBlockId;
+            return (
+              <li key={block.id}>
+                <button
+                  type="button"
+                  disabled={busyId != null}
+                  onClick={() => void pick(block.id)}
+                  className="pressable flex w-full items-start gap-3 py-3 text-left disabled:opacity-50"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[14px] font-bold ${active ? "text-accent-text" : "text-ink"}`}>
+                      {block.title}
+                      {active ? " · 当前" : ""}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted">
+                      {(block.muscles || []).join(" · ") || "—"}
+                      {block.minutes_label ? ` · ${block.minutes_label}` : ""}
+                      {block.exercises?.length ? ` · ${block.exercises.length} 动作` : ""}
+                    </p>
+                  </div>
+                  <span className="shrink-0 pt-0.5 text-[12px] font-bold text-accent-text">
+                    {busyId === block.id ? "…" : "选这个"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {!isLoading && blocks.length === 0 && (
+          <p className="py-6 text-center text-sm text-muted">这个计划还没有板块</p>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function buildSourceLine(
+  session: TrainingSession,
+  following: { plan?: { title?: string | null } | null; week?: { progress_label?: string | null; completed_count?: number; total_blocks?: number } } | null,
+): string {
+  if (session.plan_type === "custom" || (!session.plan_template_id && session.plan_type !== "framework" && session.plan_type !== "fixed")) {
+    return "教练排的 · 按你今天的状态";
+  }
+  const title = following?.plan?.title;
+  const progress =
+    following?.week?.progress_label ||
+    (following?.week?.total_blocks
+      ? `第 ${Math.min((following.week.completed_count || 0) + 1, following.week.total_blocks)} 个板块`
+      : null);
+  if (title && progress) return `${title} · ${progress}`;
+  if (title) return title;
+  if (session.plan_type === "framework" || session.plan_type === "fixed") return "计划场次";
+  return "今日计划";
 }
 
 function TodayDraftSheet({
@@ -790,6 +1317,243 @@ function TodayDraftSheet({
   );
 }
 
+function FlatExerciseRow({
+  group,
+  active,
+  tone,
+  thumb,
+  exerciseId,
+  open,
+  locked,
+  historySessions,
+  excludeSessionId,
+  onToggle,
+  onPatch,
+}: {
+  group: { name: string; muscle?: string | null; sets: SetLog[] };
+  active: boolean;
+  tone: number;
+  thumb?: string | null;
+  exerciseId?: string | null;
+  open: boolean;
+  locked: boolean;
+  historySessions: TrainingSession[];
+  excludeSessionId?: number | null;
+  onToggle: () => void;
+  onPatch: (id: number, body: Record<string, unknown>) => Promise<void>;
+}) {
+  const navigate = useNavigate();
+  const doneCount = group.sets.filter((set) => set.completed).length;
+  const allDone = doneCount === group.sets.length && group.sets.length > 0;
+  const first = group.sets[0];
+  const planHint = [
+    group.muscle,
+    first?.target_weight != null ? `${first.target_weight}kg` : null,
+    first?.target_reps ? `${first.target_reps}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 py-2">
+        <button
+          type="button"
+          className="shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (exerciseId) navigate(`/exercises/${encodeURIComponent(exerciseId)}`);
+          }}
+          aria-label={`${group.name} 详情`}
+        >
+          <ThumbTile src={thumb} tone={tone} size="sm" />
+        </button>
+        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          <div className="min-w-0 flex-1">
+            <p className={`truncate text-[14px] font-bold ${active ? "text-accent-text" : "text-ink"}`}>
+              {group.name}
+            </p>
+            {planHint ? <p className="mt-0.5 truncate text-[10.5px] text-muted">{planHint}</p> : null}
+          </div>
+          <span
+            className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-extrabold ${
+              allDone
+                ? "bg-ok/15 text-ok"
+                : active
+                  ? "bg-tint text-accent-text"
+                  : "border-[1.5px] border-line text-[#c6c1da]"
+            }`}
+          >
+            {allDone ? "✓" : active ? String(doneCount || "·") : ""}
+          </span>
+          <span className="font-num w-8 shrink-0 text-right text-[12px] font-bold text-muted">
+            {doneCount}/{group.sets.length}
+          </span>
+        </button>
+      </div>
+      {open && (
+        <ul className="mb-2 space-y-1.5 border-t border-line/60 pb-2 pt-2">
+          {group.sets.map((set) => (
+            <SetRow
+              key={set.id}
+              set={set}
+              disabled={locked}
+              prevReps={lastRepsForSet(historySessions, group.name, set.set_index, excludeSessionId)}
+              onPatch={onPatch}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TodaySeg() {
+  return (
+    <div className="flex rounded-xl border border-white/90 bg-white/65 p-1">
+      <span className="flex-1 rounded-[9px] bg-white py-2 text-center text-[13px] font-bold text-ink shadow-sm">
+        训练
+      </span>
+      <span className="flex-1 rounded-[9px] py-2 text-center text-[13px] font-bold text-muted">
+        饮食
+      </span>
+    </div>
+  );
+}
+
+function ThumbTile({
+  src,
+  tone,
+  size = "sm",
+  onClick,
+}: {
+  src?: string | null;
+  tone: number;
+  size?: "sm" | "lg";
+  onClick?: () => void;
+}) {
+  const dim = size === "lg" ? "h-14 w-14 rounded-2xl" : "h-9 w-9 rounded-[11px]";
+  const grad = THUMB_TONES[tone % THUMB_TONES.length];
+  const inner = src ? (
+    <img src={src} alt="" className={`object-cover ${dim}`} />
+  ) : (
+    <div className={`grid place-items-center bg-gradient-to-br ${grad} ${dim}`}>
+      <DumbbellIcon size={size === "lg" ? 28 : 18} />
+    </div>
+  );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="shrink-0 overflow-hidden">
+        {inner}
+      </button>
+    );
+  }
+  return <div className="shrink-0 overflow-hidden">{inner}</div>;
+}
+
+function DumbbellIcon({ size }: { size: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="white"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11" />
+    </svg>
+  );
+}
+
+function MiniStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <div className="flex-1 border-l border-line pl-3 first:border-l-0 first:pl-0">
+      <p className="text-[10px] font-semibold text-muted">{label}</p>
+      <p className="font-num mt-0.5 text-[15px] font-extrabold">
+        {value}
+        {unit ? <small className="ml-0.5 text-[10px] font-semibold text-muted">{unit}</small> : null}
+      </p>
+    </div>
+  );
+}
+
+function HighlightedSummary({ text }: { text: string }) {
+  const parts = text.split(/(\d+(?:\.\d+)?\s*(?:kg|KG|次|组|分钟)|PR)/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        /^\d/.test(part) || part === "PR" ? (
+          <b key={i} className="font-bold text-accent-text">
+            {part}
+          </b>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+function BodyWeekRing({ trained, target }: { trained: number; target: number }) {
+  const pct = target > 0 ? Math.min(trained / target, 1) : 0;
+  const R = 19;
+  const C = 2 * Math.PI * R;
+  const filled = C * pct;
+  return (
+    <div className="relative h-[42px] w-[42px] shrink-0">
+      <svg width="42" height="42" viewBox="0 0 48 48" className="-rotate-90">
+        <circle cx="24" cy="24" r={R} stroke="var(--line)" strokeWidth="5" fill="none" />
+        <circle
+          cx="24"
+          cy="24"
+          r={R}
+          stroke="var(--accent)"
+          strokeWidth="5"
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${filled} ${C - filled}`}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center font-num text-[11px] font-extrabold">
+        {trained}/{target}
+      </div>
+    </div>
+  );
+}
+
+function IdleArt() {
+  return (
+    <svg className="mx-auto mb-3.5 mt-1.5 h-[108px] w-[132px]" viewBox="0 0 132 108" fill="none" aria-hidden>
+      <ellipse cx="66" cy="90" rx="40" ry="8" fill="var(--accent)" opacity=".08" />
+      <circle cx="66" cy="46" r="34" fill="var(--accent)" opacity=".10" />
+      <circle cx="66" cy="46" r="22" fill="var(--accent)" opacity=".10" />
+      <path
+        d="M46 46h40M53 38v16M46 41v10M79 41v10"
+        stroke="var(--accent)"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        opacity=".4"
+      />
+      <path
+        d="M92 20l4-4M36 20l-4-4"
+        stroke="var(--accent)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        opacity=".25"
+      />
+    </svg>
+  );
+}
+
+function formatTodayLabel(): string {
+  const d = new Date();
+  const week = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
+  return `${d.getMonth() + 1}月${d.getDate()}日 周${week}`;
+}
+
 function parseDefaultReps(targetReps?: string | null): number {
   if (!targetReps) return 10;
   const cleaned = targetReps.replace(/[^0-9-~至到]/g, "");
@@ -804,77 +1568,15 @@ function parseDefaultReps(targetReps?: string | null): number {
   return 10;
 }
 
-function ExerciseCard({
-  group,
-  open,
-  locked,
-  onToggle,
-  onPatch,
-}: {
-  group: { name: string; muscle?: string | null; sets: SetLog[] };
-  open: boolean;
-  locked: boolean;
-  onToggle: () => void;
-  onPatch: (id: number, body: Record<string, unknown>) => Promise<void>;
-}) {
-  const doneCount = group.sets.filter((set) => set.completed).length;
-  const allDone = doneCount === group.sets.length && group.sets.length > 0;
-  return (
-    <div className="overflow-hidden rounded-xl border border-line bg-elevated transition-colors">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center justify-between px-3.5 py-3 text-left transition-colors hover:bg-bg/40 active:bg-bg/60"
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-display text-base font-bold text-ink">{group.name}</span>
-          {group.muscle && (
-            <span className="shrink-0 rounded bg-bg px-1.5 py-0.5 text-[10px] font-bold text-muted">
-              {group.muscle}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-              allDone ? "bg-ok/15 text-ok" : "bg-bg text-muted"
-            }`}
-          >
-            {doneCount}/{group.sets.length} 组
-          </span>
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={`text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </div>
-      </button>
-      {open && (
-        <ul className="space-y-1.5 border-t border-line px-3.5 pb-3.5 pt-2.5">
-          {group.sets.map((set) => (
-            <SetRow key={set.id} set={set} disabled={locked} onPatch={onPatch} />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function SetRow({
   set,
   disabled,
+  prevReps,
   onPatch,
 }: {
   set: SetLog;
   disabled: boolean;
+  prevReps?: number | null;
   onPatch: (id: number, body: Record<string, unknown>) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -952,6 +1654,9 @@ function SetRow({
         >
           <span className="text-sm font-bold text-ink">第 {set.set_index} 组</span>
           <span className="ml-2 font-num text-sm text-muted">{line}</span>
+          {prevReps != null ? (
+            <span className="ml-2 text-[11px] font-semibold text-muted">上次 {prevReps} 次</span>
+          ) : null}
         </button>
         <button
           type="button"

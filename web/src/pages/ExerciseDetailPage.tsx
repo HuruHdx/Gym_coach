@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { LoopClip } from "../components/LoopClip";
@@ -48,11 +48,15 @@ export function ExerciseDetailPage() {
   const { id: raw = "" } = useParams();
   const id = decodeURIComponent(raw);
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const [frame, setFrame] = useState<"start" | "end">("start");
   const [adding, setAdding] = useState(false);
   const [addMsg, setAddMsg] = useState("");
   const [addErr, setAddErr] = useState("");
+  const showAddCta =
+    Boolean((location.state as { fromCatalog?: boolean } | null)?.fromCatalog) ||
+    new URLSearchParams(location.search).get("from") === "catalog";
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["catalog-exercise", id],
@@ -129,7 +133,11 @@ export function ExerciseDetailPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col pb-[calc(88px+env(safe-area-inset-bottom))] pt-3">
+    <div
+      className={`flex min-h-full flex-col pt-3 ${
+        showAddCta ? "pb-[calc(88px+env(safe-area-inset-bottom))]" : "pb-6"
+      }`}
+    >
       <div className="px-4">
         <button
           type="button"
@@ -275,25 +283,33 @@ export function ExerciseDetailPage() {
             </section>
           ) : null}
 
-          <div className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md border-t border-line bg-bg/95 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
-            {addMsg ? (
-              <p className="mb-2 text-center text-[12px] font-bold text-ok">
-                {addMsg}{" "}
-                <Link to="/" className="underline">
-                  去今日
-                </Link>
-              </p>
-            ) : null}
-            {addErr ? <p className="mb-2 text-center text-[12px] font-bold text-danger">{addErr}</p> : null}
-            <button
-              type="button"
-              disabled={adding}
-              onClick={() => void addToToday()}
-              className="pressable w-full rounded-xl bg-accent py-3 text-sm font-extrabold text-accent-ink disabled:opacity-60"
-            >
-              {adding ? "加入中…" : "加入今日训练"}
-            </button>
-          </div>
+          {showAddCta ? (
+            <div className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md border-t border-line bg-bg/95 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
+              {addMsg ? (
+                <p className="mb-2 text-center text-[12px] font-bold text-ok">
+                  {addMsg}{" "}
+                  <Link to="/" className="underline">
+                    去今日
+                  </Link>
+                </p>
+              ) : null}
+              {addErr ? (
+                <p className="mb-2 text-center text-[12px] font-bold text-danger">{addErr}</p>
+              ) : null}
+              <button
+                type="button"
+                disabled={adding}
+                onClick={() => void addToToday()}
+                className="pressable w-full rounded-xl bg-accent py-3 text-sm font-extrabold text-accent-ink disabled:opacity-60"
+              >
+                {adding ? "加入中…" : "加入今日训练"}
+              </button>
+            </div>
+          ) : (
+            <p className="mt-6 px-4 pb-2 text-center text-[11px] text-muted">
+              从计划 / 今日进入时仅浏览要领，不提供「加入今日」
+            </p>
+          )}
         </>
       )}
     </div>

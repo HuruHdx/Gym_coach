@@ -16,6 +16,9 @@ router = APIRouter(prefix="/api/exercises", tags=["exercises"])
 def list_exercises(
     q: str | None = Query(default=None),
     muscle: str | None = Query(default=None),
+    gear: str | None = Query(default=None, description="自重 / 自由重量 / 器械 / 绳索"),
+    modality: str | None = Query(default=None, description="抗阻 / 有氧 / HIIT / 灵活性"),
+    coach_core: bool | None = Query(default=None, description="只看主力"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=24, ge=1, le=60),
     session: Session = Depends(get_session),
@@ -25,6 +28,9 @@ def list_exercises(
         session,
         q=q,
         muscle=muscle,
+        gear=gear,
+        modality=modality,
+        coach_core=coach_core,
         page=page,
         page_size=page_size,
     )

@@ -200,13 +200,6 @@ export function MePage({ profile, onLogout }: Props) {
             ))}
           </div>
         </div>
-        <Link
-          to="/exercises"
-          className="pressable flex items-center justify-between border-b border-line px-3.5 py-3.5 text-sm font-bold"
-        >
-          动作库
-          <span className="text-muted">›</span>
-        </Link>
         {!logoutAsk ? (
           <button
             type="button"

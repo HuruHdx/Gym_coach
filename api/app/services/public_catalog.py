@@ -27,6 +27,7 @@ def _public_list_item(ex: Exercise, media_map: dict[str, ExerciseMedia]) -> dict
         "muscle": ex.muscle,
         "sub_region": ex.sub_region,
         "gear": ex.gear,
+        "modality": ex.modality,
         "coach_core": bool(ex.coach_core),
         "thumb_url": thumb_for_exercise(ex, media_map),
     }
@@ -37,6 +38,9 @@ def list_public_exercises(
     *,
     q: str | None = None,
     muscle: str | None = None,
+    gear: str | None = None,
+    modality: str | None = None,
+    coach_core: bool | None = None,
     page: int = 1,
     page_size: int = 24,
 ) -> dict[str, Any]:
@@ -46,6 +50,12 @@ def list_public_exercises(
     filters = [Exercise.is_valid_exercise.is_(True)]
     if muscle:
         filters.append(Exercise.muscle == muscle)
+    if gear:
+        filters.append(Exercise.gear == gear)
+    if modality:
+        filters.append(Exercise.modality == modality)
+    if coach_core is True:
+        filters.append(Exercise.coach_core.is_(True))
 
     q_norm = (q or "").strip()
     if q_norm:

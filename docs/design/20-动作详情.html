@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="1020"
+      style="width:390px;height:1020px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 1020px; background: #f4f3f8; position: relative; overflow: hidden; margin: 0 auto; }
+  .wrap { padding: 0 20px; }
+  .nav { display: flex; align-items: center; padding-top: 18px; }
+  .nav-back { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #6f6a8c; }
+  .nav-back i { font-style: normal; font-size: 17px; }
+
+  .media { margin-top: 12px; height: 190px; border-radius: 18px; background: #ece8f5; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+  .media svg { width: 64px; height: 64px; stroke: #b3abc9; }
+  .media-badge { position: absolute; bottom: 10px; right: 10px; background: rgba(23,22,28,.78); color: #fff; font-size: 10px; font-weight: 700; border-radius: 6px; padding: 3px 8px; }
+
+  .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-top: 16px; }
+  .title { font-size: 25px; font-weight: 800; letter-spacing: -.02em; }
+  .title-en { font-size: 12px; color: #9b97ad; margin-top: 4px; }
+  .core { flex: none; margin-top: 5px; font-size: 10px; font-weight: 800; color: #6b46e5; border: 1px solid #ddd6f3; border-radius: 6px; padding: 3px 8px; }
+
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .tag { font-size: 10px; font-weight: 700; color: #6f6a8c; border: 1px solid #e8e5f0; border-radius: 6px; padding: 3px 7px; background: #fff; }
+
+  .risk { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 11px; color: #6f6a8c; }
+  .risk b { color: #17161c; font-weight: 700; }
+
+  .sec-title { font-size: 13px; font-weight: 800; margin: 20px 0 4px; }
+
+  .steps { border-top: 1px solid #e8e5f0; }
+  .step { display: flex; gap: 12px; padding: 12px 0; }
+  .step + .step { border-top: 1px solid #e8e5f0; }
+  .step-no { flex: none; width: 18px; height: 18px; border-radius: 6px; background: #eee9fb; color: #6b46e5; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .step p { margin: 0; font-size: 12.5px; line-height: 1.65; color: #383448; }
+
+  .bullets { margin-top: 8px; }
+  .bullets li { font-size: 12.5px; line-height: 1.7; color: #383448; list-style: none; padding-left: 14px; position: relative; }
+  .bullets li + li { margin-top: 6px; }
+  .bullets li::before { content: "·"; position: absolute; left: 2px; font-weight: 800; color: #9b97ad; }
+
+  .alias { margin-top: 16px; font-size: 11px; color: #9b97ad; }
+  .alias b { color: #6f6a8c; font-weight: 700; }
+
+  .foot { position: absolute; left: 20px; right: 20px; bottom: 26px; }
+  .foot-note { text-align: center; font-size: 10px; color: #9b97ad; line-height: 1.6; }
+</style>
+</head>
+<body style="width:390px;height:1020px;">
+<main data-canvas-root style="width:390px;height:1020px;">
+  <div class="screen">
+    <div class="wrap">
+      <div class="nav"><div class="nav-back"><i>‹</i> 返回</div></div>
+
+      <div class="media">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round">
+          <path d="M6.5 6.5v11M17.5 6.5v11M4 9.5v5M20 9.5v5M6.5 12h11"/>
+        </svg>
+        <span class="media-badge">动图</span>
+      </div>
+
+      <div class="title-row">
+        <div>
+          <div class="title">杠铃平板卧推</div>
+          <div class="title-en">Barbell Bench Press</div>
+        </div>
+        <span class="core">主力</span>
+      </div>
+
+      <div class="tag-row">
+        <span class="tag">胸</span><span class="tag">胸上部</span><span class="tag">水平推</span>
+        <span class="tag">杠铃</span><span class="tag">自由重量</span>
+      </div>
+
+      <div class="risk">关节注意：<b>肩 中</b> · <b>腕 中</b></div>
+
+      <div class="sec-title">动作要领</div>
+      <div class="steps">
+        <div class="step"><div class="step-no">1</div><p>仰卧平凳，双脚踩实地面，腰背轻微拱起，肩胛后缩下沉。</p></div>
+        <div class="step"><div class="step-no">2</div><p>握杆略宽于肩，杠铃从胸部正上方开始，下放到乳头附近。</p></div>
+        <div class="step"><div class="step-no">3</div><p>下放时小臂保持垂直，肘部约与身体成 45°，不要完全外展。</p></div>
+        <div class="step"><div class="step-no">4</div><p>推起时脚跟蹬地、臀部贴凳，杠铃轨迹略向头侧收回至起始位。</p></div>
+      </div>
+
+      <div class="sec-title">发力提示</div>
+      <ul class="bullets">
+        <li>推起前先憋气固定核心，推到锁定再呼气。</li>
+        <li>想象把杠铃"掰弯"，胸大肌主动收缩顶起杠铃。</li>
+      </ul>
+
+      <div class="sec-title">常见错误</div>
+      <ul class="bullets">
+        <li>肘部过度外展成一字，肩关节压力变大。</li>
+        <li>臀部离凳或腰部反弓过大，代偿转移到腰。</li>
+      </ul>
+
+      <div class="alias"><b>别名</b>：平板卧推、平卧推</div>
+    </div>
+
+    <div class="foot">
+      <div class="foot-note">从计划 / 今日进入：本页仅查看要领，底部不显示「加入今日」<br>从动作库 / 空态进入：底部才显示「加入今日训练」</div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

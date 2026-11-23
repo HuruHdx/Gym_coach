@@ -74,6 +74,7 @@ def set_to_out(row: TrainingSetLog) -> SetOut:
         completed=row.completed,
         feeling=row.feeling,
         note=row.note,
+        is_warmup=bool(row.is_warmup),
     )
 
 
@@ -158,6 +159,41 @@ def get_today_active(session: Session, day: date | None = None) -> Optional[Sess
         return None
     sets = list(session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == sess.id)).all())
     return session_to_out(sess, sets)
+
+
+def mark_rest_today(session: Session, day: date | None = None) -> SessionOut:
+    """记今天休息：source=rest、status=done、0 组。已有正式训练完成则拒绝。"""
+    day = day or date.today()
+    existing = session.exec(
+        _sessions_q()
+        .where(TrainingSession.session_date == day)
+        .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
+        .order_by(col(TrainingSession.id).desc())
+    ).first()
+    if existing and existing.source == "rest" and existing.status == "done":
+        return session_to_out(existing, [])
+    if existing and existing.status == "done" and existing.source != "rest":
+        raise HTTPException(status_code=409, detail="今日已有训练记录，不能再记成休息日")
+    if existing and existing.status == "active":
+        abandon_today_active(session, day)
+        session.commit()
+
+    sess = TrainingSession(
+        user_id=current_user_id(),
+        session_date=day,
+        split_label="休息",
+        source="rest",
+        status="done",
+        total_volume=0,
+        session_outcome="休息",
+        summary="今天记为休息日。",
+        duration_seconds=0,
+        duration_minutes=0,
+    )
+    session.add(sess)
+    session.commit()
+    session.refresh(sess)
+    return session_to_out(sess, [])
 
 
 def abandon_today_active(session: Session, day: date) -> None:
@@ -316,12 +352,16 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
     plan_type = body.plan_type
     if not plan_type and body.plan_template_id:
         plan_type = "framework"
+    quote = (body.coach_quote or "").strip() or None
+    if quote and len(quote) > 200:
+        quote = quote[:200]
     sess = TrainingSession(
         user_id=current_user_id(),
         session_date=day,
         split_label=split,
         source="adopted",
         status="active",
+        note=quote,
         plan_template_id=body.plan_template_id,
         plan_block_id=body.plan_block_id,
         plan_type=plan_type,

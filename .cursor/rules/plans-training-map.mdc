@@ -1,0 +1,22 @@
+---
+description: 改计划/训练链路前读字段口径与耦合表
+globs:
+  - api/app/routers/plan.py
+  - api/app/routers/training.py
+  - api/app/services/plan*.py
+  - api/app/services/session_service.py
+  - api/app/services/analytics_service.py
+  - api/app/exercise_match.py
+  - web/src/pages/**
+---
+
+# 计划 / 训练 / H5 页面
+
+改 adopt、打卡、计划模板、配课或今日/训练/计划页前先读：
+
+- `docs/项目地图.md` §6–§7（字段口径、接口）
+- 同页 §8 耦合表（exercise_name、plan_*、adopt、active_plan 等）
+- 配课/换动作遵守 §6.1：**只信结构化字段，禁止动作名写死**
+
+H5 大改对照 `docs/13-H5页面优化-逐页工单.md` 与 `docs/design/`。  
+契约或字段有变 → **同一回合更新项目地图**。
