@@ -62,36 +62,6 @@ export function TrainingPage() {
   const hasOverview = Boolean(dashboard && (dashboard.week.trained_days > 0 || metrics.sets > 0 || metrics.minutes > 0));
 
   return (
-<<<<<<< HEAD
-    <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
-      <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted">
-        Gym Coach
-      </p>
-      <h1 className="font-display text-[26px] font-bold tracking-tight">训练</h1>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <Link
-          to="/exercises"
-          className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
-        >
-          <p className="text-sm font-bold">动作库</p>
-          <p className="mt-0.5 text-[10px] text-muted">要领示范</p>
-        </Link>
-        <Link
-          to="/training/lifts"
-          className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
-        >
-          <p className="text-sm font-bold">动作进阶</p>
-          <p className="mt-0.5 text-[10px] text-muted">走势 PR</p>
-        </Link>
-        <Link
-          to="/training/form-check"
-          className="pressable rounded-2xl border border-line bg-elevated px-2.5 py-3"
-        >
-          <p className="text-sm font-bold">动作分析</p>
-          <p className="mt-0.5 text-[10px] text-muted">即将推出</p>
-        </Link>
-=======
     <div className="flex min-h-full flex-col px-5 pb-6 pt-4 rise-in">
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Gym Coach</p>
       <div className="mt-1.5 flex items-center justify-between gap-3">
@@ -110,7 +80,6 @@ export function TrainingPage() {
             </button>
           ))}
         </div>
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
       </div>
 
       {/* 本周/月概览 */}

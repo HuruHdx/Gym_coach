@@ -199,6 +199,11 @@ def studio_deps() -> dict[str, Any]:
         "yt_dlp": ytdlp,
         "ffmpeg": ffmpeg_available(),
         "faster_whisper": whisper,
+        "whisper_model": (
+            (_WHISPER_MODEL_KEY.split(":", 1)[0] if _WHISPER_MODEL_KEY else _whisper_model_name())
+            if whisper
+            else None
+        ),
         "llm": llm_ok,
         "llm_model": settings.llm_model if llm_ok else None,
         "cookie_source": (load_cookies().get("source") or "paste"),
@@ -462,18 +467,41 @@ def retranscribe(session: Session, task_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="还没有本地视频，请先下载或补传")
     ref = dict(task.result_ref or {})
     ref["continued"] = True
+    # 清掉旧草稿动作，避免字幕重跑后仍显示上一轮错名
+    ref.pop("draft", None)
     _touch(
         task,
         status="queued",
         progress=35,
         error=None,
         transcript_json=None,
+        draft_json={"plan_title": "", "blocks": []},
         result_ref=ref,
     )
     session.add(task)
     session.commit()
     _spawn_pipeline(task_id)
     return get_task(session, task_id)
+
+
+def delete_task(session: Session, task_id: int) -> dict[str, Any]:
+    """删除工坊任务：清本地视频目录 + 数据库行。已发布的计划/SKU 不回滚。"""
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    _bump_pipeline_run(session, task_id)
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    folder = _task_dir(task_id)
+    session.delete(task)
+    session.commit()
+    if folder.exists():
+        try:
+            shutil.rmtree(folder, ignore_errors=True)
+        except OSError:
+            pass
+    return {"ok": True, "id": task_id}
 
 
 def skip_transcribe(session: Session, task_id: int) -> dict[str, Any]:
@@ -714,14 +742,7 @@ def _run_pipeline_safe(task_id: int, run_id: int = 0) -> None:
                 return
             # 本地视频还在 → 多半是转字幕挂了，别伪装成「抓不到」
             has_video = bool(_abs_video(task))
-            msg = str(e)[:500]
-            if has_video and "metadata_errors" in msg:
-                msg = (
-                    "转字幕失败：faster-whisper 与本机 PyAV 版本不兼容（metadata_errors）。"
-                    "已修复兼容层，请点「重跑字幕」。"
-                )
-            elif has_video:
-                msg = f"转字幕/拆计划失败：{msg}"
+            msg = _friendly_pipeline_error(str(e), has_video=has_video)
             _touch(task, status="failed", error=msg, progress=100)
             session.add(task)
             session.commit()
@@ -1151,7 +1172,12 @@ def _patch_av_open_compat() -> None:
 
 
 _WHISPER_MODEL: Any = None
+_WHISPER_MODEL_KEY: str | None = None
 _WHISPER_LOCK = threading.Lock()
+# 默认可被环境变量覆盖：STUDIO_WHISPER_MODEL=base|small|medium|large-v3
+_WHISPER_ALLOWED = frozenset(
+    {"tiny", "base", "small", "medium", "large-v2", "large-v3", "distil-large-v3"}
+)
 
 
 def _probe_duration_sec(path: Path) -> float | None:
@@ -1208,17 +1234,209 @@ def _fmt_hms(sec: float) -> str:
     return f"{m:02d}:{ss:02d}"
 
 
+def _whisper_model_name() -> str:
+    """默认 small：纯口播中文比 base 准；可用 STUDIO_WHISPER_MODEL 改。下不动时会回退 base。"""
+    raw = (os.environ.get("STUDIO_WHISPER_MODEL") or "small").strip().lower()
+    return raw if raw in _WHISPER_ALLOWED else "small"
+
+
+_WHISPER_CUDA_BROKEN = False
+
+
+def _whisper_device_candidates() -> list[tuple[str, str]]:
+    """默认 CPU。只有显式 STUDIO_WHISPER_DEVICE=cuda 才尝试 GPU（缺 cublas 时再退 CPU）。"""
+    global _WHISPER_CUDA_BROKEN
+    force = (os.environ.get("STUDIO_WHISPER_DEVICE") or "cpu").strip().lower()
+    if force == "cuda" and not _WHISPER_CUDA_BROKEN:
+        return [("cuda", "float16"), ("cpu", "int8")]
+    return [("cpu", "int8")]
+
+
+def _ensure_hf_mirror() -> None:
+    """国内常连不上 huggingface.co；未显式配置时默认走 hf-mirror。
+
+    关掉：STUDIO_HF_MIRROR=0；自定：HF_ENDPOINT=https://...
+    """
+    flag = (os.environ.get("STUDIO_HF_MIRROR") or "1").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return
+    if (os.environ.get("HF_ENDPOINT") or "").strip():
+        return
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
+
+def _friendly_pipeline_error(raw: str, *, has_video: bool) -> str:
+    low = (raw or "").lower()
+    if has_video and "metadata_errors" in low:
+        return "转字幕失败：语音组件与本机解码库不兼容。请点「重跑字幕」。"
+    if has_video and any(k in low for k in ("cublas", "cudnn", "cublas64")):
+        return "转字幕失败：本机 GPU 库不完整。请再点「重跑字幕」（已默认改用 CPU）。"
+    if has_video and any(
+        k in low
+        for k in (
+            "connecttimeout",
+            "connection timed out",
+            "winerror 10060",
+            "huggingface",
+            "hub",
+            "snapshot folder",
+            "max retries",
+        )
+    ):
+        return (
+            "转字幕失败：语音模型下载超时（连不上模型站）。"
+            "请再点「重跑字幕」；仍失败可设 STUDIO_WHISPER_MODEL=base。"
+        )
+    if has_video:
+        return f"转字幕失败：{(raw or '')[:220]}"
+    return (raw or "处理失败")[:400]
+
+
 def _get_whisper_model() -> Any:
-    """进程内复用模型，避免每条任务重新加载 base 权重（长视频尤其明显）。"""
-    global _WHISPER_MODEL
+    """进程内复用模型；型号可回退 small→base；设备默认 CPU。"""
+    global _WHISPER_MODEL, _WHISPER_MODEL_KEY, _WHISPER_CUDA_BROKEN
+    preferred = _whisper_model_name()
     with _WHISPER_LOCK:
-        if _WHISPER_MODEL is None:
-            from faster_whisper import WhisperModel  # type: ignore
+        if _WHISPER_MODEL is not None and _WHISPER_MODEL_KEY:
+            return _WHISPER_MODEL
+        from faster_whisper import WhisperModel  # type: ignore
 
-            _patch_av_open_compat()
-            _WHISPER_MODEL = WhisperModel("base", device="cpu", compute_type="int8")
-        return _WHISPER_MODEL
+        _patch_av_open_compat()
+        _ensure_hf_mirror()
+        model_names = [preferred]
+        if preferred != "base":
+            model_names.append("base")
+        last_err: BaseException | None = None
+        for device, compute in _whisper_device_candidates():
+            for name in model_names:
+                try:
+                    _WHISPER_MODEL = WhisperModel(name, device=device, compute_type=compute)
+                    _WHISPER_MODEL_KEY = f"{name}:{device}:{compute}"
+                    return _WHISPER_MODEL
+                except BaseException as e:  # noqa: BLE001
+                    last_err = e
+                    err_l = str(e).lower()
+                    if device == "cuda" and any(k in err_l for k in ("cublas", "cudnn", "cuda")):
+                        _WHISPER_CUDA_BROKEN = True
+                    continue
+        raise RuntimeError(f"无法加载语音模型：{last_err}") from last_err
 
+
+# Whisper language=zh 常出繁体；优先 zhconv，否则常见繁简单字兜底。
+_TW_TO_CN_TABLE = str.maketrans(
+    {
+        "們": "们",
+        "這": "这",
+        "個": "个",
+        "來": "来",
+        "過": "过",
+        "後": "后",
+        "時": "时",
+        "從": "从",
+        "對": "对",
+        "會": "会",
+        "還": "还",
+        "說": "说",
+        "麼": "么",
+        "裡": "里",
+        "裏": "里",
+        "嗎": "吗",
+        "與": "与",
+        "無": "无",
+        "為": "为",
+        "於": "于",
+        "開": "开",
+        "關": "关",
+        "見": "见",
+        "現": "现",
+        "發": "发",
+        "經": "经",
+        "動": "动",
+        "運": "运",
+        "體": "体",
+        "訓": "训",
+        "練": "练",
+        "學": "学",
+        "習": "习",
+        "態": "态",
+        "勢": "势",
+        "點": "点",
+        "兩": "两",
+        "並": "并",
+        "將": "将",
+        "則": "则",
+        "卻": "却",
+        "當": "当",
+        "樣": "样",
+        "種": "种",
+        "氣": "气",
+        "條": "条",
+        "網": "网",
+        "語": "语",
+        "認": "认",
+        "調": "调",
+        "請": "请",
+        "讓": "让",
+        "該": "该",
+        "幾": "几",
+        "處": "处",
+        "應": "应",
+        "總": "总",
+        "隻": "只",
+        "進": "进",
+        "選": "选",
+        "換": "换",
+        "準": "准",
+        "備": "备",
+        "確": "确",
+        "實": "实",
+        "際": "际",
+        "長": "长",
+        "門": "门",
+        "問": "问",
+        "間": "间",
+        "閱": "阅",
+        "讀": "读",
+        "寫": "写",
+        "頭": "头",
+        "頸": "颈",
+        "彎": "弯",
+        "舉": "举",
+        "壓": "压",
+        "熱": "热",
+        "鬆": "松",
+        "組": "组",
+        "係": "系",
+        "劃": "划",
+        "載": "载",
+        "劇": "剧",
+        "傳": "传",
+        "價": "价",
+        "圓": "圆",
+        "兒": "儿",
+        "邊": "边",
+        "達": "达",
+        "遠": "远",
+        "適": "适",
+    }
+)
+
+def _to_simplified_zh(text: str) -> str:
+    """强制简体：有 zhconv 用全表，否则常见繁体字兜底。不做逐词听错硬编码。"""
+    s = (text or "").strip()
+    if not s:
+        return s
+    try:
+        from zhconv import convert as _zhconv_convert  # type: ignore
+
+        return str(_zhconv_convert(s, "zh-cn")).strip()
+    except Exception:
+        return s.translate(_TW_TO_CN_TABLE)
+
+
+def _normalize_transcript_text(text: str) -> str:
+    """转写后只做简体化；听错纠名交给对照动作库的同音匹配。"""
+    return _to_simplified_zh(text)
 
 def _transcribe(video: Path, on_progress: Any = None) -> dict[str, Any]:
     """优先 Faster-Whisper；没有则返回空字幕骨架，仍可人工审/启发式。
@@ -1283,33 +1501,43 @@ def _transcribe(video: Path, on_progress: Any = None) -> dict[str, Any]:
     except Exception:
         audio_path = video
 
-    _emit(stage="load_model", percent=48, detail="加载语音模型…")
+    model_name = _whisper_model_name()
+    _emit(stage="load_model", percent=48, detail=f"加载语音模型（{model_name}）…")
     model = _get_whisper_model()
     _emit(
         stage="transcribing",
         percent=50,
-        detail=f"转写中 00:00 / {dur_label}" if duration else "转写中…",
+        detail=f"转写中 00:00 / {dur_label} · {model_name}" if duration else f"转写中… · {model_name}",
     )
 
     segments_out: list[dict[str, Any]] = []
     texts: list[str] = []
     last_emit = 0.0
     try:
-        # beam_size=1 + 不依赖上文：CPU 上对 20+ 分钟片明显更快，健身房口播够用
+        # 跟练片多为干净口播：用更高 beam，优先把字听准；不再为了速度压成 beam=1/base
         segs, info = model.transcribe(
             str(audio_path),
             language="zh",
+            task="transcribe",
             vad_filter=True,
-            beam_size=1,
-            best_of=1,
-            condition_on_previous_text=False,
+            beam_size=5,
+            best_of=5,
+            patience=1.0,
+            temperature=0.0,
+            condition_on_previous_text=True,
+            initial_prompt=(
+                "以下是简体中文健身房跟练口播，无背景音乐。"
+                "教练会说热身、跪姿、站姿、坐姿、肘屈伸、臂屈伸、深蹲、硬拉、卧推、划船、下拉、推举、弯举、组、次。"
+            ),
         )
         total = float(getattr(info, "duration", 0) or 0) or (duration or 0.0)
         for s in segs:
+            raw = (s.text or "").strip()
+            text = _normalize_transcript_text(raw) if raw else ""
             row = {
                 "start": round(float(s.start), 2),
                 "end": round(float(s.end), 2),
-                "text": (s.text or "").strip(),
+                "text": text,
             }
             if row["text"]:
                 segments_out.append(row)
@@ -1347,7 +1575,12 @@ def _transcribe(video: Path, on_progress: Any = None) -> dict[str, Any]:
         detail=f"转写完成 · {len(segments_out)} 句",
         size=f"{len(segments_out)} 句",
     )
-    return {"engine": "faster-whisper", "segments": segments_out, "text": "\n".join(texts)}
+    return {
+        "engine": "faster-whisper",
+        "model": model_name,
+        "segments": segments_out,
+        "text": "\n".join(texts),
+    }
 
 
 def _muscle_from_hit(hit: dict[str, Any] | None) -> str:
@@ -1399,7 +1632,7 @@ _STUDIO_PARSE_SYSTEM = """你是健身房跟练视频拆课助手。根据带时
 6. cues / mistakes 各 0～3 条，必须来自字幕里的要领/易错，并带 source_at（对应字幕秒数）；没有就空数组，禁止编造。
 7. tempo / intensity 有则摘一句，无则空字符串。
 8. 组次未提及时 target_sets/target_reps 置 null；热身尤其不要瞎填组次。
-9. 若下面给了「可对照动作名表」：字幕里的说法能对上表里某个标准名时（同音字、平翘舌听错也算对上），spoken_name 照抄表内标准名；对不上才写口语原词，禁止编一个库里没有的动作名。
+9. 若下面给了「可对照动作名表」：只有核心动作词也对得上时（同音字、平翘舌听错也算），spoken_name 才照抄表内标准名；对不上就写字幕口语原词。禁止只凭「跪姿/坐姿/站姿」等姿势词，或半截乱码，去硬套库里另一个动作。禁止编库里没有的名。
 10. 混练视频按部位/阶段分块：每个 block 对应一段连续的训练内容（如 热身 / 胸日 / 背日）；单一部位视频可把热身单独一块或放在同块最前。
 11. 片头仅报菜名、没有进入该动作教学的，不要单独抽成一条；等真正讲到再抽。
 只输出 JSON：
@@ -1728,10 +1961,10 @@ def _parse_and_score(
     ensure_loaded()
 
     def _row_from_item(item: dict[str, Any], seq: int) -> dict[str, Any] | None:
-        raw_spoken = str(item.get("spoken_name") or "").strip()
+        raw_spoken = _normalize_transcript_text(str(item.get("spoken_name") or "").strip())
         if not raw_spoken:
             return None
-        # 字幕错字（载剧下拉）先改成库里唯一的标准名，再匹配；定位仍可用原词
+        # 听错名：只对照动作库做同音唯一纠错，不对单词语料做白名单替换
         repaired = repair_spoken_name(session, raw_spoken)
         spoken = repaired or raw_spoken
         spoken_at = float(item.get("spoken_at") or 0)
@@ -2170,8 +2403,14 @@ def _attach_demo_media(
         return None
     tmp = _task_dir(task.id or 0) / f"demo_{exercise_id}"
     mp4, jpg = make_demo_pair(video, start=start, end=end, out_dir=tmp, stem=exercise_id)
-    demo_url = save_public_asset(mp4.read_bytes(), f"exercises/custom/{exercise_id}_demo.mp4", "video/mp4")
-    cover_url = save_public_asset(jpg.read_bytes(), f"exercises/custom/{exercise_id}_start.jpg", "image/jpeg")
+    # 每次新文件名。固定成 {id}_demo.mp4 时，库里旧示范同路径，浏览器不重新拉，看起来像没换成博主这段。
+    token = uuid.uuid4().hex[:10]
+    demo_url = save_public_asset(
+        mp4.read_bytes(), f"exercises/custom/{exercise_id}/demo_{token}.mp4", "video/mp4"
+    )
+    cover_url = save_public_asset(
+        jpg.read_bytes(), f"exercises/custom/{exercise_id}/start_{token}.jpg", "image/jpeg"
+    )
 
     # 撤旧 published demo
     old = session.exec(
@@ -2351,15 +2590,56 @@ def restore_sku_cues_from_backup(
     return {"ok": True, "exercise_id": exercise_id, "restored": backup}
 
 
-_CUE_PAIR_SYSTEM = """你是健身教案编辑。把「库内要领」与「本次视频抽出的要领」逐条配对。
+_CUE_PAIR_SYSTEM = """你是健身教案编辑。把「库内条目」与「本次视频抽出的条目」逐条配对。
+本次传入的两侧要么全是「发力要点」，要么全是「常见错误」，不要把错误当成要点去替换要点。
 规则：
-1. 同一要点用 relation=replace，library_cue 填旧句、draft_cue 填视频句。
-2. 库里没有的视频要点用 relation=add，library_cue=null。
-3. 视频没提到、应保留的旧要点用 relation=keep，draft_cue=null。
-4. 禁止编造原文没有的句子；reason 一句话。
+1. 同一意思用 relation=replace，library_cue 填旧句、draft_cue 填视频句。
+2. 库里没有的视频句用 relation=add，library_cue=null。
+3. 视频没提到、应保留的旧句用 relation=keep，draft_cue=null。
+4. 配对时不要改写原文；reason 一句话。
 只输出 JSON：
 {"pairs":[{"library_cue":string|null,"draft_cue":string|null,"relation":"replace"|"add"|"keep","reason":string}],
  "summary":{"replace":n,"add":n,"keep":n,"result_total":n}}"""
+
+_CUE_SUGGEST_SYSTEM = """你是健身房教练。根据动作名与分类，写 3～5 条简短中文发力要领（每条不超过 28 字）。
+要求：具体可执行，不要组次数，不要寒暄。只输出 JSON：{"cues":["..."]}"""
+
+
+def _suggest_cues_for_sku(ex: Exercise) -> list[str]:
+    """视频没抽出要领时：按已绑定 SKU 用 LLM 补标准要领（可人工改后再写库）。"""
+    import asyncio
+
+    from app.brain.llm import MockLLM, TEMPERATURE_STRUCTURED, get_llm
+
+    llm = get_llm()
+    if isinstance(llm, MockLLM):
+        name = ex.name_zh or "该动作"
+        return [f"{name}时核心收紧", "关节对齐，避免借力甩", "控制离心节奏"]
+    user = (
+        f"name_zh={ex.name_zh}\nname_en={ex.name_en}\n"
+        f"muscle={ex.muscle}\nsub_region={ex.sub_region}\n"
+        f"movement_pattern={ex.movement_pattern}\ngear={ex.gear}\nmodality={ex.modality}\n"
+        f"existing_cues={ex.cues_zh}\n"
+    )
+    try:
+        raw = _run_coro(
+            asyncio.wait_for(
+                llm.complete_json(_CUE_SUGGEST_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED),
+                timeout=10.0,
+            )
+        )
+    except Exception:
+        return []
+    if not isinstance(raw, dict):
+        return []
+    out: list[str] = []
+    for t in raw.get("cues") or []:
+        s = str(t or "").strip()
+        if s and s not in out:
+            out.append(s[:80])
+        if len(out) >= 5:
+            break
+    return out
 
 
 def _aggregate_cues_draft(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2392,9 +2672,9 @@ def _aggregate_cues_draft(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _fallback_cue_pairs(
-    library: list[str], draft: list[str]
-) -> dict[str, Any]:
-    """配对失败：两列平铺，处理列待判断（前端可改 relation）。"""
+    library: list[str], draft: list[str], *, kind: str = "cue"
+) -> list[dict[str, Any]]:
+    """单侧（要点或易错）配对失败：两列平铺，处理列待判断。"""
     pairs: list[dict[str, Any]] = []
     for t in library:
         pairs.append(
@@ -2404,6 +2684,7 @@ def _fallback_cue_pairs(
                 "relation": "keep",
                 "reason": "待判断",
                 "pending": True,
+                "kind": kind,
             }
         )
     for t in draft:
@@ -2414,18 +2695,92 @@ def _fallback_cue_pairs(
                 "relation": "add",
                 "reason": "待判断",
                 "pending": True,
+                "kind": kind,
             }
         )
+    return pairs
+
+
+def _pair_texts_llm(
+    library: list[str],
+    draft_texts: list[str],
+    *,
+    kind: str,
+    label_lib: str,
+    label_draft: str,
+) -> tuple[list[dict[str, Any]], str, bool]:
+    """返回 (pairs, engine, degraded)。"""
+    import asyncio
+
+    from app.brain.llm import MockLLM, TEMPERATURE_STRUCTURED, get_llm
+
+    if not library and not draft_texts:
+        return [], "empty", False
+    if not library and draft_texts:
+        return [
+            {
+                "library_cue": None,
+                "draft_cue": t,
+                "relation": "add",
+                "reason": "库内为空，整表新增",
+                "kind": kind,
+            }
+            for t in draft_texts
+        ], "empty_library", False
+    if not draft_texts:
+        return _fallback_cue_pairs(library, [], kind=kind), "empty_draft", False
+
+    llm = get_llm()
+    if not isinstance(llm, MockLLM):
+        user = (
+            f"{label_lib}：\n"
+            + "\n".join(f"- {t}" for t in library)
+            + f"\n\n{label_draft}：\n"
+            + "\n".join(f"- {t}" for t in draft_texts)
+        )
+        try:
+            raw = _run_coro(
+                asyncio.wait_for(
+                    llm.complete_json(
+                        _CUE_PAIR_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED
+                    ),
+                    timeout=8.0,
+                )
+            )
+            if isinstance(raw, dict) and isinstance(raw.get("pairs"), list):
+                pairs: list[dict[str, Any]] = []
+                for p in raw["pairs"]:
+                    if not isinstance(p, dict):
+                        continue
+                    rel = str(p.get("relation") or "add").strip().lower()
+                    if rel not in ("replace", "add", "keep"):
+                        rel = "add"
+                    pairs.append(
+                        {
+                            "library_cue": (
+                                str(p["library_cue"]).strip() if p.get("library_cue") else None
+                            ),
+                            "draft_cue": (
+                                str(p["draft_cue"]).strip() if p.get("draft_cue") else None
+                            ),
+                            "relation": rel,
+                            "reason": str(p.get("reason") or "")[:80],
+                            "kind": kind,
+                        }
+                    )
+                if pairs:
+                    return pairs, "llm", False
+        except Exception:
+            pass
+    return _fallback_cue_pairs(library, draft_texts, kind=kind), "fallback", True
+
+
+def _summarize_pairs(pairs: list[dict[str, Any]]) -> dict[str, int]:
     return {
-        "pairs": pairs,
-        "summary": {
-            "replace": 0,
-            "add": len(draft),
-            "keep": len(library),
-            "result_total": len(library) + len(draft),
-        },
-        "degraded": True,
-        "engine": "fallback",
+        "replace": sum(1 for x in pairs if x.get("relation") == "replace"),
+        "add": sum(1 for x in pairs if x.get("relation") == "add"),
+        "keep": sum(1 for x in pairs if x.get("relation") == "keep"),
+        "result_total": len(pairs),
     }
 
 
@@ -2436,11 +2791,7 @@ def pair_studio_cues(
     row_id: str,
     exercise_id: str | None = None,
 ) -> dict[str, Any]:
-    """LLM 逐条配对；超时 8s 或失败则降级人工表。"""
-    import asyncio
-
-    from app.brain.llm import MockLLM, TEMPERATURE_STRUCTURED, get_llm
-
+    """LLM 逐条配对；要点与易错分列，超时则降级人工表。"""
     task = session.get(StudioTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -2456,103 +2807,77 @@ def pair_studio_cues(
         raise HTTPException(status_code=404, detail="草稿行不存在")
 
     eid = str(exercise_id or row.get("exercise_id") or "")
+    # 前端已点选绑定但未点「存草稿」时：请求里的 exercise_id 写回草稿行
+    if eid and not str(row.get("exercise_id") or "").strip():
+        row["exercise_id"] = eid
+        sku = session.get(Exercise, eid)
+        if sku and (sku.name_zh or "").strip():
+            row["exercise_name"] = sku.name_zh
+        draft = dict(task.draft_json or {})
+        task.draft_json = draft
+        session.add(task)
+        session.commit()
     ex = session.get(Exercise, eid) if eid else None
-    library = [str(x).strip() for x in (ex.cues_zh or []) if str(x).strip()] if ex else []
-    if ex:
-        for x in ex.common_mistakes_zh or []:
-            t = str(x).strip()
-            if t and t not in library:
-                library.append(t)
+    # 要点 / 易错分开配对，禁止混进同一列互相替换
+    cue_library = [str(x).strip() for x in (ex.cues_zh or []) if str(x).strip()] if ex else []
+    mistake_library = (
+        [str(x).strip() for x in (ex.common_mistakes_zh or []) if str(x).strip()] if ex else []
+    )
     draft_view = _aggregate_cues_draft(row)
-    draft_texts = [d["text"] for d in draft_view]
+    cue_draft = [d["text"] for d in draft_view if d.get("kind") == "cue"]
+    mistake_draft = [d["text"] for d in draft_view if d.get("kind") == "mistake"]
+    ai_filled = False
+    # 口播没抽出要点、但已绑 SKU：只补「要点」，不把易错冒充要点
+    if not cue_draft and ex:
+        suggested = _suggest_cues_for_sku(ex)
+        if suggested:
+            cue_draft = suggested
+            ai_filled = True
+            row["cues"] = [{"text": t, "source_at": None, "source": "ai_suggest"} for t in suggested]
+            draft = dict(task.draft_json or {})
+            task.draft_json = draft
+            session.add(task)
+            session.commit()
+            draft_view = _aggregate_cues_draft(row)
 
-    if not library and draft_texts:
-        pairs = [
-            {
-                "library_cue": None,
-                "draft_cue": t,
-                "relation": "add",
-                "reason": "库内为空，整表新增",
-            }
-            for t in draft_texts
-        ]
-        result = {
-            "pairs": pairs,
-            "summary": {
-                "replace": 0,
-                "add": len(pairs),
-                "keep": 0,
-                "result_total": len(pairs),
-            },
-            "degraded": False,
-            "engine": "empty_library",
-        }
-    elif not draft_texts:
-        result = _fallback_cue_pairs(library, [])
-        result["engine"] = "empty_draft"
-        result["degraded"] = False
-    else:
-        llm = get_llm()
-        result = None
-        if not isinstance(llm, MockLLM):
-            user = (
-                "库内要领：\n"
-                + "\n".join(f"- {t}" for t in library)
-                + "\n\n本次视频要领：\n"
-                + "\n".join(f"- {t}" for t in draft_texts)
-            )
-            try:
-                raw = _run_coro(
-                    asyncio.wait_for(
-                        llm.complete_json(
-                            _CUE_PAIR_SYSTEM, user, temperature=TEMPERATURE_STRUCTURED
-                        ),
-                        timeout=8.0,
-                    )
-                )
-                if isinstance(raw, dict) and isinstance(raw.get("pairs"), list):
-                    pairs = []
-                    for p in raw["pairs"]:
-                        if not isinstance(p, dict):
-                            continue
-                        rel = str(p.get("relation") or "add").strip().lower()
-                        if rel not in ("replace", "add", "keep"):
-                            rel = "add"
-                        pairs.append(
-                            {
-                                "library_cue": (str(p["library_cue"]).strip() if p.get("library_cue") else None),
-                                "draft_cue": (str(p["draft_cue"]).strip() if p.get("draft_cue") else None),
-                                "relation": rel,
-                                "reason": str(p.get("reason") or "")[:80],
-                            }
-                        )
-                    if pairs:
-                        summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
-                        result = {
-                            "pairs": pairs,
-                            "summary": {
-                                "replace": int(summary.get("replace") or sum(1 for x in pairs if x["relation"] == "replace")),
-                                "add": int(summary.get("add") or sum(1 for x in pairs if x["relation"] == "add")),
-                                "keep": int(summary.get("keep") or sum(1 for x in pairs if x["relation"] == "keep")),
-                                "result_total": int(
-                                    summary.get("result_total")
-                                    or sum(1 for x in pairs if x["relation"] in ("replace", "add", "keep"))
-                                ),
-                            },
-                            "degraded": False,
-                            "engine": "llm",
-                        }
-            except Exception:
-                result = None
-        if result is None:
-            result = _fallback_cue_pairs(library, draft_texts)
+    cue_pairs, cue_engine, cue_deg = _pair_texts_llm(
+        cue_library,
+        cue_draft,
+        kind="cue",
+        label_lib="库内要点（发力要领）",
+        label_draft="本次视频要点",
+    )
+    if ai_filled:
+        for p in cue_pairs:
+            if p.get("relation") == "add" and p.get("draft_cue"):
+                p["reason"] = "AI补充（视频未讲）"
+        cue_engine = "ai_suggest"
+
+    mistake_pairs, mist_engine, mist_deg = _pair_texts_llm(
+        mistake_library,
+        mistake_draft,
+        kind="mistake",
+        label_lib="库内常见错误",
+        label_draft="本次视频易错",
+    )
+
+    pairs = cue_pairs + mistake_pairs
+    degraded = cue_deg or mist_deg
+    engines = [e for e in (cue_engine, mist_engine) if e and e not in ("empty", "empty_draft")]
+    engine = "ai_suggest" if ai_filled else ("+".join(engines) if engines else "empty_draft")
+    result = {
+        "pairs": pairs,
+        "summary": _summarize_pairs(pairs),
+        "degraded": degraded,
+        "engine": engine,
+    }
 
     # 写回草稿行 cue_pairs
     draft = dict(task.draft_json or {})
     for block in draft.get("blocks") or []:
-        for ex in block.get("exercises") or []:
-            if isinstance(ex, dict) and str(ex.get("id") or "") == str(row_id):
-                ex["cue_pairs"] = result
+        for exr in block.get("exercises") or []:
+            if isinstance(exr, dict) and str(exr.get("id") or "") == str(row_id):
+                exr["cue_pairs"] = result
                 break
     task.draft_json = draft
     task.updated_at = utcnow()
@@ -2562,7 +2887,7 @@ def pair_studio_cues(
         "ok": True,
         "row_id": row_id,
         "exercise_id": eid or None,
-        "library": library,
+        "library": cue_library + mistake_library,
         "draft": draft_view,
         **result,
     }
@@ -2575,6 +2900,7 @@ def write_studio_cues(
     row_id: str,
     cue_mode: str = "replace",
     pairs: list[dict[str, Any]] | None = None,
+    exercise_id: str | None = None,
 ) -> dict[str, Any]:
     """抽屉「把要领写进库」：按配对结果 + cue_mode 落库。"""
     mode = (cue_mode or "replace").strip().lower()
@@ -2596,9 +2922,15 @@ def write_studio_cues(
             break
     if not row:
         raise HTTPException(status_code=404, detail="草稿行不存在")
-    eid = str(row.get("exercise_id") or "")
+    eid = str(exercise_id or row.get("exercise_id") or "").strip()
     if not eid:
         raise HTTPException(status_code=400, detail="请先绑定动作再写要领")
+    # 前端已绑、服务端草稿未落盘：以请求为准写回
+    if str(row.get("exercise_id") or "").strip() != eid:
+        row["exercise_id"] = eid
+        sku0 = session.get(Exercise, eid)
+        if sku0 and (sku0.name_zh or "").strip():
+            row["exercise_name"] = sku0.name_zh
     ex = session.get(Exercise, eid)
     if not ex:
         raise HTTPException(status_code=404, detail="动作不存在")
@@ -2633,43 +2965,84 @@ def write_studio_cues(
         "source_task_id": task_id,
     }
 
-    if mode == "append":
-        added = [
-            str(p.get("draft_cue") or "").strip()
-            for p in pair_blob
-            if str(p.get("relation") or "") == "add" and p.get("draft_cue")
-        ]
-        ex.cues_zh = _merge_unique(ex.cues_zh or [], added)
-        if added and not (ex.instructions_zh or []):
-            ex.instructions_zh = added[:4]
-    else:  # replace：按配对表换掉 + 追加新增；keep 保留
-        next_cues: list[str] = []
-        for p in pair_blob:
+    def _apply_side(kind: str) -> list[str]:
+        out: list[str] = []
+        for p in pair_blob or []:
+            if str(p.get("kind") or "cue").strip().lower() != kind:
+                continue
             rel = str(p.get("relation") or "").strip().lower()
             lib = str(p.get("library_cue") or "").strip()
             dr = str(p.get("draft_cue") or "").strip()
             if rel == "replace" and dr:
-                if dr not in next_cues:
-                    next_cues.append(dr[:120])
+                if dr not in out:
+                    out.append(dr[:120])
             elif rel == "keep" and lib:
-                if lib not in next_cues:
-                    next_cues.append(lib[:120])
+                if lib not in out:
+                    out.append(lib[:120])
             elif rel == "add" and dr:
-                if dr not in next_cues:
-                    next_cues.append(dr[:120])
-        # 若配对里没 keep 旧项，仍保留未出现在 pairs 里的旧 cues？方案 A：只信配对表
-        if next_cues:
-            ex.cues_zh = next_cues[:8]
-            ex.instructions_zh = next_cues[:4]
-        row["cues_library_backup"] = backup
+                if dr not in out:
+                    out.append(dr[:120])
+        return out
 
-    # mistakes：视频 mistakes 在 append/replace 时合并或覆盖
-    draft_mistakes = _line_texts(row.get("mistakes"))
-    if draft_mistakes:
-        if mode == "append":
-            ex.common_mistakes_zh = _merge_unique(ex.common_mistakes_zh or [], draft_mistakes)
+    # 无 kind 的旧配对：整表当要点（兼容）；有 kind 则要点/易错分落
+    has_kind = any(str(p.get("kind") or "").strip() for p in (pair_blob or []))
+    if mode == "append":
+        added_cues = [
+            str(p.get("draft_cue") or "").strip()
+            for p in (pair_blob or [])
+            if str(p.get("relation") or "") == "add"
+            and p.get("draft_cue")
+            and (not has_kind or str(p.get("kind") or "cue") == "cue")
+        ]
+        added_mistakes = [
+            str(p.get("draft_cue") or "").strip()
+            for p in (pair_blob or [])
+            if str(p.get("relation") or "") == "add"
+            and p.get("draft_cue")
+            and str(p.get("kind") or "") == "mistake"
+        ]
+        if added_cues:
+            ex.cues_zh = _merge_unique(ex.cues_zh or [], added_cues)
+            if not (ex.instructions_zh or []):
+                ex.instructions_zh = added_cues[:4]
+        if added_mistakes:
+            ex.common_mistakes_zh = _merge_unique(ex.common_mistakes_zh or [], added_mistakes)
+        if not has_kind:
+            # 旧数据：mistakes 字段仍合并
+            draft_mistakes = _line_texts(row.get("mistakes"))
+            if draft_mistakes:
+                ex.common_mistakes_zh = _merge_unique(ex.common_mistakes_zh or [], draft_mistakes)
+    else:  # replace
+        if has_kind:
+            next_cues = _apply_side("cue")
+            next_mistakes = _apply_side("mistake")
+            if next_cues:
+                ex.cues_zh = next_cues[:8]
+                ex.instructions_zh = next_cues[:4]
+            if next_mistakes or any(
+                str(p.get("kind") or "") == "mistake" for p in (pair_blob or [])
+            ):
+                ex.common_mistakes_zh = next_mistakes[:8]
         else:
-            ex.common_mistakes_zh = draft_mistakes[:8]
+            # 旧配对无 kind：全部当要点；易错仍走草稿 mistakes 列
+            next_cues = []
+            for p in pair_blob or []:
+                rel = str(p.get("relation") or "").strip().lower()
+                lib = str(p.get("library_cue") or "").strip()
+                dr = str(p.get("draft_cue") or "").strip()
+                if rel == "replace" and dr and dr not in next_cues:
+                    next_cues.append(dr[:120])
+                elif rel == "keep" and lib and lib not in next_cues:
+                    next_cues.append(lib[:120])
+                elif rel == "add" and dr and dr not in next_cues:
+                    next_cues.append(dr[:120])
+            if next_cues:
+                ex.cues_zh = next_cues[:8]
+                ex.instructions_zh = next_cues[:4]
+            draft_mistakes = _line_texts(row.get("mistakes"))
+            if draft_mistakes:
+                ex.common_mistakes_zh = draft_mistakes[:8]
+        row["cues_library_backup"] = backup
 
     ex.updated_at = utcnow()
     session.add(ex)

@@ -12,12 +12,7 @@ import {
   followPlan,
   unfollowPlan,
 } from "../lib/api";
-<<<<<<< HEAD
-import { feedbackError, toast } from "../feedback";
-import type { CardBlock, PlanBlockDetail, TrainingSession } from "../types";
-=======
 import type { CardBlock, PlanBlockDetail, PlanExerciseRow, TrainingSession } from "../types";
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
 
 export function PlanDetailPage() {
   const { id = "" } = useParams();
@@ -65,23 +60,6 @@ export function PlanDetailPage() {
     if (!draft) setSheetOpen(false);
   }, [draft]);
 
-<<<<<<< HEAD
-  async function startBlock(block: PlanBlockDetail) {
-    if (!id || expandingId != null) return;
-    setExpandingId(block.id);
-    try {
-      const res = await expandPlan(id, block.id);
-      setDraft(res.card);
-      setSheetOpen(true);
-    } catch (e) {
-      toast.err(feedbackError(e));
-    } finally {
-      setExpandingId(null);
-    }
-  }
-
-=======
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
   async function toggleFollow() {
     if (!id || followBusy) return;
     if (isFollowing) {
@@ -93,9 +71,8 @@ export function PlanDetailPage() {
       else await followPlan(id);
       void qc.invalidateQueries({ queryKey: ["plan-detail", id] });
       void qc.invalidateQueries({ queryKey: ["plans-following"] });
-      toast.ok(isFollowing ? "已退出跟练" : "已加入跟练");
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     } finally {
       setFollowBusy(false);
     }
@@ -135,84 +112,6 @@ export function PlanDetailPage() {
     );
   }
 
-<<<<<<< HEAD
-  return (
-    <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
-      <button
-        type="button"
-        onClick={() => navigate("/plans")}
-        className="pressable -ml-1 mb-2 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
-      >
-        <ChevronLeft size={16} />
-        计划列表
-      </button>
-
-      <div
-        className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[var(--hero-a)] via-bg to-bg p-4"
-        style={
-          plan.cover_url
-            ? {
-                backgroundImage: `linear-gradient(to top, rgb(var(--bg-rgb) / 0.94), rgb(var(--bg-rgb) / 0.4)), url(${plan.cover_url})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }
-            : undefined
-        }
-      >
-        <div className="flex flex-wrap gap-1.5">
-          <span className="rounded-md bg-tint px-2 py-0.5 text-[10px] font-extrabold text-accent-text">
-            {plan.badge_label || plan.scene_tag || "计划"}
-          </span>
-          {plan.scene_tag && (
-            <span className="rounded-md border border-line bg-elevated/80 px-2 py-0.5 text-[10px] font-bold text-muted">
-              {plan.scene_tag}
-            </span>
-          )}
-          {plan.level_label && (
-            <span className="rounded-md border border-line bg-elevated/80 px-2 py-0.5 text-[10px] font-bold text-muted">
-              {plan.level_label}
-            </span>
-          )}
-          {isFollowing && (
-            <span className="rounded-md bg-ok/15 px-2 py-0.5 text-[10px] font-extrabold text-ok">
-              跟练中
-            </span>
-          )}
-        </div>
-        <h1 className="mt-4 font-display text-[26px] font-extrabold tracking-tight">{plan.title}</h1>
-        {plan.author && <p className="mt-1 text-[12px] text-muted">{plan.author}</p>}
-        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-muted">
-          <span className="num">每周 {plan.days_per_week} 练</span>
-          {plan.minutes_label && <span className="num">{plan.minutes_label}</span>}
-          <span className="num">{blocks.length} 个板块</span>
-          {isFollowing && week?.progress_label && (
-            <span className="num font-bold text-accent-text">{week.progress_label}</span>
-          )}
-        </div>
-
-        <button
-          type="button"
-          disabled={followBusy}
-          onClick={() => void toggleFollow()}
-          className={`pressable mt-4 w-full rounded-md py-2.5 text-[13px] font-extrabold disabled:opacity-50 ${
-            isFollowing
-              ? "border border-line bg-elevated/90 text-ink"
-              : "bg-accent text-accent-ink"
-          }`}
-        >
-          {followBusy
-            ? "处理中…"
-            : isFollowing
-              ? "跟练中 · 退出"
-              : multiBlock
-                ? "加入跟练"
-                : "加入跟练 · 单日计划"}
-        </button>
-        {!multiBlock && !isFollowing && (
-          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-            单日模板也可设为当前跟练，方便今日页记住你在练哪套。
-          </p>
-=======
   if (activeBlock) {
     const sets = activeBlock.exercises.reduce((sum, ex) => sum + (ex.target_sets || 0), 0);
     return (
@@ -275,7 +174,6 @@ export function PlanDetailPage() {
               }}
             />
           </DraftSheet>
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
         )}
       </div>
     );

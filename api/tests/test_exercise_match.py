@@ -8,7 +8,11 @@ from app.exercise_match import (
     normalize_spoken_name,
     suggest_asr_repair,
 )
-from app.services.studio_service import _keep_snippets_on_own_action, _snippet_for_name
+from app.services.studio_service import (
+    _keep_snippets_on_own_action,
+    _normalize_transcript_text,
+    _snippet_for_name,
+)
 
 
 def test_normalize_strips_fillers():
@@ -28,6 +32,14 @@ def test_asr_repair_only_when_unique():
     assert suggest_asr_repair("窄距下拉", ["窄距下拉"]) is None
     assert suggest_asr_repair("载剧下拉", ["窄距下拉", "载距下拉"]) is None
     assert suggest_asr_repair("今天练背", ["窄距下拉"]) is None
+    assert suggest_asr_repair("酒屈深", ["肘屈伸", "臂屈伸", "跪姿杠铃深蹲"]) == "肘屈伸"
+
+
+def test_transcript_normalize_only_simplified():
+    out = _normalize_transcript_text("因為我們這通常都已經過酒屈深")
+    assert "们" in out and "这" in out
+    # 不做「酒屈深→肘屈伸」整词白名单；听错纠名走对照库
+    assert "酒屈深" in out
 
 
 def test_snippet_starts_at_this_action_not_the_previous():

@@ -60,6 +60,7 @@ class WriteCuesIn(BaseModel):
     row_id: str = Field(min_length=1, max_length=64)
     cue_mode: str = Field(default="replace", max_length=16)
     pairs: list[dict[str, Any]] | None = None
+    exercise_id: str | None = None  # 前端已绑但草稿未落盘时可由请求带上
 
 
 class AttachDemoIn(BaseModel):
@@ -201,6 +202,16 @@ def retranscribe(
     return studio_service.retranscribe(session, task_id)
 
 
+@router.delete("/tasks/{task_id}")
+def delete_task(
+    task_id: int,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    """删除工坊任务（本地视频一并清掉；已发布计划不回滚）。"""
+    return studio_service.delete_task(session, task_id)
+
+
 @router.post("/tasks/{task_id}/skip-transcribe")
 def skip_transcribe(
     task_id: int,
@@ -327,6 +338,7 @@ def write_cues(
         row_id=body.row_id,
         cue_mode=body.cue_mode,
         pairs=body.pairs,
+        exercise_id=body.exercise_id,
     )
 
 

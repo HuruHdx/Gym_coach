@@ -11,7 +11,14 @@ from fastapi import HTTPException, UploadFile
 from sqlmodel import Session, col, select
 
 from app.exercises_catalog import reload_all
-from app.models import Exercise, ExerciseAlias, ExerciseMedia, utcnow
+from app.models import (
+    Exercise,
+    ExerciseAlias,
+    ExerciseMedia,
+    MediaUnmatchedPool,
+    PlanExercise,
+    utcnow,
+)
 from app.services.admin_catalog import MEDIA_ROLES, get_exercise_detail, media_url
 from app.services.storage import save_public_asset
 
@@ -43,15 +50,27 @@ _PATTERN_ALIASES = {
     "外展": "肩孤立(平举)",
     "推胸": "水平推",
     "卧推": "水平推",
+    "夹胸": "水平推",
+    "飞鸟": "水平推",
     "肩推": "垂直推",
+    "推举": "垂直推",
     "划船": "水平拉",
+    "面拉": "水平拉",
     "下拉": "垂直拉",
+    "下压": "垂直拉",  # 直臂下压 / 绳索下压：拉向，不是心肺
+    "引体": "垂直拉",
     "深蹲": "膝主导(蹲)",
+    "箭步": "膝主导(蹲)",
     "硬拉": "髋主导(铰链)",
+    "臀桥": "髋主导(铰链)",
+    "髋推": "髋主导(铰链)",
     "弯举": "肘屈伸(弯举/臂屈伸)",
     "臂屈伸": "肘屈伸(弯举/臂屈伸)",
+    "肘屈伸": "肘屈伸(弯举/臂屈伸)",
     "平板支撑": "核心卷曲/稳定",
     "卷腹": "核心卷曲/稳定",
+    "拉伸": "拉伸/灵活",
+    "热身": "拉伸/灵活",
 }
 
 
@@ -296,6 +315,43 @@ def create_exercise(session: Session, payload: dict[str, Any]) -> dict[str, Any]
     detail = get_editable_detail(session, exercise_id)
     assert detail is not None
     return detail
+
+
+def delete_exercise(session: Session, exercise_id: str) -> dict[str, Any]:
+    """硬删动作 SKU：清别名/素材槽；计划行只解绑 id（保留动作名）；H5 打卡按名不受影响。"""
+    ex = session.get(Exercise, exercise_id)
+    if not ex:
+        raise HTTPException(status_code=404, detail="动作不存在")
+    name = ex.name_zh or exercise_id
+
+    for row in session.exec(
+        select(ExerciseMedia).where(ExerciseMedia.exercise_id == exercise_id)
+    ).all():
+        session.delete(row)
+    for row in session.exec(
+        select(ExerciseAlias).where(ExerciseAlias.exercise_id == exercise_id)
+    ).all():
+        session.delete(row)
+    for pe in session.exec(
+        select(PlanExercise).where(PlanExercise.exercise_id == exercise_id)
+    ).all():
+        if not (pe.exercise_name or "").strip():
+            pe.exercise_name = name
+        pe.exercise_id = None
+        session.add(pe)
+    for pool in session.exec(
+        select(MediaUnmatchedPool).where(MediaUnmatchedPool.bound_exercise_id == exercise_id)
+    ).all():
+        pool.bound_exercise_id = None
+        pool.bound_media_id = None
+        if pool.status == "bound":
+            pool.status = "pending"
+        session.add(pool)
+
+    session.delete(ex)
+    session.commit()
+    reload_all()
+    return {"ok": True, "id": exercise_id, "name_zh": name}
 
 
 def update_exercise(session: Session, exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -690,19 +746,25 @@ def _guess_taxonomy(ex: Exercise) -> dict[str, Any]:
         muscle = muscle or "胸"
         sub = sub or "胸部整体"
         pattern = pattern or "水平推"
-    elif any(k in blob for k in ("划船", "row")):
+    elif any(k in blob for k in ("划船", "row", "面拉")):
         muscle = muscle or "背"
         sub = sub or "中上背/背厚"
         pattern = pattern or "水平拉"
+    elif any(k in blob for k in ("下拉", "下压", "pulldown", "pushdown", "引体")):
+        # 直臂下压 / 高位下拉 / 绳索下压 → 垂直拉；不是心肺
+        muscle = muscle or ("臂" if ("三头" in blob or "pushdown" in blob) else "背")
+        if not sub:
+            sub = "肱三头肌" if muscle == "臂" else "中上背/背厚"
+        pattern = pattern or "垂直拉"
     elif any(k in blob for k in ("推举", "press", "肩推")):
         muscle = muscle or "肩"
         sub = sub or "肩前束"
         pattern = pattern or "垂直推"
-    elif any(k in blob for k in ("深蹲", "squat")):
+    elif any(k in blob for k in ("深蹲", "squat", "箭步")):
         muscle = muscle or "腿"
         sub = sub or "股四头肌(前侧)"
         pattern = pattern or "膝主导(蹲)"
-    elif any(k in blob for k in ("硬拉", "deadlift")):
+    elif any(k in blob for k in ("硬拉", "deadlift", "臀桥", "髋推")):
         muscle = muscle or "腿"
         sub = sub or "腘绳肌(后侧)"
         pattern = pattern or "髋主导(铰链)"
@@ -723,8 +785,17 @@ def _guess_taxonomy(ex: Exercise) -> dict[str, Any]:
         if whole:
             sub = whole
             note_bits.append("靶区不确定时先填「整体」，确认后可改成具体束")
+    # 猜不出模式就留空，禁止用「全身心肺/综合」凑数（抗阻动作会被标错）
     if not pattern:
-        pattern = "全身心肺/综合"
+        mapped = None
+        for key, val in _PATTERN_ALIASES.items():
+            if key.lower() in blob:
+                mapped = val
+                break
+        if mapped:
+            pattern = mapped
+        else:
+            note_bits.append("动作模式不确定，请人工选择，勿用心肺凑数")
     if not gear:
         gear = "自由重量"
 
@@ -756,6 +827,7 @@ async def ai_draft(session: Session, exercise_id: str) -> dict[str, Any]:
 
     from app.brain.llm import TEMPERATURE_STRUCTURED, get_llm
 
+    pattern_opts = " / ".join(sorted(_PATTERNS))
     system = (
         "【ADMIN_EXERCISE_DRAFT】你是健身房内容运营编辑。"
         "根据动作信息生成中文教案与分类建议，只返回 JSON："
@@ -764,9 +836,12 @@ async def ai_draft(session: Session, exercise_id: str) -> dict[str, Any]:
         '"joint_stress": {"waist":"low|medium|high","knee":"...","shoulder":"...","wrist":"...","elbow":"..."}, '
         '"muscle": "胸|背|肩|腿|臂|核心|全身", '
         '"sub_region": "可用顿号多选，如肩中束、肩后束；不确定用××整体", '
-        '"movement_pattern": string, "gear": "自由重量|器械|绳索|自重", '
+        f'"movement_pattern": "必须是枚举之一或空字符串：{pattern_opts}", '
+        '"gear": "自由重量|器械|绳索|自重", '
         '"modality": "抗阻|有氧|HIIT|灵活性", '
         '"needs_review": boolean, "confidence_note": string}'
+        "规则：直臂下压/高位下拉/绳索下压=垂直拉+抗阻，绝不是全身心肺/综合；"
+        "不确定的 movement_pattern 必须返回空字符串并 needs_review=true，禁止用心肺凑数。"
     )
     user = (
         f"id={ex.id}\nname_zh={ex.name_zh}\nname_en={ex.name_en}\n"
@@ -774,7 +849,7 @@ async def ai_draft(session: Session, exercise_id: str) -> dict[str, Any]:
         f"movement_pattern={ex.movement_pattern}\ngear={ex.gear}\nmodality={ex.modality}\n"
         f"existing_instructions={ex.instructions_zh}\nexisting_cues={ex.cues_zh}\n"
         f"existing_mistakes={ex.common_mistakes_zh}\n"
-        "要求：分类字段可补全空白；靶区可多选；不确定标 needs_review=true 并写 confidence_note。"
+        "要求：分类字段可补全空白；靶区可多选；模式不确定就留空+needs_review，不要填全身心肺/综合。"
     )
     llm = get_llm()
     guess = _guess_taxonomy(ex)
@@ -812,8 +887,25 @@ async def ai_draft(session: Session, exercise_id: str) -> dict[str, Any]:
     pattern = _normalize_pattern(str(raw.get("movement_pattern") or "")) or guess.get("movement_pattern")
     sub = _normalize_sub_region(str(raw.get("sub_region") or ""), muscle) or guess.get("sub_region")
 
+    # 抗阻名被标成「全身心肺/综合」：用别名救一次；仍不确定则清空，逼人工选
+    name_blob = f"{ex.name_zh or ''} {ex.name_en or ''}".lower()
+    if pattern == "全身心肺/综合":
+        rescued = None
+        for key, val in _PATTERN_ALIASES.items():
+            if key.lower() in name_blob:
+                rescued = val
+                break
+        if rescued and rescued != "全身心肺/综合":
+            pattern = rescued
+        elif (modality or "抗阻") == "抗阻":
+            pattern = None
+            raw["needs_review"] = True
+            note = str(raw.get("confidence_note") or "").strip()
+            tip = "动作模式曾被标成心肺，已清空请人工选"
+            raw["confidence_note"] = f"{note}；{tip}" if note else tip
+
     if raw.get("needs_review") is None:
-        raw["needs_review"] = bool(guess.get("needs_review"))
+        raw["needs_review"] = bool(guess.get("needs_review")) or not pattern
     if not str(raw.get("confidence_note") or "").strip():
         raw["confidence_note"] = guess.get("confidence_note")
 

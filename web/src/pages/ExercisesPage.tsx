@@ -88,14 +88,6 @@ export function ExercisesPage() {
       <h1 className="font-display text-[26px] font-extrabold tracking-tight">动作库</h1>
       <p className="mt-1 text-[12px] text-muted">{query.isLoading ? "加载中…" : `${total} 个动作`}</p>
 
-<<<<<<< HEAD
-      <input
-        value={draftQ}
-        onChange={(e) => setDraftQ(e.target.value)}
-        placeholder="搜中文名 / 英文 / 别名 / ID"
-        className="mt-3 w-full rounded-xl border border-line bg-elevated px-3.5 py-2.5 text-base outline-none placeholder:text-muted focus:border-ink"
-      />
-=======
       <label className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-elevated px-3.5 py-2.5">
         <Search size={16} className="text-muted" />
         <input
@@ -105,7 +97,6 @@ export function ExercisesPage() {
           className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
         />
       </label>
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
 
       <div className="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto pb-1">
         {["全部", ...MUSCLE_OPTIONS.filter((m) => m !== "全身")].map((item) => (

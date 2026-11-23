@@ -247,6 +247,16 @@ def put_exercise(
     )
 
 
+@router.delete("/exercises/{exercise_id}")
+def delete_exercise(
+    exercise_id: str,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    """删除动作 SKU（别名/素材一并清；计划行解绑保留动作名）。"""
+    return admin_editor.delete_exercise(session, exercise_id)
+
+
 @router.patch("/exercises/{exercise_id}/review-flag")
 def patch_review_flag(
     exercise_id: str,

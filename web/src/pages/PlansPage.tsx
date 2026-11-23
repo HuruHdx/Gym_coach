@@ -3,21 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Search } from "lucide-react";
 import { fetchPlans } from "../lib/api";
-<<<<<<< HEAD
-import { MUSCLE_OPTIONS } from "../types";
-
-const SCENE_FILTERS = [
-  "全部",
-  "三分化",
-  "四分化",
-  "五分化",
-  "博主同款",
-  "单部位专项",
-  "新手入门",
-] as const;
-=======
 import type { PlanTemplateCard } from "../types";
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
 
 export function PlansPage() {
   const navigate = useNavigate();

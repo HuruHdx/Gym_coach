@@ -2,12 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
-<<<<<<< HEAD
-import { api, expandPlan, fetchFollowing, fetchPlans } from "../lib/api";
-import { feedbackError, toast } from "../feedback";
-import { COACH_NAME } from "../lib/brand";
-import type { CardBlock, SetLog, TrainingSession } from "../types";
-=======
 import { api, expandPlan, fetchFollowing, fetchPlanDetail } from "../lib/api";
 import type {
   CardBlock,
@@ -17,7 +11,6 @@ import type {
   TrainingDashboard,
   TrainingSession,
 } from "../types";
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
 import { WeightStepper } from "../components/WeightStepper";
 import { RepsStepper } from "../components/RepsStepper";
 import { ReorderItem, ReorderList } from "../components/ReorderList";
@@ -211,7 +204,7 @@ export function TodayPage() {
       qc.setQueryData(["training-today"], next);
       setNow(Date.now());
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     } finally {
       setTimerBusy(false);
     }
@@ -228,7 +221,7 @@ export function TodayPage() {
       return;
     }
     if (manualMinutes != null && (manualMinutes < 1 || manualMinutes > 300)) {
-      toast.info("时长填 1 到 300 分钟");
+      alert("时长填 1 到 300 分钟");
       return;
     }
     if (
@@ -252,7 +245,7 @@ export function TodayPage() {
       qc.invalidateQueries({ queryKey: ["exercises"] });
       navigate("/recap");
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     }
   }
 
@@ -299,7 +292,7 @@ export function TodayPage() {
       void qc.invalidateQueries({ queryKey: ["training-dashboard"] });
       void qc.invalidateQueries({ queryKey: ["exercises"] });
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     } finally {
       setRegenBusy(false);
     }
@@ -659,7 +652,7 @@ export function TodayPage() {
               onClick={() => {
                 const n = Number(minuteDraft);
                 if (!Number.isFinite(n) || n < 1 || n > 300) {
-                  toast.info("时长填 1 到 300 分钟");
+                  alert("时长填 1 到 300 分钟");
                   return;
                 }
                 void completeSession(Math.round(n));
@@ -811,7 +804,7 @@ function TodayIdleWorkbench() {
       setDraft(res.card);
       setSheetOpen(true);
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     } finally {
       setStarting(false);
     }
@@ -985,45 +978,11 @@ function TodayIdleWorkbench() {
         </div>
       )}
 
-<<<<<<< HEAD
-      {/* 2. 本周 + 部位间隔（P2 接口未就绪时显示空态，不用假数据） */}
-      <div className="mt-4 grid grid-cols-2 gap-2.5">
-        <div className="rounded-xl border border-line bg-elevated p-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-bold text-muted">本周</p>
-            {!following?.active_plan_id && (
-              <span className="rounded bg-bg px-1.5 py-0.5 text-[10px] font-bold text-muted">待接入</span>
-            )}
-          </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-muted">
-            {following?.active_plan_id
-              ? `跟练进度 ${following.week.completed_count}/${following.plan?.days_per_week ?? following.week.total_blocks ?? "—"}`
-              : "跟练一套计划后，这里显示本周完成进度"}
-          </p>
-        </div>
-        <div className="rounded-xl border border-line bg-elevated p-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-bold text-muted">部位间隔</p>
-            <span className="rounded bg-bg px-1.5 py-0.5 text-[10px] font-bold text-muted">待接入</span>
-          </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-muted">
-            接口就绪后显示距各部位上次训练天数
-          </p>
-        </div>
-      </div>
-
-      {/* 3. 想换一套：最多 2 张，深色蒙版让封面可见 */}
-      <div className="mt-6 flex items-center justify-between gap-2">
-        <p className="text-xs font-bold text-muted">想换一套？</p>
-        <Link to="/plans" className="text-[12px] font-bold text-accent-text">
-          全部 &gt;
-=======
       {/* 身体数据 */}
       <div className="mt-4 flex items-center justify-between">
         <p className="text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">身体数据</p>
         <Link to="/me/settings" className="text-[11.5px] font-bold text-accent-text">
           编辑 ›
->>>>>>> 8ac665dff4450761d8f30170231d0d37b36598d6
         </Link>
       </div>
       <div className="mt-2.5 flex gap-2">
@@ -1602,7 +1561,7 @@ function SetRow({
       await onPatch(set.id, patch);
       if (nextCompleted) setExpanded(false);
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     }
   }
 
@@ -1610,7 +1569,7 @@ function SetRow({
     try {
       await onPatch(set.id, { actual_weight: newVal });
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     }
   }
 
@@ -1618,7 +1577,7 @@ function SetRow({
     try {
       await onPatch(set.id, { actual_reps: newReps });
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     }
   }
 
@@ -1626,7 +1585,7 @@ function SetRow({
     try {
       await onPatch(set.id, { note: text.trim() || null });
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     }
   }
 
@@ -1636,7 +1595,7 @@ function SetRow({
     try {
       await onPatch(set.id, { feeling: nextFeeling });
     } catch (e) {
-      toast.err(feedbackError(e));
+      alert(String(e));
     }
   }
 
@@ -1706,7 +1665,7 @@ function SetRow({
               defaultValue={set.note ?? ""}
               disabled={disabled}
               placeholder="例如：很轻松，可以加重"
-              className="mt-1 w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-base text-ink outline-none placeholder:text-muted"
+              className="mt-1 w-full rounded-md border border-line bg-elevated px-2 py-1.5 text-xs text-ink outline-none placeholder:text-muted"
               onBlur={(e) => {
                 const next = e.target.value.trim();
                 if (next === (set.note ?? "")) return;

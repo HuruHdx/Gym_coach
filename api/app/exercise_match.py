@@ -87,6 +87,7 @@ _CORES = (
     "侧平举",
     "前平举",
     "弯举",
+    "肘屈伸",
     "臂屈伸",
     "夹胸",
     "飞鸟",
@@ -117,7 +118,8 @@ _SCORE_CONTAINS = 40
 _AUTO_BIND_MIN = 90
 _SUGGEST_MIN = 55
 
-# 字幕错字：同音，以及平翘舌（z/zh）听混。只在整名等长、逐字能对上、且库里唯一时才改。
+# 听混字符族（兜底，不是「错词→对词」）。同族可互换；只在整名等长、逐字对上、且库内唯一时才改。
+# 库里没有的动作不会被改写成别的名；主路径仍是把 Whisper 转准。
 _ASR_SOUND = (
     "剧距",
     "做坐",
@@ -126,6 +128,10 @@ _ASR_SOUND = (
     "价架",
     "载窄",
     "元圆",
+    "肘酒久",
+    "伸深身",
+    "铃零玲",
+    "杠钢岗",
 )
 
 
@@ -367,7 +373,10 @@ def match_spoken_candidates(
 
 
 def repair_spoken_name(session: Session, spoken: str) -> str | None:
-    """库里没有这个原词时，按同音错字改成唯一的标准名。"""
+    """库里没有这个原词时，按同音错字改成唯一的标准名。
+
+    只对照等长的库名/别名，不要求先抠出正确核心词（整名听错时 contains(core) 会找空）。
+    """
     norm = normalize_spoken_name(spoken)
     if len(norm) < 2:
         return None
@@ -379,18 +388,34 @@ def repair_spoken_name(session: Session, spoken: str) -> str | None:
     ).first()
     if exact:
         return None
-    parts = decompose_spoken_name(norm)
-    core = parts.get("core") or ""
-    if len(core) < 2:
-        return None
     rows = session.exec(
         select(Exercise).where(
             Exercise.is_valid_exercise.is_(True),  # type: ignore[arg-type]
-            col(Exercise.name_zh).contains(core),  # type: ignore[arg-type]
             func.char_length(Exercise.name_zh) == len(norm),
         )
     ).all()
-    return suggest_asr_repair(norm, [r.name_zh or "" for r in rows])
+    # 候选串 → 展示用标准名（别名命中时回写 name_zh）
+    display_for: dict[str, str] = {}
+    for r in rows:
+        n = (r.name_zh or "").strip()
+        if n:
+            display_for[normalize_spoken_name(n)] = n
+    aliases = session.exec(
+        select(ExerciseAlias).where(func.char_length(ExerciseAlias.alias) == len(norm))
+    ).all()
+    for al in aliases:
+        alias = (al.alias or "").strip()
+        if not alias:
+            continue
+        ex = session.get(Exercise, al.exercise_id)
+        if not ex or not getattr(ex, "is_valid_exercise", True):
+            continue
+        standard = (ex.name_zh or "").strip() or alias
+        display_for[normalize_spoken_name(alias)] = standard
+    repaired = suggest_asr_repair(norm, list(display_for.keys()))
+    if not repaired:
+        return None
+    return display_for.get(normalize_spoken_name(repaired), repaired)
 
 
 def resolve_spoken_match(
