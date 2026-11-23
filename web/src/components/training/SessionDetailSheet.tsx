@@ -72,7 +72,7 @@ export function SessionDetailSheet({
               return (
                 <div key={group.name} className="rounded-xl border border-line bg-elevated px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
-                    <button type="button" onClick={() => onOpenExercise(group.name)} className="text-left">
+                    <button type="button" onClick={() => onOpenExercise(group.name)} className="min-w-0 flex-1 text-left">
                       <div className="font-display text-sm font-bold">
                         {group.name}
                         {group.muscle && (
@@ -82,18 +82,20 @@ export function SessionDetailSheet({
                       <p className="mt-0.5 text-[11px] text-muted">
                         本场最高 {fmtWeight(thisBest)}
                         {prior != null ? ` · 上场 ${fmtWeight(prior)}` : ""}
-                        {delta != null && delta !== 0
-                          ? delta > 0
-                            ? ` · +${delta}kg`
-                            : ` · ${delta}kg`
-                          : prior != null && thisBest != null
-                            ? " · 持平"
-                            : ""}
+                        {` · ${group.sets.filter((set) => set.completed).length} 组`}
                       </p>
                     </button>
-                    <span className="shrink-0 text-[11px] text-muted">
-                      {group.sets.filter((set) => set.completed).length}/{group.sets.length} 组
-                    </span>
+                    {delta != null && delta !== 0 ? (
+                      <span
+                        className={`shrink-0 text-[12px] font-extrabold ${
+                          delta > 0 ? "text-ok" : "text-danger"
+                        }`}
+                      >
+                        {delta > 0 ? `+${delta} kg` : `${delta} kg`}
+                      </span>
+                    ) : prior != null && thisBest != null ? (
+                      <span className="shrink-0 text-[11px] font-bold text-muted">持平</span>
+                    ) : null}
                   </div>
                   <ul className="mt-2 space-y-1.5">
                     {group.sets.map((set) => {

@@ -5,13 +5,14 @@ alwaysApply: true
 
 # 文档台账同步
 
-本仓**唯一**项目台账：`docs/项目地图.md`（Obsidian 可读）。
+本仓**唯一**项目台账：`docs/项目地图.md`（入口见根目录 `AGENTS.md`）。
 
 新增或改动能力、模型工具、表字段口径、prompt 位置、HTTP/卡片契约时：
-**同一回合内更新 `docs/项目地图.md` 对应小节**，不要再新建 `docs/01.md`、`abilities.md` 等平行文档。
+**同一回合内更新 `docs/项目地图.md` 对应小节**；若有跨模块影响，同步改 **§8 耦合表**。  
+不要再新建 `docs/01.md`、`abilities.md` 等平行文档。
 
 评测用例仍写在仓库根 `eval/`，只在项目地图「评测」节必要时提一句。
 
 后台仓 `gym-coach-admin` 自有 docs；本 API 的 admin 路由变更记在本仓项目地图即可。
 
-禁止：把长清单塞进 `.cursor/rules`。
+禁止：把长清单塞进 `.cursor/rules`（rule 只指路，事实留在地图）。

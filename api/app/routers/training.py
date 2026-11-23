@@ -50,6 +50,15 @@ def adopt(
     return svc.adopt_draft(session, body)
 
 
+@router.post("/rest-today", response_model=SessionOut)
+def rest_today(
+    session: Session = Depends(get_session),
+    _: AuthContext = Depends(bind_auth),
+):
+    """记今天休息（source=rest）。统计口径应排除此类场次。"""
+    return svc.mark_rest_today(session)
+
+
 @router.post("/today/add-exercise", response_model=SessionOut)
 def add_exercise_today(
     body: AddExerciseRequest,

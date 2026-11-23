@@ -342,6 +342,8 @@ class AdoptRequest(BaseModel):
     plan_template_id: Optional[str] = Field(default=None, max_length=32)
     plan_block_id: Optional[int] = None
     plan_type: Optional[str] = Field(default=None, max_length=16)  # custom | framework | fixed
+    # B2 教练原话：采纳时写入 session.note，今日页展示；完成后 summary 会覆盖总结语义
+    coach_quote: Optional[str] = Field(default=None, max_length=200)
 
 
 class ReorderRequest(BaseModel):
@@ -381,6 +383,7 @@ class SetOut(BaseModel):
     completed: bool
     feeling: Optional[str] = None
     note: Optional[str]
+    is_warmup: bool = False
 
 
 class SessionOut(BaseModel):
