@@ -253,7 +253,46 @@ def _hydrate_demo_covers(draft: dict[str, Any], session: Session | None) -> dict
     return draft if changed else draft
 
 
-def _task_out(task: StudioTask, session: Session | None = None) -> dict[str, Any]:
+def _published_plan_id(task: StudioTask) -> str | None:
+    ref = task.result_ref if isinstance(task.result_ref, dict) else {}
+    pid = str(ref.get("plan_id") or "").strip()
+    if not pid:
+        return None
+    if ref.get("published") is False and task.review_state != "published":
+        return None
+    return pid
+
+
+def _overlay_published_plan_title(
+    draft: dict[str, Any],
+    task: StudioTask,
+    session: Session | None,
+    *,
+    title_by_id: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """已发布后以 PlanTemplate.title 为准，避免工坊仍显示发布前的短草稿名。"""
+    pid = _published_plan_id(task)
+    if not pid:
+        return draft
+    title = None
+    if title_by_id is not None:
+        title = title_by_id.get(pid)
+    elif session is not None:
+        tpl = session.get(PlanTemplate, pid)
+        if tpl and tpl.title:
+            title = str(tpl.title).strip() or None
+    if title:
+        draft = dict(draft)
+        draft["plan_title"] = title
+    return draft
+
+
+def _task_out(
+    task: StudioTask,
+    session: Session | None = None,
+    *,
+    title_by_id: dict[str, str] | None = None,
+) -> dict[str, Any]:
     play_url = None
     if task.stored_path:
         p = task.stored_path.replace("\\", "/")
@@ -261,6 +300,7 @@ def _task_out(task: StudioTask, session: Session | None = None) -> dict[str, Any
     draft = task.draft_json or {}
     if isinstance(draft, dict):
         draft = _hydrate_demo_covers(dict(draft), session)
+        draft = _overlay_published_plan_title(draft, task, session, title_by_id=title_by_id)
     exercises = []
     if isinstance(draft, dict):
         for b in draft.get("blocks") or []:
@@ -298,8 +338,16 @@ def list_tasks(session: Session, *, limit: int = 50) -> dict[str, Any]:
             select(StudioTask).order_by(col(StudioTask.id).desc()).limit(max(1, min(200, limit)))
         ).all()
     )
-    # 列表不回填封面（省查询）；详情 get_task 才会 hydrate
-    return {"items": [_task_out(t) for t in rows], "total": len(rows)}
+    plan_ids = [pid for t in rows if (pid := _published_plan_id(t))]
+    title_by_id: dict[str, str] = {}
+    if plan_ids:
+        tpls = session.exec(select(PlanTemplate).where(col(PlanTemplate.id).in_(list(set(plan_ids))))).all()
+        title_by_id = {str(p.id): str(p.title).strip() for p in tpls if p.title}
+    # 列表不回填封面（省查询）；已发布计划名从 PlanTemplate 叠一层
+    return {
+        "items": [_task_out(t, session, title_by_id=title_by_id) for t in rows],
+        "total": len(rows),
+    }
 
 
 def get_task(session: Session, task_id: int) -> dict[str, Any]:
@@ -653,14 +701,20 @@ def reparse(session: Session, task_id: int) -> dict[str, Any]:
     session.commit()
     try:
         draft, score = _parse_and_score(session, task, transcript if isinstance(transcript, dict) else {})
+        # 人工改过 / 已发布计划名：重拆时保留，别被 LLM 短名盖回去
         if isinstance(task.draft_json, dict):
-            title = task.draft_json.get("plan_title")
-            if title and not draft.get("plan_title"):
-                draft["plan_title"] = title
+            kept = str(task.draft_json.get("plan_title") or "").strip()
+            if kept:
+                draft["plan_title"] = kept
+        was_published = task.review_state == "published" or bool(_published_plan_id(task))
         review = (
-            "needs_review"
-            if score.get("red_count", 0) > 0 or score.get("amber_count", 0) > 0
-            else "auto_pass"
+            "published"
+            if was_published
+            else (
+                "needs_review"
+                if score.get("red_count", 0) > 0 or score.get("amber_count", 0) > 0
+                else "auto_pass"
+            )
         )
         _touch(
             task,
@@ -877,14 +931,19 @@ def _run_pipeline(session: Session, task_id: int, run_id: int = 0) -> None:
     if not _pipeline_still_current(session, task_id, run_id):
         return
     if task.draft_json and isinstance(task.draft_json, dict):
-        # 保留 ingest 时的 plan_title
-        title = (task.draft_json or {}).get("plan_title")
-        if title and not draft.get("plan_title"):
+        # 已有人工/入库标题时保留；空着才用 LLM 新名
+        title = str((task.draft_json or {}).get("plan_title") or "").strip()
+        if title:
             draft["plan_title"] = title
+    was_published = task.review_state == "published" or bool(_published_plan_id(task))
     review = (
-        "needs_review"
-        if score.get("red_count", 0) > 0 or score.get("amber_count", 0) > 0
-        else "auto_pass"
+        "published"
+        if was_published
+        else (
+            "needs_review"
+            if score.get("red_count", 0) > 0 or score.get("amber_count", 0) > 0
+            else "auto_pass"
+        )
     )
     _touch(
         task,
@@ -3130,6 +3189,14 @@ def update_task_draft(session: Session, task_id: int, draft: dict[str, Any]) -> 
     task = session.get(StudioTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
+    draft = dict(draft) if isinstance(draft, dict) else {}
+    # 已发布：计划名以 PlanTemplate 为准，避免补示范 quiet 存草稿用发布前短名盖掉已改名
+    pid = _published_plan_id(task)
+    if pid:
+        tpl = session.get(PlanTemplate, pid)
+        live = str(tpl.title or "").strip() if tpl else ""
+        if live:
+            draft["plan_title"] = live
     task.draft_json = draft
     # 重算红/黄/绿
     exercises = []
@@ -3144,7 +3211,9 @@ def update_task_draft(session: Session, task_id: int, draft: dict[str, Any]) -> 
         "green_count": green,
         "total": len(exercises),
     }
-    task.review_state = "needs_review" if (red or amber) else "auto_pass"
+    # 已发布 / 已存草稿：只刷新分数，不要把 review_state 冲回 auto_pass
+    if task.review_state not in ("published", "drafted") and not pid:
+        task.review_state = "needs_review" if (red or amber) else "auto_pass"
     task.updated_at = utcnow()
     session.add(task)
     session.commit()
