@@ -287,16 +287,21 @@ function WeekRing({ trained, target }: { trained: number; target: number }) {
 
 function PlanPreviewCard({ plan, alt }: { plan: PlanTemplateCard; alt?: boolean }) {
   const muscles = (plan.muscle_tags || []).slice(0, 3);
-  const minutes = plan.minutes_label || approxMinutes(plan);
-  const count = plan.block_count != null ? `${plan.block_count} 板块` : null;
+  const sub =
+    muscles.length > 0
+      ? muscles.join(" · ")
+      : plan.split_summary ||
+        (plan.block_count != null ? `${plan.block_count} 板块` : null) ||
+        plan.minutes_label ||
+        approxMinutes(plan);
   return (
     <Link
       to={`/plans/${encodeURIComponent(plan.id)}`}
-      className="pressable relative flex h-32 min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] p-3.5 text-white"
+      className="pressable relative flex h-36 min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] p-3.5 text-white"
       style={
         plan.cover_url
           ? {
-              backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.35) 0%, rgba(23,22,28,.88) 72%), url(${plan.cover_url})`,
+              backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.28) 0%, rgba(23,22,28,.88) 72%), url(${plan.cover_url})`,
               backgroundSize: "cover",
               backgroundPosition: "center",
             }
@@ -307,25 +312,8 @@ function PlanPreviewCard({ plan, alt }: { plan: PlanTemplateCard; alt?: boolean 
             }
       }
     >
-      <span className="self-start rounded-md bg-white/15 px-2 py-0.5 text-[9.5px] font-bold">
-        {plan.badge_label || plan.scene_tag || "计划"}
-      </span>
-      <p className="mt-auto truncate text-[18px] font-extrabold tracking-tight">{plan.title}</p>
-      <p className="mt-1 text-[10.5px] text-white/70">
-        {[count, minutes].filter(Boolean).join(" · ") || plan.split_summary || "—"}
-      </p>
-      {muscles.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {muscles.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-white/25 px-1.5 py-0.5 text-[9px] font-bold text-white/85"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
+      <p className="mt-auto truncate text-[17px] font-extrabold tracking-tight">{plan.title}</p>
+      {sub ? <p className="mt-1 truncate text-[10.5px] text-white/75">{sub}</p> : null}
     </Link>
   );
 }

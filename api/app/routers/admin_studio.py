@@ -68,6 +68,8 @@ class AttachDemoIn(BaseModel):
     exercise_id: str = Field(min_length=1, max_length=64)
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+    # 优先写回这一行；缺省时按 exercise_id 扫草稿（兼容旧前端）
+    row_id: str | None = Field(default=None, max_length=64)
 
 
 class DraftIn(BaseModel):
@@ -297,6 +299,7 @@ def attach_demo(
         exercise_id=body.exercise_id,
         start=body.start,
         end=body.end,
+        row_id=body.row_id,
     )
 
 

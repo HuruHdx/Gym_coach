@@ -32,7 +32,7 @@ def ensure_plan_seeds(session: Session) -> None:
             "经典三分化：每周三场结构固定，详情页已按部位自动搭配动作；"
             "点「练这场」可再按伤病与偏好微调，动作均可换。"
         ),
-        scene_tag="三分化",
+        scene_tag="热门计划",
         is_published=True,
         sort_order=10,
         created_at=now,
@@ -54,7 +54,7 @@ def ensure_plan_seeds(session: Session) -> None:
         split_summary="胸 · 肩 · 三头",
         gear_tags=["杠铃", "哑铃", "绳索"],
         description="动作与组次锁定的推日成品课，适合直接开练；伤病或缺器械时会尝试备选。",
-        scene_tag="单部位专项",
+        scene_tag="增肌专项",
         is_published=True,
         sort_order=20,
         created_at=now,
@@ -118,7 +118,7 @@ def _five_split_template(now) -> PlanTemplate:
             "经典五分化：每周五场按部位拆开练，详情页已自动搭配常用动作；"
             "点「练这场」可再按伤病与偏好微调。"
         ),
-        scene_tag="五分化",
+        scene_tag="热门计划",
         is_published=True,
         sort_order=15,
         created_at=now,
@@ -200,8 +200,17 @@ def _seed_five_split_blocks(session: Session, template_id: str) -> None:
             )
 
 
+# 旧「分化方式」词表 → 人群/场景分组（重启 init 时自动迁）
+_LEGACY_SCENE_REMAP = {
+    "三分化": "热门计划",
+    "四分化": "热门计划",
+    "五分化": "热门计划",
+    "单部位专项": "增肌专项",
+}
+
+
 def _patch_existing_plans(session: Session) -> None:
-    """已有库：文案去「槽位」、补 scene_tag、动作行补 target_muscle；缺则补五分化。"""
+    """已有库：文案去「槽位」、迁 scene_tag、动作行补 target_muscle；缺则补五分化。"""
     dirty = False
 
     fw = session.get(PlanTemplate, "three-split-classic")
@@ -216,8 +225,8 @@ def _patch_existing_plans(session: Session) -> None:
                 "点「练这场」可再按伤病与偏好微调，动作均可换。"
             )
             local_dirty = True
-        if not fw.scene_tag:
-            fw.scene_tag = "三分化"
+        if not fw.scene_tag or fw.scene_tag in _LEGACY_SCENE_REMAP:
+            fw.scene_tag = _LEGACY_SCENE_REMAP.get(fw.scene_tag or "", "热门计划")
             local_dirty = True
         if local_dirty:
             fw.updated_at = utcnow()
@@ -230,22 +239,37 @@ def _patch_existing_plans(session: Session) -> None:
         session.flush()
         _seed_five_split_blocks(session, five.id)
         dirty = True
+    else:
+        five = session.get(PlanTemplate, "five-split-classic")
+        if five and (not five.scene_tag or five.scene_tag in _LEGACY_SCENE_REMAP):
+            five.scene_tag = _LEGACY_SCENE_REMAP.get(five.scene_tag or "", "热门计划")
+            five.updated_at = utcnow()
+            session.add(five)
+            dirty = True
 
     fixed = session.get(PlanTemplate, "fixed-push-strength")
-    if fixed and not fixed.scene_tag:
-        fixed.scene_tag = "单部位专项"
+    if fixed and (not fixed.scene_tag or fixed.scene_tag in _LEGACY_SCENE_REMAP):
+        fixed.scene_tag = _LEGACY_SCENE_REMAP.get(fixed.scene_tag or "", "增肌专项")
         fixed.updated_at = utcnow()
         session.add(fixed)
         dirty = True
 
-    # 其它已发布模板：空 scene_tag 时按规则兜底
-    for tpl in session.exec(select(PlanTemplate).where(col(PlanTemplate.scene_tag).is_(None))).all():
-        derived = _derive_scene_tag(session, tpl)
-        if derived:
-            tpl.scene_tag = derived
+    # 其它模板：旧分化词迁新分组；空则按规则兜底
+    for tpl in session.exec(select(PlanTemplate)).all():
+        if tpl.id in ("three-split-classic", "five-split-classic", "fixed-push-strength"):
+            continue
+        if tpl.scene_tag in _LEGACY_SCENE_REMAP:
+            tpl.scene_tag = _LEGACY_SCENE_REMAP[tpl.scene_tag]
             tpl.updated_at = utcnow()
             session.add(tpl)
             dirty = True
+        elif not tpl.scene_tag:
+            derived = _derive_scene_tag(session, tpl)
+            if derived:
+                tpl.scene_tag = derived
+                tpl.updated_at = utcnow()
+                session.add(tpl)
+                dirty = True
 
     if _backfill_target_muscles(session):
         dirty = True
@@ -262,17 +286,12 @@ def _derive_scene_tag(session: Session, tpl: PlanTemplate) -> str | None:
         return "博主同款"
     if tpl.level == "beginner":
         return "新手入门"
+    if tpl.level in ("intermediate", "advanced"):
+        return "进阶强化"
     blocks = session.exec(select(PlanBlock).where(PlanBlock.template_id == tpl.id)).all()
-    n = len(blocks)
-    if n == 1:
-        return "单部位专项"
-    if tpl.days_per_week == 3 and n >= 3:
-        return "三分化"
-    if tpl.days_per_week == 4 and n >= 4:
-        return "四分化"
-    if tpl.days_per_week == 5 and n >= 5:
-        return "五分化"
-    return None
+    if len(blocks) == 1:
+        return "增肌专项"
+    return "热门计划"
 
 
 def _backfill_target_muscles(session: Session) -> bool:

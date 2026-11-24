@@ -90,7 +90,7 @@ def _split_line(tpl: PlanTemplate) -> str:
 
 
 def _scene_tag_of(session: Session, tpl: PlanTemplate, block_count: int | None = None) -> str | None:
-    """优先用落库 scene_tag；空则按作者/难度/板块数兜底派生。"""
+    """优先用落库 scene_tag（人群/场景分组）；空则按作者/难度兜底，不再用三分化当分栏。"""
     if tpl.scene_tag:
         return tpl.scene_tag
     author = (tpl.author or "").strip()
@@ -98,20 +98,16 @@ def _scene_tag_of(session: Session, tpl: PlanTemplate, block_count: int | None =
         return "博主同款"
     if tpl.level == "beginner":
         return "新手入门"
+    if tpl.level in ("intermediate", "advanced"):
+        return "进阶强化"
     n = block_count
     if n is None:
         n = len(
             session.exec(select(PlanBlock.id).where(PlanBlock.template_id == tpl.id)).all()
         )
     if n == 1:
-        return "单部位专项"
-    if tpl.days_per_week == 3 and n >= 3:
-        return "三分化"
-    if tpl.days_per_week == 4 and n >= 4:
-        return "四分化"
-    if tpl.days_per_week == 5 and n >= 5:
-        return "五分化"
-    return None
+        return "增肌专项"
+    return "热门计划"
 
 
 def _template_card(

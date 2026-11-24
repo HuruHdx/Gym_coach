@@ -144,45 +144,27 @@ export function PlansPage() {
 
 function PlanCard({ plan }: { plan: PlanTemplateCard }) {
   const muscles = (plan.muscle_tags || []).slice(0, 3);
-  const meta = [plan.scene_tag, plan.level_label].filter(Boolean).join(" · ");
-  const rhythm =
-    plan.split_summary ||
-    (plan.days_per_week ? `${plan.block_count ?? plan.days_per_week} 个板块` : null);
+  const sub =
+    muscles.length > 0
+      ? muscles.join(" · ")
+      : plan.split_summary ||
+        (plan.block_count != null ? `${plan.block_count} 个板块` : null);
   return (
     <Link
       to={`/plans/${encodeURIComponent(plan.id)}`}
-      className="pressable relative flex min-h-[148px] flex-col overflow-hidden rounded-2xl p-3 text-white"
+      className="pressable relative flex aspect-[3/4] min-h-[176px] flex-col overflow-hidden rounded-2xl p-3 text-white"
       style={
         plan.cover_url
           ? {
-              backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.3) 0%, rgba(23,22,28,.9) 75%), url(${plan.cover_url})`,
+              backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.2) 0%, rgba(23,22,28,.88) 72%), url(${plan.cover_url})`,
               backgroundSize: "cover",
               backgroundPosition: "center",
             }
           : { background: "linear-gradient(165deg, #342c46 0%, #17161c 72%)" }
       }
     >
-      {meta && (
-        <span className="self-start rounded-md bg-white/15 px-2 py-0.5 text-[9.5px] font-bold">
-          {meta}
-        </span>
-      )}
-      <p className="mt-auto text-[16px] font-extrabold leading-snug tracking-tight">{plan.title}</p>
-      <p className="mt-1 line-clamp-2 text-[10.5px] text-white/70">
-        {[plan.badge_label || "教练编排", plan.level_label, rhythm].filter(Boolean).join(" · ")}
-      </p>
-      {muscles.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {muscles.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-white/25 px-1.5 py-0.5 text-[9px] font-bold text-white/85"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
+      <p className="mt-auto text-[17px] font-extrabold leading-snug tracking-tight">{plan.title}</p>
+      {sub ? <p className="mt-1 line-clamp-2 text-[10.5px] text-white/75">{sub}</p> : null}
     </Link>
   );
 }
@@ -190,7 +172,7 @@ function PlanCard({ plan }: { plan: PlanTemplateCard }) {
 function groupPlans(items: PlanTemplateCard[]) {
   const map = new Map<string, PlanTemplateCard[]>();
   for (const plan of items) {
-    const key = plan.scene_tag || plan.badge_label || "全部计划";
+    const key = plan.scene_tag || "热门计划";
     const list = map.get(key) || [];
     list.push(plan);
     map.set(key, list);

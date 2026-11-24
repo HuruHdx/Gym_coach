@@ -192,23 +192,27 @@ export function PlanDetailPage() {
         </button>
 
         <div
-          className="relative overflow-hidden rounded-[18px] p-4 text-white"
+          className="relative min-h-[240px] overflow-hidden rounded-[18px] p-4 text-white"
           style={
             plan.cover_url
               ? {
-                  backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.25) 0%, rgba(23,22,28,.88) 75%), url(${plan.cover_url})`,
+                  backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.18) 0%, rgba(23,22,28,.92) 78%), url(${plan.cover_url})`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
                 }
               : { background: "linear-gradient(165deg, #342c46 0%, #17161c 72%)" }
           }
         >
-          <div className="flex flex-wrap gap-1.5">
-            {plan.scene_tag && <CoverTag label={plan.scene_tag} />}
-            {plan.level_label && <CoverTag label={plan.level_label} />}
-            {plan.badge_label && <CoverTag label={plan.badge_label} />}
-          </div>
-          <h1 className="mt-10 font-display text-[26px] font-extrabold tracking-tight">{plan.title}</h1>
+          {(plan.level_label || plan.badge_label) && (
+            <div className="flex flex-wrap gap-1.5">
+              {plan.level_label && <CoverTag label={plan.level_label} />}
+              {plan.badge_label && <CoverTag label={plan.badge_label} />}
+            </div>
+          )}
+          <h1 className="mt-16 font-display text-[28px] font-extrabold tracking-tight">{plan.title}</h1>
+          {plan.split_summary ? (
+            <p className="mt-2 text-[12px] font-semibold text-white/75">{plan.split_summary}</p>
+          ) : null}
         </div>
 
         <div className="mt-3 flex gap-4 font-num text-[13px] font-extrabold">
@@ -228,11 +232,9 @@ export function PlanDetailPage() {
           )}
         </div>
 
-        {(plan.description || plan.split_summary) && (
-          <p className="mt-3 text-[13px] leading-relaxed text-muted">
-            {plan.description || plan.split_summary}
-          </p>
-        )}
+        {plan.description ? (
+          <p className="mt-3 text-[13px] leading-relaxed text-muted">{plan.description}</p>
+        ) : null}
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {(plan.muscle_tags || []).map((tag) => (

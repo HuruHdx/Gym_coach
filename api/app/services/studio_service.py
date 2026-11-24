@@ -211,7 +211,10 @@ def studio_deps() -> dict[str, Any]:
 
 
 def _hydrate_demo_covers(draft: dict[str, Any], session: Session | None) -> dict[str, Any]:
-    """clipped 但缺 demo_cover_url 时，用 SKU image_start 回填（旧草稿兼容）。"""
+    """旧草稿兼容：clipped 且本次 demo/cover 都缺时，才用 SKU image_start 回填。
+
+    已有 demo_url（本次切过）却缺封面时不回填，避免把库内旧博主封面顶到「本次产出」。
+    """
     if not session or not isinstance(draft, dict):
         return draft
     need_ids: list[str] = []
@@ -221,7 +224,9 @@ def _hydrate_demo_covers(draft: dict[str, Any], session: Session | None) -> dict
         for ex in block.get("exercises") or []:
             if not isinstance(ex, dict):
                 continue
-            if (ex.get("media_status") != "clipped") or ex.get("demo_cover_url"):
+            if ex.get("media_status") != "clipped":
+                continue
+            if ex.get("demo_cover_url") or ex.get("demo_url"):
                 continue
             eid = str(ex.get("exercise_id") or "").strip()
             if eid:
@@ -237,7 +242,9 @@ def _hydrate_demo_covers(draft: dict[str, Any], session: Session | None) -> dict
         for ex in block.get("exercises") or []:
             if not isinstance(ex, dict):
                 continue
-            if (ex.get("media_status") != "clipped") or ex.get("demo_cover_url"):
+            if ex.get("media_status") != "clipped":
+                continue
+            if ex.get("demo_cover_url") or ex.get("demo_url"):
                 continue
             sku = by_id.get(str(ex.get("exercise_id") or ""))
             if sku and sku.image_start:
@@ -556,6 +563,7 @@ def attach_demo_now(
     exercise_id: str,
     start: float,
     end: float,
+    row_id: str | None = None,
 ) -> dict[str, Any]:
     """立刻把选区压成静音小 MP4 + 封面，写入动作库（不等到发布）。"""
     task = session.get(StudioTask, task_id)
@@ -572,28 +580,49 @@ def attach_demo_now(
     meta = _attach_demo_media(session, task, exercise_id, float(start), float(end))
     if not meta:
         raise HTTPException(status_code=400, detail="切片失败：本地视频不存在或 ffmpeg 出错")
-    # 方案 A：立刻出库示范只写媒体；要领只在抽屉点「写进库」
+    # 方案 A：立刻出库示范只写媒体；要领只在抽屉点「保存编辑」
     # 封面/示范 URL 写回草稿，刷新后「本次产出」还能出缩略图
     draft = dict(task.draft_json or {}) if isinstance(task.draft_json, dict) else {}
     blocks = list(draft.get("blocks") or [])
+    target_row = str(row_id or "").strip()
     changed = False
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        for ex in block.get("exercises") or []:
-            if not isinstance(ex, dict):
+
+    def _write_row(ex: dict[str, Any]) -> None:
+        nonlocal changed
+        snip = dict(ex.get("snippet") or {})
+        snip["start"] = float(start)
+        snip["end"] = float(end)
+        ex["snippet"] = snip
+        ex["exercise_id"] = str(exercise_id)
+        ex["media_status"] = "clipped"
+        ex["attach_demo"] = True
+        ex["replace_demo"] = True
+        ex["demo_url"] = meta.get("demo_url")
+        ex["demo_cover_url"] = meta.get("cover_url")
+        changed = True
+
+    if target_row:
+        for block in blocks:
+            if not isinstance(block, dict):
                 continue
-            if str(ex.get("exercise_id") or "") != str(exercise_id):
+            for ex in block.get("exercises") or []:
+                if not isinstance(ex, dict):
+                    continue
+                if str(ex.get("id") or "") != target_row:
+                    continue
+                _write_row(ex)
+                break
+    if not changed:
+        # 无 row_id 或找不到行：按 exercise_id 兜底（可能多行同 SKU 一并更新）
+        for block in blocks:
+            if not isinstance(block, dict):
                 continue
-            snip = dict(ex.get("snippet") or {})
-            snip["start"] = float(start)
-            snip["end"] = float(end)
-            ex["snippet"] = snip
-            ex["media_status"] = "clipped"
-            ex["attach_demo"] = True
-            ex["demo_url"] = meta.get("demo_url")
-            ex["demo_cover_url"] = meta.get("cover_url")
-            changed = True
+            for ex in block.get("exercises") or []:
+                if not isinstance(ex, dict):
+                    continue
+                if str(ex.get("exercise_id") or "") != str(exercise_id):
+                    continue
+                _write_row(ex)
     if changed:
         draft["blocks"] = blocks
         task.draft_json = draft
@@ -603,6 +632,7 @@ def attach_demo_now(
     return {
         "ok": True,
         "exercise_id": exercise_id,
+        "row_id": target_row or None,
         "demo": meta,
         "synced_text": {"ok": False, "reason": "drawer_only"},
     }
