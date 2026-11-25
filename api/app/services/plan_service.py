@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 from fastapi import HTTPException
@@ -268,14 +268,6 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
     return detail
 
 
-def _week_bounds(day: date | None = None) -> tuple[date, date]:
-    """自然周：周一 00:00 至周日。"""
-    day = day or date.today()
-    start = day - timedelta(days=day.weekday())
-    end = start + timedelta(days=6)
-    return start, end
-
-
 def _sessions_for_user():
     stmt = select(TrainingSession)
     uid = current_user_id()
@@ -312,7 +304,11 @@ def unfollow_plan(session: Session) -> dict[str, Any]:
 
 
 def get_following_progress(session: Session, day: date | None = None) -> dict[str, Any]:
-    """本周跟练进度：按自然周已练板块推算 next_block，绝不锁死。"""
+    """跟练进度：多板块按滚动一轮；单板块看当天。绝不锁死。
+
+    字段名仍用 week / week_cycle_done（兼容前端），语义已是「当前轮」而非自然周。
+    自然周统计仍在 dashboard，与跟练指针脱钩。
+    """
     day = day or date.today()
     profile = get_current_profile(session)
     active_id = getattr(profile, "active_plan_id", None) if profile else None
@@ -352,40 +348,26 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
             .order_by(col(PlanBlock.order_index), col(PlanBlock.id))
         ).all()
     )
-    week_start, week_end = _week_bounds(day)
-    rows = list(
-        session.exec(
-            _sessions_for_user()
-            .where(TrainingSession.plan_template_id == active_id)
-            .where(TrainingSession.session_date >= week_start)
-            .where(TrainingSession.session_date <= week_end)
-            .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
-            .order_by(col(TrainingSession.session_date), col(TrainingSession.id))
-        ).all()
+    total = len(blocks)
+    block_ids = {int(b.id) for b in blocks if b.id is not None}
+
+    # 自跟练开始起的场次（滚动一轮）；无 started_at 则用全部历史
+    q = (
+        _sessions_for_user()
+        .where(TrainingSession.plan_template_id == active_id)
+        .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
+        .order_by(col(TrainingSession.session_date), col(TrainingSession.id))
     )
+    if started_at is not None:
+        # started_at 是 datetime；场次按 session_date 过滤时用日期部分
+        start_day = started_at.date() if hasattr(started_at, "date") else started_at
+        q = q.where(TrainingSession.session_date >= start_day)
+    rows = list(session.exec(q).all())
 
-    completed_ids: list[int] = []
     today_block_id: int | None = None
-    seen: set[int] = set()
     for sess in rows:
-        bid = sess.plan_block_id
-        if bid is None:
-            continue
-        if sess.session_date == day:
-            today_block_id = bid
-        if bid not in seen:
-            seen.add(bid)
-            completed_ids.append(bid)
-
-    next_block = None
-    week_cycle_done = False
-    for block in blocks:
-        if block.id not in seen:
-            next_block = block
-            break
-    if blocks and next_block is None:
-        week_cycle_done = True
-        next_block = blocks[0]
+        if sess.session_date == day and sess.plan_block_id is not None:
+            today_block_id = int(sess.plan_block_id)
 
     def _block_brief(block: PlanBlock | None) -> dict[str, Any] | None:
         if not block:
@@ -403,7 +385,6 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
                 preview_names.append(ex.exercise_name)
             if len(preview_names) >= 4:
                 break
-        # 框架空槽：详情预览逻辑太重，这里只返回已有名；前端可再拉详情补
         return {
             "id": block.id,
             "order_index": block.order_index,
@@ -415,17 +396,88 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
             "preview_names": preview_names,
         }
 
-    total = len(blocks)
-    done_n = len(completed_ids)
-    order_of_next = None
-    if next_block:
-        for i, b in enumerate(blocks, start=1):
-            if b.id == next_block.id:
-                order_of_next = i
-                break
-    progress_label = None
-    if total > 0 and order_of_next is not None:
-        progress_label = f"本周第 {order_of_next}/{total} 练"
+    completed_ids: list[int] = []
+    next_block: PlanBlock | None = None
+    week_cycle_done = False
+    progress_label: str | None = None
+
+    if total <= 1:
+        # 单日 / 单板块：只看当天这场
+        only = blocks[0] if blocks else None
+        today_done = any(
+            sess.session_date == day
+            and sess.status == "done"
+            and sess.source != "rest"
+            and (sess.plan_block_id is None or only is None or int(sess.plan_block_id) == only.id)
+            for sess in rows
+        )
+        today_active = any(
+            sess.session_date == day
+            and sess.status == "active"
+            and (sess.plan_block_id is None or only is None or int(sess.plan_block_id) == only.id)
+            for sess in rows
+        )
+        if today_done:
+            week_cycle_done = True
+            completed_ids = [int(only.id)] if only and only.id is not None else []
+            next_block = only  # 仍可再开；文案标明今日已完成
+            progress_label = "今日已完成"
+        elif today_active:
+            completed_ids = []
+            next_block = only
+            progress_label = "今日进行中"
+        else:
+            completed_ids = []
+            next_block = only
+            progress_label = "今日待练" if only else None
+    else:
+        # 多板块：滚动一轮（不要求连续天，不按周一重置）
+        open_seen: set[int] = set()
+        open_order: list[int] = []
+        round_just_finished = False
+        for sess in rows:
+            bid = sess.plan_block_id
+            if bid is None:
+                continue
+            bid_i = int(bid)
+            if bid_i not in block_ids:
+                continue
+            if bid_i not in open_seen:
+                open_seen.add(bid_i)
+                open_order.append(bid_i)
+            if block_ids and open_seen >= block_ids:
+                # 本轮集齐 → 关闭，准备下一轮
+                open_seen = set()
+                open_order = []
+                round_just_finished = True
+            else:
+                round_just_finished = False
+
+        if round_just_finished:
+            week_cycle_done = True
+            completed_ids = [int(b.id) for b in blocks if b.id is not None]
+            next_block = blocks[0]
+            progress_label = "本套已轮完"
+        else:
+            week_cycle_done = False
+            completed_ids = open_order
+            for block in blocks:
+                if block.id is not None and int(block.id) not in open_seen:
+                    next_block = block
+                    break
+            if next_block is None and blocks:
+                next_block = blocks[0]
+                week_cycle_done = True
+                progress_label = "本套已轮完"
+            else:
+                order_of_next = None
+                if next_block:
+                    for i, b in enumerate(blocks, start=1):
+                        if b.id == next_block.id:
+                            order_of_next = i
+                            break
+                if order_of_next is not None:
+                    progress_label = f"本套第 {order_of_next}/{total} 个板块"
 
     card = _template_card(session, tpl, block_count=total)
     card["block_count"] = total
@@ -439,7 +491,7 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
             "next_block": _block_brief(next_block),
             "week_cycle_done": week_cycle_done,
             "total_blocks": total,
-            "completed_count": done_n,
+            "completed_count": len(completed_ids) if not week_cycle_done or total <= 1 else total,
             "today_block_id": today_block_id,
             "progress_label": progress_label,
         },

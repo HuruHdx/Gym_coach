@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
-import { api, expandPlan, fetchFollowing, fetchPlanDetail } from "../lib/api";
+import { api, expandPlan, fetchFollowing, fetchPlanDetail, unfollowPlan } from "../lib/api";
 import type {
   CardBlock,
   PlanBlockDetail,
@@ -17,6 +17,7 @@ import { ReorderItem, ReorderList } from "../components/ReorderList";
 import { DraftCard } from "../components/DraftCard";
 import { Sparkline } from "../components/dashboard/TrainingDashboard";
 import {
+  buildBlockRecoveryHint,
   buildMuscleGap,
   buildRestHints,
   lastCompletedReps,
@@ -732,6 +733,7 @@ function TodayIdleWorkbench() {
   const [starting, setStarting] = useState(false);
   const [blockPickerOpen, setBlockPickerOpen] = useState(false);
   const [restBusy, setRestBusy] = useState(false);
+  const [unfollowBusy, setUnfollowBusy] = useState(false);
 
   const followingQuery = useQuery({
     queryKey: ["plans-following"],
@@ -740,6 +742,7 @@ function TodayIdleWorkbench() {
   const following = followingQuery.data;
   const nextBlock = following?.week?.next_block ?? null;
   const hasFollowReady = Boolean(following?.active_plan_id && nextBlock);
+  const cycleDone = Boolean(following?.week?.week_cycle_done);
 
   const { data: profile } = useQuery({
     queryKey: ["profile"],
@@ -779,7 +782,19 @@ function TodayIdleWorkbench() {
     () => buildRestHints(sessions, { targetDays: target, trainedDays: trained }),
     [sessions, target, trained],
   );
-  const suggestRestDay = trained >= target && target > 0 && !hasFollowReady;
+  const blockRecovery = useMemo(
+    () =>
+      hasFollowReady
+        ? buildBlockRecoveryHint(nextBlock?.muscles, dashboard?.muscle_pulse)
+        : null,
+    [hasFollowReady, nextBlock?.muscles, dashboard?.muscle_pulse],
+  );
+  const musclesNeedRest = Boolean(blockRecovery && !blockRecovery.ready);
+  const weekTargetMet = trained >= target && target > 0;
+  /** 无跟练且达标 → 主推休息；跟练中肌群未恢复 / 本套已轮完也可记休息 */
+  const suggestRestDay = weekTargetMet && !hasFollowReady;
+  const showFollowRest =
+    hasFollowReady && (musclesNeedRest || cycleDone || weekTargetMet);
 
   async function markRest() {
     if (restBusy) return;
@@ -793,6 +808,21 @@ function TodayIdleWorkbench() {
       alert(String(e));
     } finally {
       setRestBusy(false);
+    }
+  }
+
+  async function stopFollowing() {
+    if (unfollowBusy) return;
+    if (!confirm("先不跟这套了？只是不再推课，以前练过的记录都还在。")) return;
+    setUnfollowBusy(true);
+    try {
+      await unfollowPlan();
+      void qc.invalidateQueries({ queryKey: ["plans-following"] });
+      void qc.invalidateQueries({ queryKey: ["profile"] });
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setUnfollowBusy(false);
     }
   }
 
@@ -826,7 +856,7 @@ function TodayIdleWorkbench() {
             <p className="mt-3 text-[12px] font-semibold text-muted">
               {following?.plan?.title || "跟练计划"}
               {following?.week.progress_label ? ` · ${following.week.progress_label}` : ""}
-              {following?.week.week_cycle_done ? " · 本周已轮完，可再练" : ""}
+              {cycleDone && (following?.week.total_blocks ?? 0) > 1 ? " · 可开下一轮" : ""}
             </p>
             <div className="mt-1.5 flex items-start justify-between gap-2">
               <h2 className="font-display text-[26px] font-extrabold tracking-tight">
@@ -859,6 +889,9 @@ function TodayIdleWorkbench() {
                 {(nextBlock.preview_names || []).slice(0, 4).join(" · ")}
               </p>
             )}
+            {musclesNeedRest && blockRecovery?.text ? (
+              <p className="mt-2 text-[12px] leading-relaxed text-muted">{blockRecovery.text}</p>
+            ) : null}
             <div className="mt-4 flex flex-col gap-2.5">
               <button
                 type="button"
@@ -875,6 +908,30 @@ function TodayIdleWorkbench() {
               >
                 今天想练别的？
               </button>
+              {showFollowRest ? (
+                <button
+                  type="button"
+                  disabled={restBusy}
+                  onClick={() => void markRest()}
+                  className="pressable flex w-full items-center justify-center rounded-[14px] border border-line bg-elevated/80 py-3 text-[13px] font-bold text-ink disabled:opacity-50"
+                >
+                  {restBusy ? "记录中…" : "记今天休息"}
+                </button>
+              ) : null}
+              <div className="flex items-center justify-center gap-3 pt-0.5 text-[12px] font-semibold text-muted">
+                <Link to="/plans" className="underline-offset-2 hover:underline">
+                  换计划
+                </Link>
+                <span aria-hidden>·</span>
+                <button
+                  type="button"
+                  disabled={unfollowBusy}
+                  onClick={() => void stopFollowing()}
+                  className="underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  {unfollowBusy ? "处理中…" : "先不跟了"}
+                </button>
+              </div>
             </div>
           </>
         ) : suggestRestDay ? (

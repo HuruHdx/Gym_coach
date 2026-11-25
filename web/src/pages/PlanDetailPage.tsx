@@ -63,7 +63,7 @@ export function PlanDetailPage() {
   async function toggleFollow() {
     if (!id || followBusy) return;
     if (isFollowing) {
-      if (!confirm("退出跟练？本周进度标签会清空，已打卡记录仍保留。")) return;
+      if (!confirm("退出跟练？只是不再推这套计划，以前练过的记录都还在。")) return;
     }
     setFollowBusy(true);
     try {

@@ -1,12 +1,53 @@
 import type { MusclePulse, TrainingSession } from "../types";
 
 const BIG = new Set(["胸", "背", "腿"]);
-const SMALL = new Set(["肩", "臂", "核心"]);
+const SMALL = new Set(["肩", "臂"]);
+/** 核心/腹可每天练，阈值 0 = 始终 ready */
+const DAILY = new Set(["核心", "腹"]);
 
-function thresholdDays(muscle: string): number {
-  if (BIG.has(muscle)) return 2; // 48h
-  if (SMALL.has(muscle)) return 1; // 24h
-  return 2;
+export function thresholdDays(muscle: string): number {
+  if (DAILY.has(muscle)) return 0;
+  if (BIG.has(muscle)) return 3;
+  if (SMALL.has(muscle)) return 2;
+  return 3;
+}
+
+export type BlockRecoveryHint = {
+  ready: boolean;
+  text: string;
+  muscles: string[];
+};
+
+/** 下一板块主肌群是否够间隔；不够则给软提示（不锁死）。 */
+export function buildBlockRecoveryHint(
+  muscles: string[] | undefined | null,
+  pulse: MusclePulse[] | undefined | null,
+): BlockRecoveryHint | null {
+  const list = (muscles || []).map((m) => m.trim()).filter(Boolean);
+  if (list.length === 0) return null;
+  const byMuscle = new Map(
+    (pulse || [])
+      .filter((p) => p.days_since != null && Number.isFinite(p.days_since))
+      .map((p) => [p.muscle, p.days_since as number]),
+  );
+  const notReady: { muscle: string; days: number; need: number }[] = [];
+  for (const m of list) {
+    const need = thresholdDays(m);
+    if (need <= 0) continue;
+    const days = byMuscle.get(m);
+    if (days == null) continue; // 无历史 → 视为可练
+    if (days < need) notReady.push({ muscle: m, days, need });
+  }
+  if (notReady.length === 0) {
+    return { ready: true, text: "", muscles: list };
+  }
+  notReady.sort((a, b) => a.days - b.days);
+  const top = notReady[0];
+  return {
+    ready: false,
+    text: `${top.muscle}距上次仅 ${top.days} 天（建议间隔 ${top.need} 天），可休息或换板块`,
+    muscles: notReady.map((r) => r.muscle),
+  };
 }
 
 export type MuscleGapView = {
