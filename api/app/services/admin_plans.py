@@ -135,6 +135,16 @@ def _block_out(session: Session, block: PlanBlock) -> dict[str, Any]:
 
 
 def _exercise_out(session: Session, row: PlanExercise) -> dict[str, Any]:
+    plan_cover = getattr(row, "demo_cover_url", None)
+    plan_demo = getattr(row, "demo_url", None)
+    thumb = None
+    for cand in (plan_cover, plan_demo):
+        if cand and str(cand).strip():
+            text = str(cand).strip()
+            thumb = text if text.startswith("/static/") or text.startswith("http") else f"/static/{text.lstrip('/')}"
+            break
+    if not thumb:
+        thumb = _exercise_thumb(session, row.exercise_id)
     return {
         "id": row.id,
         "block_id": row.block_id,
@@ -149,7 +159,11 @@ def _exercise_out(session: Session, row: PlanExercise) -> dict[str, Any]:
         "target_muscle": getattr(row, "target_muscle", None),
         "alternatives": list(row.alternatives or []),
         "note": row.note,
-        "thumb_url": _exercise_thumb(session, row.exercise_id),
+        "demo_url": plan_demo,
+        "demo_cover_url": plan_cover,
+        "cues_zh": list(getattr(row, "cues_zh", None) or []),
+        "common_mistakes_zh": list(getattr(row, "common_mistakes_zh", None) or []),
+        "thumb_url": thumb,
         "pending": not (row.exercise_id or row.exercise_name),
     }
 

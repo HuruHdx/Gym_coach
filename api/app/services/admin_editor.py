@@ -272,6 +272,12 @@ def create_exercise(session: Session, payload: dict[str, Any]) -> dict[str, Any]
     movement_pattern = str(payload.get("movement_pattern") or "").strip() or None
     coach_core = bool(payload.get("coach_core", False))
     aliases = _clean_list(payload.get("aliases"), limit=20)
+    variant_of = str(payload.get("variant_of") or "").strip() or None
+    female_variant = str(payload.get("female_variant") or "").strip() or None
+    if variant_of and not session.get(Exercise, variant_of):
+        raise HTTPException(status_code=400, detail=f"variant_of 指向的动作不存在: {variant_of}")
+    if female_variant and not session.get(Exercise, female_variant):
+        raise HTTPException(status_code=400, detail=f"female_variant 指向的动作不存在: {female_variant}")
 
     ex = Exercise(
         id=exercise_id,
@@ -300,9 +306,15 @@ def create_exercise(session: Session, payload: dict[str, Any]) -> dict[str, Any]
         instructions_zh=_clean_list(payload.get("instructions_zh"), limit=8),
         cues_zh=_clean_list(payload.get("cues_zh"), limit=8),
         common_mistakes_zh=_clean_list(payload.get("common_mistakes_zh"), limit=8),
+        variant_of=variant_of,
+        female_variant=female_variant,
         text_source="admin_create",
         updated_at=utcnow(),
     )
+    if "slot_roles" in payload and payload["slot_roles"] is not None:
+        from app.slot_roles import normalize_slot_roles
+
+        ex.slot_roles = normalize_slot_roles(payload["slot_roles"])
     session.add(ex)
     for alias in aliases:
         if alias == name_zh:
@@ -315,6 +327,117 @@ def create_exercise(session: Session, payload: dict[str, Any]) -> dict[str, Any]
     detail = get_editable_detail(session, exercise_id)
     assert detail is not None
     return detail
+
+
+_FEMALE_SUFFIX = "·女"
+
+
+def female_display_name(base_name: str) -> str:
+    name = (base_name or "").strip()
+    if not name:
+        return f"未命名{_FEMALE_SUFFIX}"
+    if name.endswith(_FEMALE_SUFFIX):
+        return name
+    return f"{name}{_FEMALE_SUFFIX}"
+
+
+def derive_female_variant(
+    session: Session,
+    source_id: str,
+    *,
+    copy_cues: bool = True,
+) -> dict[str, Any]:
+    """从男版/通用 SKU 派生女版：拷贝分类字段，双向挂 variant_of / female_variant。
+
+    不拷贝示范媒体（女版需工坊另切片）。若男版已有 female_variant 且仍有效，直接返回已有女版。
+    """
+    source = session.get(Exercise, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="源动作不存在")
+    # 已经是女版：直接返回
+    if (source.variant_of or "").strip():
+        detail = get_editable_detail(session, source_id)
+        assert detail is not None
+        return {"exercise": detail, "created": False, "reason": "already_female"}
+
+    existing_id = (source.female_variant or "").strip()
+    if existing_id:
+        existing = session.get(Exercise, existing_id)
+        if existing and getattr(existing, "is_valid_exercise", True):
+            # 补齐反向链接
+            if (existing.variant_of or "").strip() != source_id:
+                existing.variant_of = source_id
+                session.add(existing)
+                session.commit()
+                reload_all()
+            detail = get_editable_detail(session, existing_id)
+            assert detail is not None
+            return {"exercise": detail, "created": False, "reason": "already_linked"}
+
+    base_name = (source.name_zh or "").strip() or source_id
+    female_name = female_display_name(base_name)
+    # 同名女版已存在但未挂链：复用并补链
+    same_name = session.exec(
+        select(Exercise).where(
+            Exercise.name_zh == female_name,  # type: ignore[arg-type]
+            Exercise.is_valid_exercise.is_(True),  # type: ignore[arg-type]
+        )
+    ).first()
+    if same_name:
+        same_name.variant_of = source_id
+        source.female_variant = same_name.id
+        session.add(same_name)
+        session.add(source)
+        session.commit()
+        reload_all()
+        detail = get_editable_detail(session, same_name.id)
+        assert detail is not None
+        return {"exercise": detail, "created": False, "reason": "linked_existing_name"}
+
+    aliases = [base_name]
+    for row in session.exec(
+        select(ExerciseAlias).where(
+            ExerciseAlias.exercise_id == source_id,
+            ExerciseAlias.status == "published",
+        )
+    ).all():
+        a = (row.alias or "").strip()
+        if a and a not in aliases and a != female_name:
+            aliases.append(a)
+
+    payload: dict[str, Any] = {
+        "name_zh": female_name,
+        "name_en": source.name_en or female_name,
+        "muscle": source.muscle or "全身",
+        "sub_region": source.sub_region,
+        "movement_pattern": source.movement_pattern,
+        "gear": source.gear or "器械",
+        "modality": source.modality or "抗阻",
+        "coach_core": False,
+        "needs_review": True,
+        "slot_roles": list(source.slot_roles or []),
+        "aliases": aliases,
+        "variant_of": source_id,
+        "joint_stress": source.joint_stress or {},
+    }
+    if copy_cues:
+        payload["cues_zh"] = list(source.cues_zh or [])
+        payload["common_mistakes_zh"] = list(source.common_mistakes_zh or [])
+        payload["instructions_zh"] = list(source.instructions_zh or [])
+
+    created = create_exercise(session, payload)
+    female_id = str(created["id"])
+    # create_exercise 已 commit；回写男版 female_variant
+    source = session.get(Exercise, source_id)
+    if source:
+        source.female_variant = female_id
+        source.updated_at = utcnow()
+        session.add(source)
+        session.commit()
+        reload_all()
+    detail = get_editable_detail(session, female_id)
+    assert detail is not None
+    return {"exercise": detail, "created": True, "reason": "created"}
 
 
 def delete_exercise(session: Session, exercise_id: str) -> dict[str, Any]:
@@ -412,6 +535,18 @@ def update_exercise(session: Session, exercise_id: str, payload: dict[str, Any])
         from app.slot_roles import normalize_slot_roles
 
         ex.slot_roles = normalize_slot_roles(payload["slot_roles"])
+    if "variant_of" in payload:
+        raw = payload["variant_of"]
+        value = str(raw).strip() if raw else None
+        if value and not session.get(Exercise, value):
+            raise HTTPException(status_code=400, detail=f"variant_of 指向的动作不存在: {value}")
+        ex.variant_of = value or None
+    if "female_variant" in payload:
+        raw = payload["female_variant"]
+        value = str(raw).strip() if raw else None
+        if value and not session.get(Exercise, value):
+            raise HTTPException(status_code=400, detail=f"female_variant 指向的动作不存在: {value}")
+        ex.female_variant = value or None
 
     if "aliases" in payload and payload["aliases"] is not None:
         wanted = _clean_list(payload["aliases"], limit=20)

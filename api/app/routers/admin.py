@@ -233,6 +233,17 @@ def get_exercise(
     return detail
 
 
+@router.post("/exercises/{exercise_id}/derive-female")
+def derive_female_exercise(
+    exercise_id: str,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+    copy_cues: bool = True,
+):
+    """从男版/通用 SKU 派生女版（双向 variant 关联；不拷贝示范）。"""
+    return admin_editor.derive_female_variant(session, exercise_id, copy_cues=copy_cues)
+
+
 @router.put("/exercises/{exercise_id}")
 def put_exercise(
     exercise_id: str,

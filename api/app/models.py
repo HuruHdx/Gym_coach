@@ -399,6 +399,12 @@ class PlanExercise(SQLModel, table=True):
     source_kind: Optional[str] = Field(default=None, max_length=16)  # spoken|visual|manual|missing
     match_confidence: Optional[float] = Field(default=None)
     source_snippet: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    # 计划行自有示范（工坊切片默认写这里，不盖动作库 SKU）
+    demo_url: Optional[str] = Field(default=None, max_length=512)
+    demo_cover_url: Optional[str] = Field(default=None, max_length=512)
+    # 计划行自有要点/易错（可跟计划走，不必写进动作库）
+    cues_zh: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
+    common_mistakes_zh: list[Any] = Field(default_factory=list, sa_column=Column(JSON))
 
 
 class StudioTask(SQLModel, table=True):

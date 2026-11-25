@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Search } from "lucide-react";
 import { fetchPlans } from "../lib/api";
+import { planCadenceLabel, planCornerBadge, planMuscleLine } from "../lib/planCardMeta";
 import type { PlanTemplateCard } from "../types";
 
 export function PlansPage() {
@@ -128,7 +129,7 @@ export function PlansPage() {
                 <p className="mb-2 text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">
                   {group.title}
                 </p>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="no-scrollbar -mx-4 flex gap-2.5 overflow-x-auto px-4 pb-0.5">
                   {group.items.map((plan) => (
                     <PlanCard key={plan.id} plan={plan} />
                   ))}
@@ -143,28 +144,50 @@ export function PlansPage() {
 }
 
 function PlanCard({ plan }: { plan: PlanTemplateCard }) {
-  const muscles = (plan.muscle_tags || []).slice(0, 3);
-  const sub =
-    muscles.length > 0
-      ? muscles.join(" · ")
-      : plan.split_summary ||
-        (plan.block_count != null ? `${plan.block_count} 个板块` : null);
+  const badge = planCornerBadge(plan);
+  const muscles = planMuscleLine(plan);
+  const cadence = planCadenceLabel(plan);
+  const muscleChips = (plan.muscle_tags || []).map((t) => String(t).trim()).filter(Boolean).slice(0, 3);
   return (
     <Link
       to={`/plans/${encodeURIComponent(plan.id)}`}
-      className="pressable relative flex aspect-[3/4] min-h-[176px] flex-col overflow-hidden rounded-2xl p-3 text-white"
+      className="pressable flex h-[176px] w-[156px] shrink-0 flex-col overflow-hidden rounded-2xl p-3 text-white"
       style={
         plan.cover_url
           ? {
-              backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.2) 0%, rgba(23,22,28,.88) 72%), url(${plan.cover_url})`,
+              backgroundImage: `linear-gradient(165deg, rgba(23,22,28,.22) 0%, rgba(23,22,28,.88) 72%), url(${plan.cover_url})`,
               backgroundSize: "cover",
               backgroundPosition: "center",
             }
           : { background: "linear-gradient(165deg, #342c46 0%, #17161c 72%)" }
       }
     >
-      <p className="mt-auto text-[17px] font-extrabold leading-snug tracking-tight">{plan.title}</p>
-      {sub ? <p className="mt-1 line-clamp-2 text-[10.5px] text-white/75">{sub}</p> : null}
+      {badge ? (
+        <span className="max-w-full self-start truncate rounded-md bg-white/16 px-2 py-[3px] text-[10px] font-bold leading-none text-white">
+          {badge}
+        </span>
+      ) : (
+        <span className="h-[18px]" aria-hidden />
+      )}
+      <div className="mt-auto min-w-0">
+        <p className="line-clamp-2 text-[17px] font-extrabold leading-snug tracking-tight">{plan.title}</p>
+        {muscles && muscleChips.length === 0 ? (
+          <p className="mt-1 line-clamp-1 text-[11px] font-medium text-white/72">{muscles}</p>
+        ) : null}
+        <div className="mt-2 flex flex-wrap gap-1">
+          {muscleChips.map((tag) => (
+            <span
+              key={tag}
+              className="rounded border border-white/22 px-1.5 py-0.5 text-[9px] font-bold text-white/85"
+            >
+              {tag}
+            </span>
+          ))}
+          <span className="rounded border border-white/22 px-1.5 py-0.5 text-[9px] font-bold text-white/85">
+            {cadence}
+          </span>
+        </div>
+      </div>
     </Link>
   );
 }

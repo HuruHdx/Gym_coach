@@ -115,6 +115,10 @@ def _ensure_columns() -> None:
         ("plan_exercises", "match_confidence", "REAL"),
         ("plan_exercises", "source_snippet", "TEXT"),
         ("plan_exercises", "rest_sec", "INTEGER DEFAULT 90"),
+        ("plan_exercises", "demo_url", "VARCHAR"),
+        ("plan_exercises", "demo_cover_url", "VARCHAR"),
+        ("plan_exercises", "cues_zh", "TEXT"),
+        ("plan_exercises", "common_mistakes_zh", "TEXT"),
         ("trainingsetlog", "completed_at", "TIMESTAMP"),
     ]
     url = settings.database_url
@@ -131,6 +135,8 @@ def _ensure_columns() -> None:
             ("exercises", "common_mistakes_zh"),
             ("exercises", "slot_roles"),
             ("plan_exercises", "source_snippet"),
+            ("plan_exercises", "cues_zh"),
+            ("plan_exercises", "common_mistakes_zh"),
             ("studio_tasks", "transcript_json"),
             ("studio_tasks", "draft_json"),
             ("studio_tasks", "score"),

@@ -130,6 +130,8 @@ def exercise_list_item(
         flags["end"] = True
     state = _media_state(flags)
     enriched = bool(ex.coach_core and (ex.cues_zh or (ex.instructions_zh and len(ex.instructions_zh) >= 4)))
+    is_female = bool((ex.variant_of or "").strip())
+    has_female = bool((ex.female_variant or "").strip()) and not is_female
     return {
         "id": ex.id,
         "name_zh": ex.name_zh,
@@ -149,6 +151,10 @@ def exercise_list_item(
         "media_state": state,
         "risk": _top_risk(ex.joint_stress if isinstance(ex.joint_stress, dict) else None),
         "enriched": enriched,
+        "is_female_variant": is_female,
+        "has_female_variant": has_female,
+        "female_variant": (ex.female_variant or None) if has_female else None,
+        "variant_of": (ex.variant_of or None) if is_female else None,
         "updated_at": ex.updated_at.isoformat() if ex.updated_at else None,
     }
 
@@ -391,6 +397,16 @@ def get_exercise_detail(session: Session, exercise_id: str) -> dict[str, Any] | 
                 "media_id": m.id if m else None,
             }
         )
+    female_id = (ex.female_variant or "").strip() or None
+    male_id = (ex.variant_of or "").strip() or None
+    female_name = None
+    male_name = None
+    if female_id:
+        linked = session.get(Exercise, female_id)
+        female_name = (linked.name_zh if linked else None) or female_id
+    if male_id:
+        linked = session.get(Exercise, male_id)
+        male_name = (linked.name_zh if linked else None) or male_id
     return {
         "id": ex.id,
         "name_zh": ex.name_zh,
@@ -413,6 +429,10 @@ def get_exercise_detail(session: Session, exercise_id: str) -> dict[str, Any] | 
         "description_zh": ex.description_zh,
         "aliases": [a.alias for a in aliases],
         "slots": slots,
+        "female_variant": female_id,
+        "female_variant_name": female_name,
+        "variant_of": male_id,
+        "variant_of_name": male_name,
         "updated_at": ex.updated_at.isoformat() if ex.updated_at else None,
     }
 

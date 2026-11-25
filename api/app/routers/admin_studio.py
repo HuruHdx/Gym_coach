@@ -44,6 +44,13 @@ class QuickCreateIn(BaseModel):
     write_cues: bool = False
 
 
+class DeriveFemaleIn(BaseModel):
+    task_id: int
+    source_exercise_id: str = Field(min_length=1, max_length=64)
+    row_id: str | None = Field(default=None, max_length=64)
+    copy_cues: bool = True
+
+
 class RestoreCuesIn(BaseModel):
     task_id: int
     exercise_id: str = Field(min_length=1, max_length=64)
@@ -70,6 +77,8 @@ class AttachDemoIn(BaseModel):
     end: float = Field(gt=0)
     # 优先写回这一行；缺省时按 exercise_id 扫草稿（兼容旧前端）
     row_id: str | None = Field(default=None, max_length=64)
+    # False=只挂计划/草稿行（默认）；True=同时写入动作库 SKU 示范
+    write_to_library: bool = False
 
 
 class DraftIn(BaseModel):
@@ -80,6 +89,8 @@ class ConfirmPlanIn(BaseModel):
     task_id: int
     draft: dict[str, Any] | None = None
     append_to_plan_id: str | None = None
+    # 多条合成一套：额外勾选的其它可发布任务 id（不含 task_id）
+    merge_task_ids: list[int] | None = None
     publish: bool = True
 
 
@@ -287,6 +298,22 @@ def quick_create(
     )
 
 
+@router.post("/derive-female-variant")
+def derive_female_variant(
+    body: DeriveFemaleIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    """从男版/通用 SKU 派生女版并可选写回草稿行绑定。"""
+    return studio_service.derive_female_variant_for_studio(
+        session,
+        task_id=body.task_id,
+        source_exercise_id=body.source_exercise_id,
+        row_id=body.row_id,
+        copy_cues=body.copy_cues,
+    )
+
+
 @router.post("/attach-demo")
 def attach_demo(
     body: AttachDemoIn,
@@ -300,6 +327,7 @@ def attach_demo(
         start=body.start,
         end=body.end,
         row_id=body.row_id,
+        write_to_library=body.write_to_library,
     )
 
 
@@ -356,5 +384,6 @@ def confirm_plan(
         task_id=body.task_id,
         draft=body.draft,
         append_to_plan_id=body.append_to_plan_id,
+        merge_task_ids=body.merge_task_ids,
         publish=body.publish,
     )

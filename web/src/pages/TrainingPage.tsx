@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, ChevronRight, ClipboardList, Video } from "lucide-react";
 import { api, fetchPlans } from "../lib/api";
+import { planCadenceLabel, planCornerBadge, planMuscleLine } from "../lib/planCardMeta";
 import { Sparkline } from "../components/dashboard/TrainingDashboard";
 import type { DashboardPeriod } from "../components/dashboard/TrainingDashboard";
 import type { PlanTemplateCard, TrainingDashboard as DashboardData, TrainingSession } from "../types";
@@ -286,18 +287,14 @@ function WeekRing({ trained, target }: { trained: number; target: number }) {
 }
 
 function PlanPreviewCard({ plan, alt }: { plan: PlanTemplateCard; alt?: boolean }) {
-  const muscles = (plan.muscle_tags || []).slice(0, 3);
-  const sub =
-    muscles.length > 0
-      ? muscles.join(" · ")
-      : plan.split_summary ||
-        (plan.block_count != null ? `${plan.block_count} 板块` : null) ||
-        plan.minutes_label ||
-        approxMinutes(plan);
+  const badge = planCornerBadge(plan);
+  const muscles = planMuscleLine(plan);
+  const cadence = planCadenceLabel(plan);
+  const muscleChips = (plan.muscle_tags || []).map((t) => String(t).trim()).filter(Boolean).slice(0, 3);
   return (
     <Link
       to={`/plans/${encodeURIComponent(plan.id)}`}
-      className="pressable relative flex h-36 min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] p-3.5 text-white"
+      className="pressable flex h-[140px] min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] p-3 text-white"
       style={
         plan.cover_url
           ? {
@@ -312,8 +309,32 @@ function PlanPreviewCard({ plan, alt }: { plan: PlanTemplateCard; alt?: boolean 
             }
       }
     >
-      <p className="mt-auto truncate text-[17px] font-extrabold tracking-tight">{plan.title}</p>
-      {sub ? <p className="mt-1 truncate text-[10.5px] text-white/75">{sub}</p> : null}
+      {badge ? (
+        <span className="max-w-full self-start truncate rounded-md bg-white/16 px-2 py-[3px] text-[10px] font-bold leading-none text-white">
+          {badge}
+        </span>
+      ) : (
+        <span className="h-[18px]" aria-hidden />
+      )}
+      <div className="mt-auto min-w-0">
+        <p className="truncate text-[16px] font-extrabold tracking-tight">{plan.title}</p>
+        {muscles && muscleChips.length === 0 ? (
+          <p className="mt-0.5 truncate text-[10.5px] font-medium text-white/72">{muscles}</p>
+        ) : null}
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {muscleChips.map((tag) => (
+            <span
+              key={tag}
+              className="rounded border border-white/22 px-1.5 py-0.5 text-[9px] font-bold text-white/85"
+            >
+              {tag}
+            </span>
+          ))}
+          <span className="rounded border border-white/22 px-1.5 py-0.5 text-[9px] font-bold text-white/85">
+            {cadence}
+          </span>
+        </div>
+      </div>
     </Link>
   );
 }
@@ -358,12 +379,6 @@ function ResourceRow({
       )}
     </Tag>
   );
-}
-
-function approxMinutes(plan: PlanTemplateCard) {
-  if (plan.minutes_min && plan.minutes_max) return `约 ${plan.minutes_min}-${plan.minutes_max} 分钟`;
-  if (plan.minutes_min) return `约 ${plan.minutes_min} 分钟`;
-  return null;
 }
 
 function shortName(name: string) {

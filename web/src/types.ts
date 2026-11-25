@@ -169,6 +169,10 @@ export type PlanExerciseRow = {
   alternatives?: string[];
   note?: string | null;
   thumb_url?: string | null;
+  demo_url?: string | null;
+  demo_cover_url?: string | null;
+  cues_zh?: string[];
+  common_mistakes_zh?: string[];
   pending?: boolean;
   /** 详情预览时由空槽自动配上的动作，非模板落库名 */
   preview_filled?: boolean;

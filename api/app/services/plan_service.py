@@ -223,7 +223,13 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
                     used_sub_regions.add(str(picked["sub_region"]))
             if name:
                 used_names.add(canonicalize_exercise(str(name)))
-            thumb = _thumb_url(session, exercise_id=exercise_id, name=name)
+            thumb = _thumb_url(
+                session,
+                exercise_id=exercise_id,
+                name=name,
+                plan_demo_url=getattr(ex, "demo_url", None),
+                plan_cover_url=getattr(ex, "demo_cover_url", None),
+            )
             ex_rows.append(
                 {
                     "id": ex.id,
@@ -240,6 +246,11 @@ def get_plan_detail(session: Session, plan_id: str) -> dict[str, Any]:
                     "alternatives": list(ex.alternatives or []),
                     "note": ex.note,
                     "thumb_url": thumb,
+                    "demo_url": getattr(ex, "demo_url", None),
+                    "cues_zh": list(getattr(ex, "cues_zh", None) or []),
+                    "common_mistakes_zh": list(
+                        getattr(ex, "common_mistakes_zh", None) or []
+                    ),
                     "pending": not bool(name),
                     "preview_filled": preview_filled,
                 }
@@ -498,9 +509,27 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
     }
 
 
+def _media_public_url(path: str | None) -> str | None:
+    if not path:
+        return None
+    text = str(path).strip()
+    if not text:
+        return None
+    return text if text.startswith("/static/") or text.startswith("http") else f"/static/exercises/{text}"
+
+
 def _thumb_url(
-    session: Session, *, exercise_id: str | None, name: str | None = None
+    session: Session,
+    *,
+    exercise_id: str | None,
+    name: str | None = None,
+    plan_demo_url: str | None = None,
+    plan_cover_url: str | None = None,
 ) -> str | None:
+    # 计划行自有示范优先（女计划切片不盖库）
+    plan_thumb = _media_public_url(plan_cover_url) or _media_public_url(plan_demo_url)
+    if plan_thumb:
+        return plan_thumb
     sku = None
     if exercise_id:
         sku = session.get(Exercise, exercise_id)
@@ -508,8 +537,7 @@ def _thumb_url(
         sku = session.exec(select(Exercise).where(Exercise.name_zh == name)).first()
     if not sku or not sku.image_start:
         return None
-    path = sku.image_start
-    return path if path.startswith("/static/") else f"/static/exercises/{path}"
+    return _media_public_url(sku.image_start)
 
 
 def expand_plan_block(session: Session, plan_id: str, block_id: int) -> dict[str, Any]:
@@ -582,6 +610,13 @@ def expand_plan_block(session: Session, plan_id: str, block_id: int) -> dict[str
         if row.warmup_sets:
             subtitle_parts.append(f"热身 {row.warmup_sets}")
 
+        plan_thumb = _thumb_url(
+            session,
+            exercise_id=picked.get("exercise_id") or row.exercise_id,
+            name=name or None,
+            plan_demo_url=getattr(row, "demo_url", None),
+            plan_cover_url=getattr(row, "demo_cover_url", None),
+        )
         items.append(
             {
                 "id": f"plan-{block_id}-{row.id or idx}",
@@ -601,6 +636,12 @@ def expand_plan_block(session: Session, plan_id: str, block_id: int) -> dict[str
                     "note": "；".join(note_bits) if note_bits else None,
                     "gear": picked.get("gear"),
                     "sub_region": picked.get("sub_region"),
+                    "thumb_url": plan_thumb,
+                    "demo_url": getattr(row, "demo_url", None),
+                    "cues_zh": list(getattr(row, "cues_zh", None) or []),
+                    "common_mistakes_zh": list(
+                        getattr(row, "common_mistakes_zh", None) or []
+                    ),
                 },
             }
         )

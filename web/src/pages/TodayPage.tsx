@@ -119,15 +119,34 @@ export function TodayPage() {
   const currentSet = currentGroup?.sets.find((s) => !s.completed) ?? null;
   const currentMeta = currentGroup ? thumbByName.get(currentGroup.name) : undefined;
 
+  const { data: planForCues } = useQuery({
+    queryKey: ["plan-detail-cues", local?.plan_template_id],
+    queryFn: () => fetchPlanDetail(local!.plan_template_id!),
+    enabled: Boolean(local?.plan_template_id) && local?.status === "active",
+  });
+  const planCue = useMemo(() => {
+    if (!currentGroup || !planForCues) return null;
+    const blocks = planForCues.blocks || [];
+    const block =
+      (local?.plan_block_id != null
+        ? blocks.find((b) => b.id === local.plan_block_id)
+        : null) ?? blocks[0];
+    const row = block?.exercises?.find(
+      (e) => (e.exercise_name || "").trim() === currentGroup.name.trim(),
+    );
+    const text = row?.cues_zh?.[0];
+    return typeof text === "string" && text.trim() ? text.trim() : null;
+  }, [currentGroup, planForCues, local?.plan_block_id]);
+
   const { data: currentDetail } = useQuery({
     queryKey: ["catalog-exercise-cue", currentMeta?.id],
     queryFn: () =>
       api<{ cues_zh?: string[]; id: string }>(
         `/api/exercises/${encodeURIComponent(currentMeta!.id!)}`,
       ),
-    enabled: Boolean(currentMeta?.id) && local?.status === "active",
+    enabled: Boolean(currentMeta?.id) && local?.status === "active" && !planCue,
   });
-  const currentCue = currentDetail?.cues_zh?.[0] || null;
+  const currentCue = planCue || currentDetail?.cues_zh?.[0] || null;
 
   const prevReps = useMemo(() => {
     if (!currentGroup) return null;
@@ -315,6 +334,8 @@ export function TodayPage() {
   }
 
   const remainMoves = groups.filter((g) => g.sets.some((s) => !s.completed)).length;
+  const allSetsDone =
+    local.progress.total > 0 && local.progress.done >= local.progress.total;
   const outcomeLabel = local.session_outcome || (isDone ? "完成" : null);
   const dateLabel = formatTodayLabel();
 
@@ -329,20 +350,23 @@ export function TodayPage() {
             <p className="font-num mt-0.5 text-[26px] font-extrabold leading-none tracking-tight">
               {formatClock(seconds)}
             </p>
-            <button
-              type="button"
-              onClick={() => void completeSession()}
-              className="pressable mt-1.5 rounded-lg border border-line bg-elevated/80 px-2.5 py-1 text-[11px] font-bold text-accent-text"
-            >
-              结束这场
-            </button>
+            {/* 组次未打完时结束放次级；打完后主 CTA 在 Hero 里 */}
+            {!allSetsDone ? (
+              <button
+                type="button"
+                onClick={() => void completeSession()}
+                className="pressable mt-1.5 rounded-lg border border-line bg-elevated/80 px-2.5 py-1 text-[11px] font-bold text-accent-text"
+              >
+                结束这场
+              </button>
+            ) : null}
           </div>
         ) : (
           <p className="pt-2 text-[12px] font-semibold text-muted">{dateLabel}</p>
         )}
       </div>
 
-      {/* Hero：D 已完成 / C 训练中 / B 有计划未开练 */}
+      {/* Hero：D 已完成 / C 训练中 / C′ 组次打完待收尾 / B 有计划未开练 */}
       <div className="mt-3 overflow-hidden rounded-[20px] border border-line bg-gradient-to-br from-[var(--hero-a)] via-[#f6f2fd] to-elevated p-4">
         <TodaySeg />
 
@@ -473,6 +497,44 @@ export function TodayPage() {
               className="pressable mt-3.5 flex w-full items-center justify-center rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink"
             >
               完成这组
+            </button>
+          </>
+        ) : allSetsDone || running ? (
+          <>
+            <p className="mt-3 text-[12px] font-semibold text-muted">
+              {sourceLine} · {allSetsDone ? "组次已打完" : "今日进行中"}
+            </p>
+            <div className="mt-1.5 flex items-start justify-between gap-2">
+              <h2 className="font-display text-[26px] font-extrabold tracking-tight">
+                {local.split_label || "训练"}
+              </h2>
+              <span className="mt-2 shrink-0 rounded-md bg-ok/15 px-2 py-1 text-[10px] font-bold text-ok">
+                {allSetsDone ? "待收尾" : "进行中"}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[12px] text-muted">
+              <span className="num">
+                {exerciseCount} 动作 · {local.progress.done} / {local.progress.total} 组
+              </span>
+              {muscleSummary ? ` · ${muscleSummary}` : ""}
+            </p>
+            <div className="mt-3.5 h-1 overflow-hidden rounded-full bg-line">
+              <div
+                className="h-full rounded-full bg-accent transition-all"
+                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+              />
+            </div>
+            <div className="mt-2 text-[11px] text-muted">
+              {allSetsDone
+                ? "本场组次都勾完了，点结束生成总结"
+                : `还剩 ${remainMoves} 个动作 · 可在下方清单继续勾组`}
+            </div>
+            <button
+              type="button"
+              onClick={() => void completeSession()}
+              className="pressable mt-3.5 w-full rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink"
+            >
+              结束这场
             </button>
           </>
         ) : (

@@ -231,6 +231,8 @@ def _has_demo(session: Session, exercise_id: str) -> bool:
 
 
 def _pack(ex: Exercise, score: int, reason: str, *, has_demo: bool) -> dict[str, Any]:
+    is_female = bool((ex.variant_of or "").strip())
+    has_female = bool((ex.female_variant or "").strip()) and not is_female
     return {
         "id": ex.id,
         "name_zh": ex.name_zh,
@@ -239,6 +241,10 @@ def _pack(ex: Exercise, score: int, reason: str, *, has_demo: bool) -> dict[str,
         "has_demo": has_demo,
         "score": int(score),
         "reason": reason,
+        "is_female_variant": is_female,
+        "has_female_variant": has_female,
+        "female_variant": (ex.female_variant or None) if has_female else None,
+        "variant_of": (ex.variant_of or None) if is_female else None,
     }
 
 
@@ -418,24 +424,58 @@ def repair_spoken_name(session: Session, spoken: str) -> str | None:
     return display_for.get(normalize_spoken_name(repaired), repaired)
 
 
+def prefer_female_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    prefer_female: bool,
+) -> list[dict[str, Any]]:
+    """女性专项计划：女版候选置前；仅有男版时标注建议派生。"""
+    if not prefer_female or not candidates:
+        return candidates
+    female = [c for c in candidates if c.get("is_female_variant")]
+    male_only = [c for c in candidates if c.get("has_female_variant")]
+    other = [c for c in candidates if not c.get("is_female_variant") and not c.get("has_female_variant")]
+    # 男版且尚无女版：提示派生，避免女计划直接绑男版盖示范
+    for c in other:
+        if not c.get("is_female_variant"):
+            c["prefer_derive_female"] = True
+            reason = str(c.get("reason") or "")
+            if "建议派生女版" not in reason:
+                c["reason"] = f"{reason}·建议派生女版" if reason else "建议派生女版"
+    # 已有女版链的男版：女计划里压后，优先展示女版
+    for c in male_only:
+        c["prefer_derive_female"] = False
+        c["score"] = max(0, int(c.get("score") or 0) - 8)
+    ordered = female + other + male_only
+    return ordered
+
+
 def resolve_spoken_match(
     session: Session,
     spoken: str,
     *,
     muscle_hint: str | None = None,
     limit: int = 3,
+    prefer_female: bool = False,
 ) -> dict[str, Any]:
     """主命中 + 候选列表。
 
     - score≥90 且非含糊：自动预填主命中
     - 55～89：只给候选，主命中为空（等人点选）
     - <55：新动作路径
+    - prefer_female：女性专项计划，候选优先女版
     """
-    candidates = match_spoken_candidates(session, spoken, limit=limit, muscle_hint=muscle_hint)
+    # 多取一些再重排，避免女版被截在 limit 外
+    fetch_n = max(limit, 6) if prefer_female else limit
+    candidates = match_spoken_candidates(session, spoken, limit=fetch_n, muscle_hint=muscle_hint)
+    candidates = prefer_female_candidates(candidates, prefer_female=prefer_female)[:limit]
     hit: dict[str, Any] | None = None
     if candidates:
         top = candidates[0]
-        if int(top["score"]) >= _AUTO_BIND_MIN and not is_ambiguous_spoken(spoken):
+        # 女计划不自动绑男版（即使分够），避免切片盖示范
+        if prefer_female and top.get("prefer_derive_female") and not top.get("is_female_variant"):
+            hit = None
+        elif int(top["score"]) >= _AUTO_BIND_MIN and not is_ambiguous_spoken(spoken):
             hit = {
                 "id": top["id"],
                 "name_zh": top["name_zh"],
@@ -445,6 +485,8 @@ def resolve_spoken_match(
                 "confidence": top["score"] / 100.0,
                 "score": top["score"],
                 "reason": top["reason"],
+                "is_female_variant": bool(top.get("is_female_variant")),
+                "has_female_variant": bool(top.get("has_female_variant")),
             }
     return {
         "hit": hit,

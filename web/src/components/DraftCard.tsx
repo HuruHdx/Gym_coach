@@ -273,11 +273,15 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
                       title={thumbs[it.title]?.id ? "查看动作详情" : "暂无动作库匹配"}
                       disabled={!thumbs[it.title]?.id}
                     >
-                      {thumbs[it.title]?.thumb_url ? (
+                      {(typeof it.meta?.thumb_url === "string" && it.meta.thumb_url) ||
+                      thumbs[it.title]?.thumb_url ? (
                         <img
-                          src={thumbs[it.title].thumb_url!}
+                          src={
+                            (typeof it.meta?.thumb_url === "string" && it.meta.thumb_url) ||
+                            thumbs[it.title]!.thumb_url!
+                          }
                           alt=""
-                          className="h-full w-full object-contain"
+                          className="h-full w-full object-cover"
                         />
                       ) : (
                         <span className="grid h-full place-items-center text-[9px] font-bold text-muted">
