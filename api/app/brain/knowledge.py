@@ -137,8 +137,9 @@ _by_norm: dict[str, list["Doc"]] = {}
 _by_alias: dict[str, list["Doc"]] = {}
 # 后台 ExerciseAlias / register_alias 写入；优先于家族名解释，保证绑别名热生效
 _priority_alias: dict[str, list["Doc"]] = {}
-# 评测/单测可置 False，隔离后台 DB 别名来源，保证内存知识库纯净（不读业务库）
+# 评测/单测可置 False，隔离后台 DB 别名/动作来源，保证内存知识库纯净（不读业务库）
 _load_db_aliases: bool = True
+_load_db_exercises: bool = True
 _by_en: dict[str, list["Doc"]] = {}
 _substrings: set[str] = set()
 
@@ -267,6 +268,49 @@ def _assets_json() -> "Path":
     return enriched if enriched.exists() else legacy
 
 
+def _doc_from_db_exercise(ex: Any) -> "Doc | None":
+    """后台 Exercise 行 → KB Doc；与 JSON 行同结构，便于同 id 覆盖。"""
+    name = str(getattr(ex, "name_zh", "") or "").strip()
+    eid = str(getattr(ex, "id", "") or "").strip()
+    if not name or not eid:
+        return None
+    en = str(getattr(ex, "name_en", "") or "").strip().lower()
+    muscle = str(getattr(ex, "muscle", "") or "").strip() or "相关肌群"
+    target_en = str(getattr(ex, "target", "") or "").strip()
+    cues = getattr(ex, "cues_zh", None) or []
+    mistakes = getattr(ex, "common_mistakes_zh", None) or []
+    steps = getattr(ex, "instructions_zh", None) or []
+    if not isinstance(steps, list) or not steps:
+        steps = getattr(ex, "instructions_en", None) or []
+    step_text = " ".join(str(s) for s in steps[:6]) if isinstance(steps, list) else ""
+    cue_text = "；".join(str(c) for c in cues[:6]) if isinstance(cues, list) else ""
+    miss_text = "；".join(str(m) for m in mistakes[:4]) if isinstance(mistakes, list) else ""
+    desc = str(getattr(ex, "description_zh", "") or getattr(ex, "description_en", "") or "").strip()
+    lines = [
+        f"名称：{name}",
+        f"目标肌：{muscle}",
+        f"器械：{getattr(ex, 'gear', '') or '—'}",
+    ]
+    if step_text:
+        lines.append(f"步骤：{step_text}")
+    if cue_text:
+        lines.append(f"要点：{cue_text}")
+    if miss_text:
+        lines.append(f"易错：{miss_text}")
+    if desc:
+        lines.append(f"说明：{desc}")
+    return Doc(
+        id=eid,
+        name_zh=name,
+        name_en=en,
+        norm=normalize_exercise_name(name),
+        norm_en=normalize_exercise_name(en),
+        target_en=target_en,
+        target_zh=muscle if muscle != "全身" else _target_zh(target_en),
+        passage="\n".join(lines),
+    )
+
+
 def ensure_index() -> None:
     global _ready
     if _ready:
@@ -275,17 +319,10 @@ def ensure_index() -> None:
         if _ready:
             return
         raw = json.loads(_assets_json().read_text(encoding="utf-8"))
-        docs: list[Doc] = []
-        by_norm: dict[str, list[Doc]] = {}
+        by_id: dict[str, Doc] = {}
+        orphan_docs: list[Doc] = []
         by_alias: dict[str, list[Doc]] = {}
-        by_en: dict[str, list[Doc]] = {}
-        subs: set[str] = set()
-
-        def _add_substrings(norm: str) -> None:
-            upper = min(len(norm), 12)
-            for length in range(2, upper + 1):
-                for i in range(0, len(norm) - length + 1):
-                    subs.add(norm[i : i + length])
+        json_aliases: list[tuple[str, str]] = []  # (exercise_id, alias)
 
         def _index_alias(surface: str, doc: Doc) -> None:
             norm = normalize_exercise_name(surface)
@@ -304,8 +341,9 @@ def ensure_index() -> None:
             en = str(row.get("name_en") or "").strip().lower()
             target_en = str(row.get("target") or "")
             tz = _target_zh(target_en)
+            eid = str(row.get("id") or "").strip()
             doc = Doc(
-                id=str(row.get("id") or ""),
+                id=eid,
                 name_zh=name,
                 name_en=en,
                 norm=normalize_exercise_name(name),
@@ -314,23 +352,64 @@ def ensure_index() -> None:
                 target_zh=tz,
                 passage=_passage(row, tz),
             )
-            docs.append(doc)
+            if eid:
+                by_id[eid] = doc
+            else:
+                orphan_docs.append(doc)
+            for alias in row.get("aliases") or []:
+                alias_text = str(alias or "").strip()
+                if alias_text and eid:
+                    json_aliases.append((eid, alias_text))
+            # 兼容旧正式名（清洗后改名）
+            if name == "平板杠铃卧推" and eid:
+                json_aliases.append((eid, "杠铃卧推"))
+            if name == "徒手深蹲" and eid:
+                json_aliases.append((eid, "深蹲"))
+
+        # 后台 Exercise 覆盖同 id / 补上 JSON 没有的新 SKU（工坊写入库的示范才能被问答命中）
+        if _load_db_exercises:
+            try:
+                from sqlmodel import Session, select
+
+                from app.db import engine
+                from app.models import Exercise
+
+                with Session(engine) as session:
+                    db_rows = session.exec(
+                        select(Exercise).where(Exercise.is_valid_exercise == True)  # noqa: E712
+                    ).all()
+                for ex in db_rows:
+                    doc = _doc_from_db_exercise(ex)
+                    if doc is not None:
+                        by_id[doc.id] = doc
+            except Exception:
+                pass
+
+        docs = list(by_id.values()) + orphan_docs
+        docs_by_id = {d.id: d for d in docs if d.id}
+        by_norm: dict[str, list[Doc]] = {}
+        by_en: dict[str, list[Doc]] = {}
+        subs: set[str] = set()
+        by_alias.clear()
+
+        def _add_substrings(norm: str) -> None:
+            upper = min(len(norm), 12)
+            for length in range(2, upper + 1):
+                for i in range(0, len(norm) - length + 1):
+                    subs.add(norm[i : i + length])
+
+        for doc in docs:
             by_norm.setdefault(doc.norm, []).append(doc)
             _add_substrings(doc.norm)
             if doc.norm_en:
                 by_en.setdefault(doc.norm_en, []).append(doc)
-            for alias in row.get("aliases") or []:
-                alias_text = str(alias or "").strip()
-                if alias_text:
-                    _index_alias(alias_text, doc)
-            # 兼容旧正式名（清洗后改名）
-            if name == "平板杠铃卧推":
-                _index_alias("杠铃卧推", doc)
-            if name == "徒手深蹲":
-                _index_alias("深蹲", doc)
+
+        for eid, alias_text in json_aliases:
+            doc = docs_by_id.get(eid)
+            if doc is not None:
+                _index_alias(alias_text, doc)
 
         # 后台绑的 ExerciseAlias → 普通索引 + 优先索引（热生效 / 重启后仍可用）
-        docs_by_id = {d.id: d for d in docs if d.id}
         priority: dict[str, list[Doc]] = {}
         if _load_db_aliases:
             try:

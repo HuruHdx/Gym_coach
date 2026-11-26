@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ChevronLeft, Search, X } from "lucide-react";
+import { ArrowLeft, Search, X } from "lucide-react";
 import { api } from "../lib/api";
 import { MUSCLE_OPTIONS } from "../types";
 
@@ -85,11 +85,12 @@ export function ExercisesPage() {
     <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
       <button
         type="button"
-        onClick={() => navigate("/training")}
-        className="pressable -ml-1 mb-1 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+        onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/training"))}
+        className="pressable -ml-1 mb-1 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+        aria-label="返回"
       >
-        <ChevronLeft size={16} />
-        训练
+        <ArrowLeft size={18} strokeWidth={2.25} />
+        返回
       </button>
       <h1 className="font-display text-[26px] font-extrabold tracking-tight">动作库</h1>
       <p className="mt-1 text-[12px] text-muted">{query.isLoading ? "加载中…" : `${total} 个动作`}</p>

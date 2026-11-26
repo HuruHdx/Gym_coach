@@ -1,22 +1,31 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { DraftCard } from "../components/DraftCard";
 import { LoopClip } from "../components/LoopClip";
 import {
   api,
   expandPlan,
+  fetchFollowing,
   fetchPlanDetail,
   followPlan,
   unfollowPlan,
 } from "../lib/api";
-import type { CardBlock, PlanBlockDetail, PlanExerciseRow, TrainingSession } from "../types";
+import type {
+  CardBlock,
+  FollowingProgress,
+  PlanBlockDetail,
+  PlanDetail,
+  PlanExerciseRow,
+  TrainingSession,
+} from "../types";
 
 export function PlanDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const [activeBlockId, setActiveBlockId] = useState<number | null>(null);
   const [draft, setDraft] = useState<CardBlock | null>(null);
@@ -24,10 +33,29 @@ export function PlanDetailPage() {
   const [expanding, setExpanding] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
 
+  function goBack() {
+    // 从教练荐卡 / 计划库 / 我的 进来都应回到上一页，不要写死计划库
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    const from = (location.state as { from?: string } | null)?.from;
+    if (from === "coach") {
+      navigate("/coach");
+      return;
+    }
+    navigate("/plans");
+  }
+
   const detailQuery = useQuery({
     queryKey: ["plan-detail", id],
     queryFn: () => fetchPlanDetail(id),
     enabled: Boolean(id),
+  });
+
+  const followingQuery = useQuery({
+    queryKey: ["plans-following"],
+    queryFn: fetchFollowing,
   });
 
   const { data: todaySession } = useQuery({
@@ -49,7 +77,8 @@ export function PlanDetailPage() {
     () => blocks.find((block) => block.id === activeBlockId) ?? null,
     [blocks, activeBlockId],
   );
-  const isFollowing = Boolean(plan?.is_following);
+  // 以跟练指针为准，避免详情缓存导致退出后仍显示「跟练中」
+  const isFollowing = Boolean(id) && followingQuery.data?.active_plan_id === id;
 
   const totalExercises = useMemo(
     () => blocks.reduce((sum, block) => sum + block.exercises.length, 0),
@@ -67,10 +96,18 @@ export function PlanDetailPage() {
     }
     setFollowBusy(true);
     try {
-      if (isFollowing) await unfollowPlan();
-      else await followPlan(id);
-      void qc.invalidateQueries({ queryKey: ["plan-detail", id] });
-      void qc.invalidateQueries({ queryKey: ["plans-following"] });
+      const next = isFollowing ? await unfollowPlan() : await followPlan(id);
+      qc.setQueryData<FollowingProgress>(["plans-following"], next);
+      qc.setQueryData<PlanDetail>(["plan-detail", id], (old) =>
+        old
+          ? {
+              ...old,
+              is_following: next.active_plan_id === id,
+              week_progress: next.active_plan_id === id ? next.week ?? null : null,
+            }
+          : old,
+      );
+      void qc.invalidateQueries({ queryKey: ["plans"] });
     } catch (e) {
       alert(String(e));
     } finally {
@@ -101,11 +138,12 @@ export function PlanDetailPage() {
       <div className="flex min-h-full flex-col px-4 pb-6 pt-3">
         <button
           type="button"
-          onClick={() => navigate("/plans")}
-          className="pressable -ml-1 mb-2 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+          onClick={goBack}
+          className="pressable -ml-1 mb-2 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+          aria-label="返回"
         >
-          <ChevronLeft size={16} />
-          计划库
+          <ArrowLeft size={18} strokeWidth={2.25} />
+          返回
         </button>
         <p className="mt-6 text-sm text-danger">计划不存在或未发布。</p>
       </div>
@@ -184,11 +222,12 @@ export function PlanDetailPage() {
       <div className="px-4">
         <button
           type="button"
-          onClick={() => navigate("/plans")}
-          className="pressable -ml-1 mb-2 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+          onClick={goBack}
+          className="pressable -ml-1 mb-2 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+          aria-label="返回"
         >
-          <ChevronLeft size={16} />
-          计划库
+          <ArrowLeft size={18} strokeWidth={2.25} />
+          返回
         </button>
 
         <div

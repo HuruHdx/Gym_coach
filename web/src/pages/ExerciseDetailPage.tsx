@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { LoopClip } from "../components/LoopClip";
 import { MuscleFocusDiagram } from "../components/MuscleFocusDiagram";
 import { api } from "../lib/api";
@@ -144,9 +144,10 @@ export function ExerciseDetailPage() {
         <button
           type="button"
           onClick={goBack}
-          className="pressable -ml-1 mb-2 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+          className="pressable -ml-1 mb-2 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+          aria-label="返回"
         >
-          <ChevronLeft size={16} />
+          <ArrowLeft size={18} strokeWidth={2.25} />
           返回
         </button>
       </div>

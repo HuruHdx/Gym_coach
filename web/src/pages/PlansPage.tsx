@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Search } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
 import { fetchPlans } from "../lib/api";
 import { planCadenceLabel, planCornerBadge, planMuscleLine } from "../lib/planCardMeta";
 import type { PlanTemplateCard } from "../types";
@@ -53,9 +53,10 @@ export function PlansPage() {
       <button
         type="button"
         onClick={() => navigate(-1)}
-        className="pressable -ml-1 mb-1 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+        className="pressable -ml-1 mb-1 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+        aria-label="返回"
       >
-        <ChevronLeft size={16} />
+        <ArrowLeft size={18} strokeWidth={2.25} />
         返回
       </button>
       <h1 className="font-display text-[26px] font-extrabold tracking-tight">计划库</h1>

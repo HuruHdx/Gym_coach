@@ -124,6 +124,7 @@ class CardType(str, Enum):
     PROFILE_CONFIRM = "profile_confirm"
     WEEKLY_REPORT = "weekly_report"
     EXERCISE_REF = "exercise_ref"
+    PLAN_RECOMMEND = "plan_recommend"
 
 
 class CardItem(BaseModel):

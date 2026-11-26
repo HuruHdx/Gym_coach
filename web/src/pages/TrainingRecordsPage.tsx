@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { api } from "../lib/api";
 import { SessionDetailSheet } from "../components/training/SessionDetailSheet";
 import {
@@ -57,11 +57,12 @@ export function TrainingRecordsPage() {
     <div className="flex min-h-full flex-col px-4 pb-6 pt-3 rise-in">
       <button
         type="button"
-        onClick={() => navigate("/training")}
-        className="pressable -ml-1 mb-1 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+        onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/training"))}
+        className="pressable -ml-1 mb-1 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+        aria-label="返回"
       >
-        <ChevronLeft size={16} />
-        训练
+        <ArrowLeft size={18} strokeWidth={2.25} />
+        返回
       </button>
       <h1 className="font-display text-[26px] font-extrabold tracking-tight">训练记录</h1>
       <p className="mt-1 text-[12px] text-muted">近 30 天</p>

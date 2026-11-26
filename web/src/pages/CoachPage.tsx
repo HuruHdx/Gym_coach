@@ -14,10 +14,6 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { COACH_NAME } from "../lib/brand";
-import {
-  isTestFeedbackEnabled,
-  TEST_FEEDBACK_EVENT,
-} from "../lib/testFeedback";
 import { CoachMark } from "../components/CoachMark";
 import { DraftCard } from "../components/DraftCard";
 import { ExerciseRefCards } from "../components/ExerciseRefCards";
@@ -269,17 +265,6 @@ export function CoachPage({ profile }: Props) {
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const [testFeedbackOn, setTestFeedbackOn] = useState(() => isTestFeedbackEnabled());
-
-  useEffect(() => {
-    const sync = () => setTestFeedbackOn(isTestFeedbackEnabled());
-    window.addEventListener("storage", sync);
-    window.addEventListener(TEST_FEEDBACK_EVENT, sync);
-    return () => {
-      window.removeEventListener("storage", sync);
-      window.removeEventListener(TEST_FEEDBACK_EVENT, sync);
-    };
-  }, []);
 
   // 换账号后必须重新灌库，不能沿用上一用户的 hydrated 气泡
   useEffect(() => {
@@ -628,7 +613,7 @@ export function CoachPage({ profile }: Props) {
                         <p className="text-meta leading-relaxed text-ink">{m.text}</p>
                       </div>
 
-                      {testFeedbackOn && (m.traceId != null || m.turnId != null) && (
+                      {(m.traceId != null || m.turnId != null) && (
                         <MessageFeedback traceId={m.traceId} turnId={m.turnId} />
                       )}
 
@@ -683,11 +668,6 @@ export function CoachPage({ profile }: Props) {
                         <ExerciseRefCards card={m.card} />
                       )}
 
-                      {testFeedbackOn && m.traceId != null && (
-                        <div className="mt-1.5 text-right">
-                          <span className="text-micro text-muted">调试轨迹 #{m.traceId}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>

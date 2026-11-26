@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { followPlan, fetchFollowing } from "../lib/api";
-import type { CardBlock } from "../types";
+import { toast } from "../feedback";
+import type { CardBlock, FollowingProgress } from "../types";
 
 type Props = {
   card: CardBlock;
@@ -20,23 +21,23 @@ export function PlanRecommendCard({ card }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const followingQuery = useQuery({
+    queryKey: ["plans-following"],
+    queryFn: fetchFollowing,
+  });
+  const activePlanId = followingQuery.data?.active_plan_id ?? null;
+  /** 已经采纳过跟练：整张荐卡作废，不再当加入/切换入口 */
+  const cardSpent = Boolean(activePlanId);
 
   async function onFollow(planId: string, title: string) {
-    if (!planId || busyId) return;
+    if (!planId || busyId || cardSpent) return;
     setBusyId(planId);
     try {
-      const current = await fetchFollowing();
-      if (current.active_plan_id && current.active_plan_id !== planId) {
-        const currentTitle = current.plan?.title || current.active_plan_id;
-        const ok = window.confirm(
-          `将切换跟练计划为「${title}」（当前：${currentTitle}）。原计划历史保留，今日已有场次不会被自动覆盖。确定吗？`,
-        );
-        if (!ok) return;
-      }
-      await followPlan(planId);
-      void qc.invalidateQueries({ queryKey: ["plans-following"] });
+      const next = await followPlan(planId);
+      qc.setQueryData<FollowingProgress>(["plans-following"], next);
       void qc.invalidateQueries({ queryKey: ["plans"] });
-      navigate(`/plans/${encodeURIComponent(planId)}`);
+      void qc.invalidateQueries({ queryKey: ["plan-detail", planId] });
+      toast.ok(`已加入「${title}」`);
     } catch (e) {
       alert(e instanceof Error ? e.message : "加入跟练失败");
     } finally {
@@ -45,11 +46,20 @@ export function PlanRecommendCard({ card }: Props) {
   }
 
   return (
-    <div className="rounded-lg border border-line bg-elevated p-3.5 shadow-card">
+    <div
+      className={`rounded-lg border border-line bg-elevated p-3.5 shadow-card ${
+        cardSpent ? "opacity-80" : ""
+      }`}
+    >
       <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">可跟计划</p>
       <h3 className="mt-1 font-display text-[17px] font-extrabold tracking-tight text-ink">
         {card.title || "为你挑了几套计划"}
       </h3>
+      {cardSpent ? (
+        <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+          已有跟练中的计划，这张推荐不再使用。要换计划去计划库或详情页。
+        </p>
+      ) : null}
       <ul className="mt-3 space-y-2.5">
         {card.items.map((item) => {
           const planId = planIdOf(item);
@@ -86,21 +96,27 @@ export function PlanRecommendCard({ card }: Props) {
                   disabled={!planId || Boolean(busyId)}
                   className="pressable flex-1 rounded-[10px] border border-line bg-elevated py-2 text-[12px] font-bold text-ink disabled:opacity-50"
                   onClick={() => {
-                    if (planId) navigate(`/plans/${encodeURIComponent(planId)}`);
+                    if (planId) {
+                      navigate(`/plans/${encodeURIComponent(planId)}`, {
+                        state: { from: "coach" },
+                      });
+                    }
                   }}
                 >
                   查看详情
                 </button>
-                <button
-                  type="button"
-                  disabled={!planId || Boolean(busyId)}
-                  className="pressable flex-1 rounded-[10px] bg-accent py-2 text-[12px] font-extrabold text-accent-ink disabled:opacity-50"
-                  onClick={() => {
-                    if (planId) void onFollow(planId, item.title);
-                  }}
-                >
-                  {busyId === planId ? "加入中…" : "加入跟练"}
-                </button>
+                {!cardSpent ? (
+                  <button
+                    type="button"
+                    disabled={!planId || Boolean(busyId)}
+                    className="pressable flex-1 rounded-[10px] bg-accent py-2 text-[12px] font-extrabold text-accent-ink disabled:opacity-50"
+                    onClick={() => {
+                      if (planId) void onFollow(planId, item.title);
+                    }}
+                  >
+                    {busyId === planId ? "加入中…" : "加入跟练"}
+                  </button>
+                ) : null}
               </div>
             </li>
           );

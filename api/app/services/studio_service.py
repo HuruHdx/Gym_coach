@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import queue
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col, select
 
 # UploadFile 仅 upload_fallback 使用
@@ -287,6 +289,50 @@ def _overlay_published_plan_title(
     return draft
 
 
+def _scrub_stale_exercise_binds(session: Session, draft: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """草稿 exercise_id 若库里已不存在：清绑定，避免界面假「已绑」却写入库 404。"""
+    draft = copy.deepcopy(draft)
+    ids: set[str] = set()
+    for block in draft.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        for ex in block.get("exercises") or []:
+            if not isinstance(ex, dict):
+                continue
+            eid = str(ex.get("exercise_id") or "").strip()
+            if eid:
+                ids.add(eid)
+    if not ids:
+        return draft, 0
+    existing = {
+        str(x)
+        for x in session.exec(select(Exercise.id).where(col(Exercise.id).in_(list(ids)))).all()
+    }
+    n = 0
+    for block in draft.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        for ex in block.get("exercises") or []:
+            if not isinstance(ex, dict):
+                continue
+            eid = str(ex.get("exercise_id") or "").strip()
+            if not eid:
+                continue
+            if eid in existing:
+                if ex.pop("sku_missing", None) is not None:
+                    n += 1
+                continue
+            ex["exercise_id"] = None
+            ex["traffic"] = "red"
+            ex["match_score"] = None
+            ex["match_confidence"] = None
+            ex["sku_missing"] = True
+            if ex.get("media_status") == "library":
+                ex["media_status"] = "pending_sku"
+            n += 1
+    return draft, n
+
+
 def _task_out(
     task: StudioTask,
     session: Session | None = None,
@@ -354,6 +400,16 @@ def get_task(session: Session, task_id: int) -> dict[str, Any]:
     task = session.get(StudioTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
+    draft = task.draft_json if isinstance(task.draft_json, dict) else None
+    if draft is not None:
+        cleaned, scrubbed = _scrub_stale_exercise_binds(session, draft)
+        if scrubbed:
+            task.draft_json = cleaned
+            flag_modified(task, "draft_json")
+            task.updated_at = utcnow()
+            session.add(task)
+            session.commit()
+            session.refresh(task)
     return _task_out(task, session)
 
 
@@ -623,7 +679,13 @@ def attach_demo_now(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     if not session.get(Exercise, exercise_id):
-        raise HTTPException(status_code=404, detail="动作 SKU 不存在")
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"动作库里没有 ID「{exercise_id}」（可能已删或换号）。"
+                "请在清单重新绑到现有动作后再写入示范。"
+            ),
+        )
     if end <= start:
         raise HTTPException(status_code=400, detail="选区无效：结束须大于开始")
     if end - start > 30:
@@ -643,6 +705,13 @@ def attach_demo_now(
     stem = target_row or str(exercise_id)
     if do_library:
         meta = _attach_demo_media(session, task, exercise_id, float(start), float(end))
+        # 写库后刷新问答索引，避免 JSON 快照没有该 SKU 时检索不到
+        try:
+            from app.exercises_catalog import reload_all
+
+            reload_all()
+        except Exception:
+            pass
     else:
         meta = _render_plan_demo_clip(task, float(start), float(end), stem=stem)
     if not meta:

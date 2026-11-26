@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import { api } from "../lib/api";
 import { WeightTrendChart } from "../components/dashboard/WeightTrendChart";
 import type { ExerciseStat, SetLog, TrainingSession } from "../types";
@@ -43,9 +43,10 @@ export function ExerciseTrendPage() {
       <button
         type="button"
         onClick={() => navigate(-1)}
-        className="pressable -ml-1 mb-1 inline-flex w-fit items-center gap-0.5 text-[12px] font-bold text-muted"
+        className="pressable -ml-1 mb-1 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+        aria-label="返回"
       >
-        <ChevronLeft size={16} />
+        <ArrowLeft size={18} strokeWidth={2.25} />
         返回
       </button>
 

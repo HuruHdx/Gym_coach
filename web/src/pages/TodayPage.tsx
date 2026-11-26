@@ -20,6 +20,7 @@ import {
   buildBlockRecoveryHint,
   buildMuscleGap,
   buildRestHints,
+  estimateSessionKcal,
   lastCompletedReps,
   lastRepsForSet,
 } from "../lib/todayHints";
@@ -56,8 +57,6 @@ export function TodayPage() {
   const [order, setOrder] = useState<string[]>([]);
   const orderRef = useRef<string[]>([]);
   orderRef.current = order;
-  const [revising, setRevising] = useState(false);
-  const [regenBusy, setRegenBusy] = useState(false);
   const [blockPickerOpen, setBlockPickerOpen] = useState(false);
   const [draft, setDraft] = useState<CardBlock | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -67,11 +66,6 @@ export function TodayPage() {
   useEffect(() => {
     setOrder([]);
   }, [session?.id]);
-  useEffect(() => {
-    // 新一场 / 仍在执行中：退出修正态
-    if (session?.status !== "done") setRevising(false);
-  }, [session?.id, session?.status]);
-
   const running = Boolean(local?.timer_started_at) && local?.status === "active";
   useEffect(() => {
     if (!running) return;
@@ -82,11 +76,19 @@ export function TodayPage() {
   const baseGroups = useMemo(() => groupByExercise(local?.sets || []), [local]);
   const groups = useMemo(() => sortGroups(baseGroups, order), [baseGroups, order]);
   useEffect(() => {
+    // 完成后收起组明细，需要时再点开回顾
+    if (local?.status === "done") {
+      setOpenName(null);
+    }
+  }, [local?.id, local?.status]);
+
+  useEffect(() => {
     if (pickedOpen) return;
+    if (local?.status === "done") return;
     const firstOpen =
       groups.find((g) => g.sets.some((s) => !s.completed))?.name ?? groups[0]?.name ?? null;
     setOpenName(firstOpen);
-  }, [groups, pickedOpen]);
+  }, [groups, pickedOpen, local?.status]);
 
   const { data: historySessions = [] } = useQuery({
     queryKey: ["training-sessions"],
@@ -95,6 +97,10 @@ export function TodayPage() {
   const { data: following } = useQuery({
     queryKey: ["plans-following"],
     queryFn: fetchFollowing,
+  });
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => api<Profile>("/api/profile"),
   });
 
   const exerciseNames = useMemo(() => groups.map((g) => g.name), [groups]);
@@ -286,7 +292,7 @@ export function TodayPage() {
       ? Math.round((local.progress.done / local.progress.total) * 100)
       : 0;
   const isDone = local.status === "done";
-  const locked = isDone && !revising;
+  const locked = isDone;
   const seconds = elapsedSeconds(local, now);
   const exerciseCount = groups.length;
   const isCoachPlan = local.plan_type === "custom" || (!local.plan_template_id && local.plan_type !== "framework" && local.plan_type !== "fixed");
@@ -296,27 +302,6 @@ export function TodayPage() {
   ]
     .slice(0, 4)
     .join(" · ");
-
-  async function regenerateSummary() {
-    if (!local || regenBusy) return;
-    setRegenBusy(true);
-    try {
-      const done = await api<TrainingSession>(`/api/training/sessions/${local.id}/complete`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      setLocal(done);
-      setRevising(false);
-      void qc.invalidateQueries({ queryKey: ["training-today"] });
-      void qc.invalidateQueries({ queryKey: ["training-sessions"] });
-      void qc.invalidateQueries({ queryKey: ["training-dashboard"] });
-      void qc.invalidateQueries({ queryKey: ["exercises"] });
-    } catch (e) {
-      alert(String(e));
-    } finally {
-      setRegenBusy(false);
-    }
-  }
 
   async function completeCurrentSet() {
     if (!currentSet || locked) return;
@@ -336,7 +321,14 @@ export function TodayPage() {
   const remainMoves = groups.filter((g) => g.sets.some((s) => !s.completed)).length;
   const allSetsDone =
     local.progress.total > 0 && local.progress.done >= local.progress.total;
-  const outcomeLabel = local.session_outcome || (isDone ? "完成" : null);
+  // 「完成」只是默认收尾，不单独当结果标签；突破/力竭/吃力等才展示
+  const outcomeRaw = (local.session_outcome || "").trim();
+  const outcomeLabel =
+    outcomeRaw && outcomeRaw !== "完成" ? outcomeRaw : null;
+  const estimatedKcal = estimateSessionKcal(
+    profile?.weight_kg,
+    local.duration_minutes,
+  );
   const dateLabel = formatTodayLabel();
 
   return (
@@ -397,11 +389,11 @@ export function TodayPage() {
                   <p className="text-[12.5px] font-extrabold text-[color:var(--text-2,#54506b)]">
                     教练总结
                   </p>
-                  {outcomeLabel && (
+                  {outcomeLabel ? (
                     <span className="rounded-md bg-tint px-2 py-0.5 text-[10px] font-extrabold text-accent-text">
                       {outcomeLabel}
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 {local.summary && (
                   <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink">
@@ -421,7 +413,11 @@ export function TodayPage() {
                 }
                 unit="分钟"
               />
-              <MiniStat label="本场状态" value={outcomeLabel || "完成"} />
+              <MiniStat
+                label="约热量"
+                value={estimatedKcal != null ? String(estimatedKcal) : "—"}
+                unit={estimatedKcal != null ? "kcal" : ""}
+              />
             </div>
             <Link to="/recap" className="mt-3.5 inline-block text-[12px] font-bold text-accent-text">
               查看完整总结和海报 ›
@@ -735,38 +731,11 @@ export function TodayPage() {
         </div>
       )}
 
-      {isDone && !revising && (
+      {isDone ? (
         <div className="mt-5">
           <DoneNextHint />
-          <button
-            type="button"
-            className="mt-3 w-full text-center text-xs font-bold text-muted underline"
-            onClick={() => setRevising(true)}
-          >
-            记错了？修正本场记录
-          </button>
         </div>
-      )}
-
-      {isDone && revising && (
-        <div className="mt-6 flex flex-col gap-2">
-          <button
-            type="button"
-            disabled={regenBusy}
-            onClick={() => void regenerateSummary()}
-            className="pressable w-full rounded-md bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink disabled:opacity-50"
-          >
-            {regenBusy ? "正在重新生成…" : "重新生成总结"}
-          </button>
-          <button
-            type="button"
-            className="text-xs font-bold text-muted underline"
-            onClick={() => setRevising(false)}
-          >
-            取消修正
-          </button>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -777,11 +746,16 @@ function DoneNextHint() {
     queryFn: fetchFollowing,
   });
   const next = following?.week?.next_block;
-  if (!following?.active_plan_id || !next) return null;
+  const total = following?.week?.total_blocks ?? 0;
+  // 单板块/当日练：下次还是同一场，没信息量（还会拼出「背 · 背」）
+  if (!following?.active_plan_id || !next || total <= 1) return null;
+  // 本轮已跟完也不催
+  if (following.week?.week_cycle_done) return null;
+  const muscles = (next.muscles || []).filter((m) => m && m !== next.title);
   return (
     <p className="mt-3 text-center text-[12px] text-muted">
       下次：<span className="font-bold text-ink">{next.title}</span>
-      {(next.muscles || []).length > 0 ? ` · ${(next.muscles || []).join(" + ")}` : ""}
+      {muscles.length > 0 ? ` · ${muscles.join(" + ")}` : ""}
     </p>
   );
 }
@@ -918,14 +892,14 @@ function TodayIdleWorkbench() {
             <p className="mt-3 text-[12px] font-semibold text-muted">
               {following?.plan?.title || "跟练计划"}
               {following?.week.progress_label ? ` · ${following.week.progress_label}` : ""}
-              {cycleDone && (following?.week.total_blocks ?? 0) > 1 ? " · 可开下一轮" : ""}
+              {cycleDone ? " · 可再开" : ""}
             </p>
             <div className="mt-1.5 flex items-start justify-between gap-2">
               <h2 className="font-display text-[26px] font-extrabold tracking-tight">
                 {nextBlock.title}
               </h2>
               <span className="mt-2 shrink-0 rounded-md bg-tint px-2 py-1 text-[10px] font-bold text-accent-text">
-                今天
+                {cycleDone ? "已完成" : "今天"}
               </span>
             </div>
             <p className="mt-1.5 text-[12px] text-muted">
@@ -961,7 +935,7 @@ function TodayIdleWorkbench() {
                 onClick={() => void startNextBlock()}
                 className="pressable flex w-full items-center justify-center gap-2 rounded-[14px] bg-accent py-3.5 text-[15px] font-extrabold text-accent-ink disabled:opacity-50"
               >
-                {starting ? "展开中…" : "开始这场"}
+                {starting ? "展开中…" : cycleDone ? "再练一场" : "开始这场"}
               </button>
               <button
                 type="button"

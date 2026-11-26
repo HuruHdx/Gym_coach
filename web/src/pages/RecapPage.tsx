@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft } from "lucide-react";
 import { toPng } from "html-to-image";
 import { TrainingPoster, buildPosterModel } from "../components/TrainingPoster";
 import { api } from "../lib/api";
@@ -38,11 +40,20 @@ function streakDays(sessions: TrainingSession[] | undefined): number {
 }
 
 export function RecapPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: session, isLoading } = useQuery({
     queryKey: ["training-today"],
     queryFn: () => api<TrainingSession | null>("/api/training/today"),
   });
+
+  function goBack() {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/");
+  }
   const { data: history } = useQuery({
     queryKey: ["training-sessions"],
     queryFn: () => api<TrainingSession[]>("/api/training/sessions?limit=30"),
@@ -123,7 +134,17 @@ export function RecapPage() {
 
   return (
     <div data-theme="dark" className="recap-poster relative flex min-h-full flex-col px-5 pb-8 pt-4 text-ink">
-      {isLoading && <p className="mt-16 text-sm text-muted">正在打开结算…</p>}
+      <button
+        type="button"
+        onClick={goBack}
+        className="pressable -ml-1 mb-1 inline-flex h-9 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-bold text-ink"
+        aria-label="返回"
+      >
+        <ArrowLeft size={18} strokeWidth={2.25} />
+        返回今日
+      </button>
+
+      {isLoading && <p className="mt-8 text-sm text-muted">正在打开结算…</p>}
 
       {!isLoading && !current && (
         <p className="mt-16 font-display text-display font-semibold">今天还没有完成的训练。</p>

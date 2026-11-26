@@ -315,7 +315,7 @@ def unfollow_plan(session: Session) -> dict[str, Any]:
 
 
 def get_following_progress(session: Session, day: date | None = None) -> dict[str, Any]:
-    """跟练进度：多板块按滚动一轮；单板块看当天。绝不锁死。
+    """跟练进度：多板块按滚动一轮；单板块/当日练完成一次即本轮结束。绝不锁死。
 
     字段名仍用 week / week_cycle_done（兼容前端），语义已是「当前轮」而非自然周。
     自然周统计仍在 dashboard，与跟练指针脱钩。
@@ -413,30 +413,48 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
     progress_label: str | None = None
 
     if total <= 1:
-        # 单日 / 单板块：只看当天这场
+        # 单日 / 单板块：只服务「当天这场」。
+        # 当天完成 → 今日已完成；隔日再进 → 清掉跟练指针（没有进行中的计划），需重新选计划。
         only = blocks[0] if blocks else None
+
+        def _same_block(sess: TrainingSession) -> bool:
+            return sess.plan_block_id is None or only is None or int(sess.plan_block_id) == only.id
+
         today_done = any(
             sess.session_date == day
             and sess.status == "done"
             and sess.source != "rest"
-            and (sess.plan_block_id is None or only is None or int(sess.plan_block_id) == only.id)
+            and _same_block(sess)
             for sess in rows
         )
         today_active = any(
-            sess.session_date == day
-            and sess.status == "active"
-            and (sess.plan_block_id is None or only is None or int(sess.plan_block_id) == only.id)
+            sess.session_date == day and sess.status == "active" and _same_block(sess)
             for sess in rows
         )
-        if today_done:
-            week_cycle_done = True
-            completed_ids = [int(only.id)] if only and only.id is not None else []
-            next_block = only  # 仍可再开；文案标明今日已完成
-            progress_label = "今日已完成"
-        elif today_active:
+        prior_done = any(
+            sess.session_date < day
+            and sess.status == "done"
+            and sess.source != "rest"
+            and _same_block(sess)
+            for sess in rows
+        )
+        if prior_done and not today_done and not today_active:
+            if profile:
+                profile.active_plan_id = None
+                profile.active_plan_started_at = None
+                profile.updated_at = utcnow()
+                session.add(profile)
+                session.commit()
+            return empty
+        if today_active and not today_done:
             completed_ids = []
             next_block = only
             progress_label = "今日进行中"
+        elif today_done:
+            week_cycle_done = True
+            completed_ids = [int(only.id)] if only and only.id is not None else []
+            next_block = only
+            progress_label = "今日已完成"
         else:
             completed_ids = []
             next_block = only

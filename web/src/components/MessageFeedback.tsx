@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { api } from "../lib/api";
 
 const DOWN_TAGS: { id: string; label: string }[] = [
@@ -79,35 +80,41 @@ export function MessageFeedback({ traceId, turnId }: Props) {
   }
 
   return (
-    <div className="mt-1.5">
-      <div className="flex items-center gap-1.5">
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           disabled={busy}
           aria-label="有用"
           onClick={onUp}
-          className={`pressable rounded-md px-1.5 py-0.5 text-[11px] ${
-            rating === "up" ? "bg-ink text-bg" : "text-muted hover:bg-bg hover:text-ink"
+          className={`pressable inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[12px] font-bold transition-colors ${
+            rating === "up"
+              ? "border-ink bg-ink text-[color:var(--accent-ink,#fff)]"
+              : "border-line bg-elevated text-ink"
           }`}
         >
-          👍
+          <ThumbsUp size={14} strokeWidth={2.25} />
+          有用
         </button>
         <button
           type="button"
           disabled={busy}
           aria-label="不好"
           onClick={onDownClick}
-          className={`pressable rounded-md px-1.5 py-0.5 text-[11px] ${
-            rating === "down" ? "bg-ink text-bg" : "text-muted hover:bg-bg hover:text-ink"
+          className={`pressable inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[12px] font-bold transition-colors ${
+            rating === "down"
+              ? "border-ink bg-ink text-[color:var(--accent-ink,#fff)]"
+              : "border-line bg-elevated text-ink"
           }`}
         >
-          👎
+          <ThumbsDown size={14} strokeWidth={2.25} />
+          不好
         </button>
         {saved && rating === "up" && (
-          <span className="text-[10px] text-muted">已记录</span>
+          <span className="text-[11px] font-semibold text-muted">已记录</span>
         )}
         {saved && rating === "down" && (
-          <span className="text-[10px] text-muted">已记下，待导出评测</span>
+          <span className="text-[11px] font-semibold text-muted">已记下</span>
         )}
       </div>
 

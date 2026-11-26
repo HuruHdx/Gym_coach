@@ -12,10 +12,6 @@ import {
 } from "../lib/profileOptions";
 import type { Profile } from "../types";
 import { feedbackError, toast } from "../feedback";
-import {
-  isTestFeedbackEnabled,
-  setTestFeedbackEnabled,
-} from "../lib/testFeedback";
 
 type Props = { profile: Profile; onUpdated: () => void; onResetOnboarding: () => void };
 
@@ -34,7 +30,6 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
   const [weightDraft, setWeightDraft] = useState(profile.weight_kg ?? 70);
   const [daysDraft, setDaysDraft] = useState(profile.days_per_week);
   const [minutesDraft, setMinutesDraft] = useState(profile.session_minutes ?? 60);
-  const [testFeedbackOn, setTestFeedbackOn] = useState(() => isTestFeedbackEnabled());
   const equipment = currentEquipment(profile);
 
   useEffect(() => {
@@ -205,36 +200,6 @@ export function ProfileSettingsPage({ profile, onUpdated, onResetOnboarding }: P
               </button>
             );
           })}
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-xl border border-line bg-elevated p-3.5">
-        <p className="text-[11px] font-bold text-muted">开发者</p>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-bold">测试反馈</p>
-            <p className="mt-0.5 text-[11px] text-muted">开启后教练气泡可点赞踩，并显示轨迹号</p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={testFeedbackOn}
-            className={`pressable relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-              testFeedbackOn ? "bg-accent" : "bg-line"
-            }`}
-            onClick={() => {
-              const next = !testFeedbackOn;
-              setTestFeedbackEnabled(next);
-              setTestFeedbackOn(next);
-              toast.ok(next ? "已开启测试反馈" : "已关闭测试反馈");
-            }}
-          >
-            <span
-              className={`absolute top-0.5 h-6 w-6 rounded-full bg-elevated shadow transition-transform ${
-                testFeedbackOn ? "translate-x-5" : "translate-x-0.5"
-              }`}
-            />
-          </button>
         </div>
       </section>
 

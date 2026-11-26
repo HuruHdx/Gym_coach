@@ -1,11 +1,6 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import {
-  isTestFeedbackEnabled,
-  setTestFeedbackEnabled,
-} from "../lib/testFeedback";
 
 type GraphStep = {
   node: string;
@@ -28,7 +23,6 @@ type Trace = {
 };
 
 export function DebugPage() {
-  const [testFeedbackOn, setTestFeedbackOn] = useState(() => isTestFeedbackEnabled());
   const { data, refetch, isFetching } = useQuery({
     queryKey: ["traces"],
     queryFn: () => api<Trace[]>("/api/debug/traces?limit=10"),
@@ -43,31 +37,6 @@ export function DebugPage() {
         </Link>
       </div>
       <p className="mt-1 text-xs text-muted">每次聊天走的节点。点开可看完整输入输出。</p>
-      <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-line bg-elevated px-3 py-2">
-        <div className="min-w-0">
-          <p className="text-xs font-bold">测试反馈开关</p>
-          <p className="text-[11px] text-muted">控制教练页点赞踩与轨迹号</p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={testFeedbackOn}
-          className={`pressable relative h-7 w-12 shrink-0 rounded-full ${
-            testFeedbackOn ? "bg-accent" : "bg-line"
-          }`}
-          onClick={() => {
-            const next = !testFeedbackOn;
-            setTestFeedbackEnabled(next);
-            setTestFeedbackOn(next);
-          }}
-        >
-          <span
-            className={`absolute top-0.5 h-6 w-6 rounded-full bg-elevated shadow transition-transform ${
-              testFeedbackOn ? "translate-x-5" : "translate-x-0.5"
-            }`}
-          />
-        </button>
-      </div>
       <button
         type="button"
         onClick={() => refetch()}

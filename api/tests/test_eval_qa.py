@@ -25,8 +25,9 @@ def _intent(text: str, **_kwargs):
 
 
 def _run(monkeypatch, payload: dict) -> dict:
-    # 隔离后台 DB 别名：评测走纯内存库，不读业务 ExerciseAlias 表
+    # 隔离后台 DB：评测走纯 JSON 内存库，不读业务 Exercise / Alias 表
     monkeypatch.setattr(knowledge, "_load_db_aliases", False)
+    monkeypatch.setattr(knowledge, "_load_db_exercises", False)
     knowledge.reload_index()
 
     async def fake(text: str, **kwargs):

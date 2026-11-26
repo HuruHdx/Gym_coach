@@ -199,6 +199,19 @@ export function lastRepsForSet(
   return null;
 }
 
+/**
+ * 抗阻课粗估消耗：MET≈5 × 体重kg × 小时。
+ * 正式营养阶段应按 modality / METs 换，这里只给完成态展示「别人更关心」的约值。
+ */
+export function estimateSessionKcal(
+  weightKg: number | null | undefined,
+  minutes: number | null | undefined,
+): number | null {
+  if (weightKg == null || !(weightKg > 0)) return null;
+  if (minutes == null || !(minutes >= 1)) return null;
+  return Math.max(1, Math.round(5 * weightKg * (minutes / 60)));
+}
+
 function isoDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
