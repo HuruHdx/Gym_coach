@@ -2,6 +2,7 @@ import asyncio
 
 from app.brain.intent_rewrite import (
     apply_coach_routing,
+    apply_plan_kind,
     build_clarification,
     generate_clarification,
     intent_from_model_json,
@@ -9,9 +10,78 @@ from app.brain.intent_rewrite import (
     needs_clarification,
     rewrite_intent,
 )
+from app.brain.graph import _pick_route
 from app.brain.llm import MockLLM
 from app.brain.memory import Intent, draft_title_for_intent, format_intent_for_prompt, parse_intent
 from app.models import Experience, Goal, Profile
+
+
+def test_plan_kind_recommend_vs_today_session():
+    # 无部位 → 结构兜底荐模板（不靠「三分化」等词表）
+    recommend_raws = ["有没有三分化计划", "推荐个增肌计划", "新手怎么练", "能否给我安排个适合我的计划"]
+    for raw in recommend_raws:
+        intent = apply_plan_kind(
+            Intent(
+                expert="training",
+                raw=raw,
+                params={"topic": "plan", "domain": "training", "agent": "coach_plan"},
+            )
+        )
+        assert intent.params.get("plan_kind") == "recommend_plan", raw
+        routed = apply_coach_routing(intent)
+        assert not needs_clarification(routed)
+        assert _pick_route(routed, False) == "recommend"
+    # 有部位 / 本句时长 → 今日课
+    today_cases = [
+        ("今天练胸", ["胸"]),
+        ("只有30分钟帮我排一下", []),  # 时长信号
+        ("这场加点有氧", ["全身"]),
+    ]
+    for raw, muscles in today_cases:
+        intent = apply_plan_kind(
+            Intent(
+                expert="training",
+                muscles=muscles,
+                raw=raw,
+                params={"topic": "plan", "domain": "training", "agent": "coach_plan", "ready": True},
+            )
+        )
+        assert intent.params.get("plan_kind") == "today_session", raw
+        assert _pick_route(intent, False) in ("plan", "clarify")
+
+
+def test_plan_kind_model_explicit_recommend_not_overridden_by_muscles():
+    intent = apply_plan_kind(
+        Intent(
+            expert="training",
+            muscles=["胸"],
+            raw="有没有胸日完整计划",
+            params={
+                "topic": "plan",
+                "domain": "training",
+                "agent": "coach_plan",
+                "plan_kind": "recommend_plan",
+            },
+        )
+    )
+    assert intent.params.get("plan_kind") == "recommend_plan"
+
+
+def test_draft_relation_forces_today_session_plan_kind():
+    intent = apply_plan_kind(
+        Intent(
+            expert="training",
+            raw="有没有三分化",
+            params={
+                "topic": "plan",
+                "domain": "training",
+                "agent": "coach_plan",
+                "draft_relation": "revise",
+                "plan_kind": "recommend_plan",
+            },
+        )
+    )
+    assert intent.params.get("plan_kind") == "today_session"
 
 
 def test_rewrite_hybrid_matches_rules_under_mock():

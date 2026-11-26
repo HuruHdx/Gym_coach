@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlalchemy import and_, case, or_
@@ -11,12 +12,68 @@ from app.models import Exercise, ExerciseAlias, ExerciseMedia
 from app.services.admin_catalog import MEDIA_ROLES, media_url, _published_media_by_exercise
 
 
+def _looks_like_video(url: str | None) -> bool:
+    if not url:
+        return False
+    return bool(re.search(r"\.(mp4|webm|mov)(\?|$)", url, flags=re.I))
+
+
+def cover_image_for_exercise(ex: Exercise, media_map: dict[str, ExerciseMedia]) -> str | None:
+    """卡片 poster / 静态缩略图：只取图片槽，避免把 demo MP4 塞进 <img>。"""
+    for role in ("start", "end", "tip"):
+        row = media_map.get(role)
+        if row and row.url:
+            url = media_url(row.url)
+            if url and not _looks_like_video(url):
+                return url
+    for raw in (ex.image_start, ex.image_end):
+        url = media_url(raw)
+        if url and not _looks_like_video(url):
+            return url
+    return None
+
+
 def thumb_for_exercise(ex: Exercise, media_map: dict[str, ExerciseMedia]) -> str | None:
-    for role in ("start", "end", "demo", "tip", "highlight_video"):
+    cover = cover_image_for_exercise(ex, media_map)
+    if cover:
+        return cover
+    for role in ("demo", "highlight_video"):
         row = media_map.get(role)
         if row and row.url:
             return media_url(row.url)
-    return media_url(ex.image_start) or media_url(ex.image_end)
+    return None
+
+
+def media_pack_by_ids(session: Session, exercise_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """教练动作卡取数：封面图 + demo / highlight 视频 URL（单次批量）。"""
+    ids = [i for i in exercise_ids if i]
+    if not ids:
+        return {}
+    rows = session.exec(
+        select(Exercise).where(col(Exercise.id).in_(ids), Exercise.is_valid_exercise.is_(True))
+    ).all()
+    media_maps = _published_media_by_exercise(session, [ex.id for ex in rows])
+    out: dict[str, dict[str, Any]] = {}
+    for ex in rows:
+        mmap = media_maps.get(ex.id, {})
+        demo_row = mmap.get("demo")
+        highlight_row = mmap.get("highlight_video")
+        demo_url = media_url(demo_row.url) if demo_row and demo_row.url else None
+        highlight_url = media_url(highlight_row.url) if highlight_row and highlight_row.url else None
+        if demo_url and not _looks_like_video(demo_url):
+            demo_url = None
+        if highlight_url and not _looks_like_video(highlight_url):
+            highlight_url = None
+        cover_url = cover_image_for_exercise(ex, mmap)
+        out[ex.id] = {
+            "cover_url": cover_url,
+            "demo_url": demo_url,
+            "highlight_url": highlight_url,
+            "thumb_url": cover_url or demo_url or highlight_url,
+            "muscle": ex.muscle,
+            "has_video": bool(demo_url or highlight_url),
+        }
+    return out
 
 
 def _public_list_item(ex: Exercise, media_map: dict[str, ExerciseMedia]) -> dict[str, Any]:
@@ -231,6 +288,17 @@ def get_public_exercise(session: Session, exercise_id: str) -> dict[str, Any] | 
         )
     ).all()
 
+    from app.brain.knowledge import TARGET_ZH
+
+    secondary_zh: list[str] = []
+    for item in ex.secondary_muscles or []:
+        key = str(item or "").strip().lower()
+        if not key:
+            continue
+        label = TARGET_ZH.get(key) or str(item).strip()
+        if label and label not in secondary_zh and label != ex.muscle:
+            secondary_zh.append(label)
+
     return {
         "id": ex.id,
         "name_zh": ex.name_zh,
@@ -245,6 +313,8 @@ def get_public_exercise(session: Session, exercise_id: str) -> dict[str, Any] | 
         "instructions_zh": ex.instructions_zh or [],
         "cues_zh": ex.cues_zh or [],
         "common_mistakes_zh": ex.common_mistakes_zh or [],
+        "secondary_muscles": list(ex.secondary_muscles or []),
+        "secondary_muscles_zh": secondary_zh,
         "aliases": [a.alias for a in aliases],
         "slots": slots,
     }

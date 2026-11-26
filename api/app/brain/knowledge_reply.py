@@ -24,6 +24,7 @@ KNOWLEDGE_SYSTEM = """【知识问答】
 4) 若给了某一条动作的段落，目标肌用段落里的中文，不要换成别的肌群。问做法时用中文复述步骤，不要整句抄英文。
 5) 有伤痛时先说风险和能做的降风险办法，不要鼓励冲击大重量，不要做医学诊断。
 6) 【训练统计】只在用户问自己的次数、重量、记录时引用。没问就不要提，也不要因为写着「暂无」就说没有来源。
+7) 【部位热力/周节奏】有则只在问进度、哪里练得少、明天练啥、恢复时引用；没有记录就说没有，不要编天数或次数。
 
 【格式】
 严格只输出 JSON：{"text":"你的中文回复"}
@@ -44,7 +45,7 @@ basis 只能取这些名字：训练经验、长期目标、每周、伤痛、�
 档案不是「无」时，basis 不能是空数组。
 text 里的理由要能对上 basis 里的字段。不要只说「都行」「看你自己」就结束。
 不要把档位、目标当称呼。不要排成一堂课（不要同时给出动作名单、组数和重量）。
-有伤痛且和这问有关时，basis 带上「伤痛」。问到自己的记录时，没有记录就说明没有，不要编。
+有伤痛且和这问有关时，basis 带上「伤痛」。问到自己的记录/进度/哪里练得少时，引用【训练统计】与【部位热力/周节奏】；没有记录就说明没有，不要编。
 
 【格式】
 严格只输出 JSON：{"basis":["训练经验"],"text":"你的中文回复"}
@@ -189,15 +190,76 @@ def collect_training_stats(session: Any, intent: Any, question: str, stats_fixtu
     return stats_text, payload
 
 
+def format_progress_brief(session: Any) -> str:
+    """部位热力 + 本周节奏摘要，供 recall/decide 注入；无记录时明确说暂无。"""
+    from datetime import date
+
+    from app.services.analytics_service import build_dashboard
+
+    try:
+        dash = build_dashboard(session, today=date.today(), period="week")
+    except Exception:  # noqa: BLE001
+        return "（暂无训练场次，无法汇总部位热力与周节奏；没有记录不要编数字。）"
+
+    pulse = dash.get("muscle_pulse") or []
+    week = dash.get("week") or {}
+    lines: list[str] = []
+    trained = week.get("trained_days")
+    target = week.get("target_days")
+    if trained is not None and target is not None:
+        lines.append(f"本周已练 {trained}/{target} 天")
+    elif not pulse:
+        return "（暂无训练场次，无法汇总部位热力与周节奏；没有记录不要编数字。）"
+
+    status_zh = {"fresh": "刚练", "ok": "正常", "overdue": "偏久", "idle": "未练"}
+    bits: list[str] = []
+    for row in pulse:
+        m = row.get("muscle")
+        if not m:
+            continue
+        ds = row.get("days_since")
+        st = status_zh.get(str(row.get("status") or ""), str(row.get("status") or ""))
+        cnt = row.get("count_30d") or 0
+        if ds is None:
+            bits.append(f"{m}=未练(30天{cnt}次)")
+        else:
+            bits.append(f"{m}={ds}天前/{st}(30天{cnt}次)")
+    if bits:
+        lines.append("部位：" + "；".join(bits))
+    return "\n".join(lines) if lines else "（暂无部位热力数据；没有记录不要编数字。）"
+
+
+def _allow_inline_video(grounding: dict[str, Any], intent: Any) -> bool:
+    """仅 kb 单条精确命中才内联示范视频；ask/decide/recall/多候选只挂静态卡。"""
+    branch = grounding.get("branch")
+    if branch != "kb":
+        return False
+    qa_kind = str((intent.params or {}).get("qa_kind") or "").strip()
+    if qa_kind in ("decide", "recall", "compare"):
+        return False
+    kb = grounding.get("kb") or {}
+    hits = list(kb.get("hits") or [])
+    near = list(kb.get("near_miss") or [])
+    return len(hits) == 1 and not near
+
+
 def build_exercise_ref_card(
     session: Any,
     grounding: dict[str, Any],
     intent: Any,
     *,
     limit: int = 3,
+    allow_inline_video: bool | None = None,
 ) -> dict[str, Any] | None:
-    """知识问答命中动作时，挂可点进详情的动作卡（无命中则不挂）。"""
-    from app.services.public_catalog import resolve_by_names, thumbs_by_ids
+    """知识问答命中动作时，挂可点进详情的动作卡（无命中则不挂）。
+
+    现状：ask / decide / kb 等分支都可能挂卡（含 near_miss、focus_exercises）。
+    内联视频仅在 allow_inline_video 为真时写入 demo/highlight 字段。
+    """
+    from app.services.public_catalog import media_pack_by_ids, resolve_by_names
+
+    if allow_inline_video is None:
+        allow_inline_video = _allow_inline_video(grounding, intent)
 
     candidates: list[tuple[str, str | None]] = []  # (name, id?)
     kb = grounding.get("kb") or {}
@@ -241,27 +303,42 @@ def build_exercise_ref_card(
     if not rows:
         return None
 
-    # 补齐仅有 id、尚未取缩略图的条目
-    missing_thumb_ids = [r["id"] for r in rows if not r.get("thumb_url")]
-    if missing_thumb_ids:
-        thumbs = thumbs_by_ids(session, missing_thumb_ids)
-        for row in rows:
-            if not row.get("thumb_url"):
-                row["thumb_url"] = thumbs.get(row["id"])
+    packs = media_pack_by_ids(session, [r["id"] for r in rows])
+    for row in rows:
+        pack = packs.get(row["id"]) or {}
+        # 卡片缩略图优先封面图，避免 demo MP4 进 <img>
+        row["thumb_url"] = pack.get("cover_url") or pack.get("thumb_url") or row.get("thumb_url")
+        row["cover_url"] = pack.get("cover_url")
+        row["demo_url"] = pack.get("demo_url") if allow_inline_video else None
+        row["highlight_url"] = pack.get("highlight_url") if allow_inline_video else None
+        row["muscle"] = pack.get("muscle")
+        row["has_video"] = bool(
+            allow_inline_video and (row.get("demo_url") or row.get("highlight_url"))
+        )
 
-    items = [
-        {
-            "id": f"ex-{row['id']}",
-            "title": row["name_zh"],
-            "subtitle": "查看示范与要领",
-            "selected": True,
-            "meta": {
-                "exercise_id": row["id"],
-                "thumb_url": row.get("thumb_url"),
-            },
-        }
-        for row in rows
-    ]
+    items = []
+    for row in rows:
+        muscle = str(row.get("muscle") or "").strip()
+        subtitle = "查看示范与要领"
+        if muscle:
+            subtitle = f"{subtitle} · {muscle}"
+        items.append(
+            {
+                "id": f"ex-{row['id']}",
+                "title": row["name_zh"],
+                "subtitle": subtitle,
+                "selected": True,
+                "meta": {
+                    "exercise_id": row["id"],
+                    "thumb_url": row.get("thumb_url"),
+                    "cover_url": row.get("cover_url"),
+                    "demo_url": row.get("demo_url"),
+                    "highlight_url": row.get("highlight_url"),
+                    "has_video": bool(row.get("has_video")),
+                    "muscle": row.get("muscle"),
+                },
+            }
+        )
     title = rows[0]["name_zh"] if len(rows) == 1 else f"{len(rows)} 个相关动作"
     return {
         "kind": "card",
@@ -270,7 +347,10 @@ def build_exercise_ref_card(
         "status": "draft",
         "items": items,
         "actions": [],
-        "meta": {"source": "knowledge"},
+        "meta": {
+            "source": "knowledge",
+            "inline_video": bool(allow_inline_video and any(r.get("has_video") for r in rows)),
+        },
     }
 
 
@@ -279,8 +359,15 @@ def _with_exercise_card(
     session: Any,
     grounding: dict[str, Any],
     intent: Any,
+    *,
+    allow_inline_video: bool | None = None,
 ) -> dict[str, Any]:
-    card = build_exercise_ref_card(session, grounding, intent)
+    card = build_exercise_ref_card(
+        session,
+        grounding,
+        intent,
+        allow_inline_video=allow_inline_video,
+    )
     if not card:
         return result
     blocks = list(result.get("blocks") or [])
@@ -353,7 +440,7 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
 
     if branch == "ask":
         text = str(grounding.get("answer") or "").strip() or "你说的是哪一个动作？"
-        # 消歧阶段若已有候选命中，也挂上动作卡方便点选查看
+        # 消歧：挂静态多候选卡，不内联视频
         return _with_exercise_card(
             _finish_reply(
                 started,
@@ -365,6 +452,7 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
             session,
             grounding,
             intent,
+            allow_inline_video=False,
         )
 
     # kb「练哪里」也走模型：库只供 passage，不再回固定句。
@@ -378,15 +466,20 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
         question,
         stats_fixture=state.get("stats_fixture") or None,
     )
+    qa_kind = intent.params.get("qa_kind")
+    progress_text = ""
+    if qa_kind in ("recall", "decide") and not state.get("stats_fixture"):
+        progress_text = format_progress_brief(session)
 
-    if intent.params.get("qa_kind") == "decide":
+    if qa_kind == "decide":
+        progress_block = f"\n【部位热力/周节奏】\n{progress_text}" if progress_text else ""
         prompt = build_worker_context(
             session,
             question,
             state.get("history"),
             None,
             None,
-            f"【长期记忆】\n{profile_text}\n【训练统计】\n{stats_text or '（暂无）'}",
+            f"【长期记忆】\n{profile_text}\n【训练统计】\n{stats_text or '（暂无）'}{progress_block}",
             state.get("intent", {}).get("formatted") or "",
         )
         parse_ok = True
@@ -414,6 +507,7 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
             session,
             grounding,
             intent,
+            allow_inline_video=False,
         )
 
     injured = bool(profile is not None and profile.injuries)
@@ -421,13 +515,14 @@ async def knowledge_reply_node(state: dict[str, Any]) -> dict[str, Any]:
     injuries = ""
     if injured and profile is not None:
         injuries = "学员伤痛：" + "、".join(profile.injuries) + "。回答动作时要避开这些风险。\n"
+    progress_block = f"【部位热力/周节奏】\n{progress_text}\n" if progress_text else ""
     prompt = build_worker_context(
         session,
         question,
         state.get("history"),
         None,
         None,
-        f"【长期记忆】\n{profile_text}\n【训练统计】\n{stats_text or '（暂无）'}\n{injuries}{extra}",
+        f"【长期记忆】\n{profile_text}\n【训练统计】\n{stats_text or '（暂无）'}\n{progress_block}{injuries}{extra}",
         state.get("intent", {}).get("formatted") or "",
     )
     parse_ok = True

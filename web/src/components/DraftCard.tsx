@@ -142,6 +142,12 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
       );
       if (!ok) return;
     }
+    if (todayStatus === "active" && !forceReplaceDone) {
+      const ok = confirm(
+        "今日已有进行中的训练场次，采纳将替换今日安排（历史已完成记录保留，跟练进度不受影响），确定替换吗？",
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       const planTemplateId =

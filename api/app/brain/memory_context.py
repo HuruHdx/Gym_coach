@@ -296,6 +296,8 @@ def load_conversation_messages(session: Session, conversation_id: str | None = N
                 "card": card,
                 "suggestions": _suggestions(row.suggestions),
                 "created_at": created,
+                "turn_id": row.id,
+                "trace_id": row.trace_id,
             }
         )
     return {"conversation_id": cid, "messages": messages}
@@ -370,7 +372,7 @@ def build_intent_context(
     today_turns, past = split_turns(session, user_text, history)
     parts: list[str] = []
     if include_profile:
-        parts.append("【长期记忆】\n" + format_profile_for_llm(profile))
+        parts.append("【长期记忆】\n" + format_profile_for_llm(profile, session=session))
     past_block = format_past(past)
     if past_block:
         parts.append(past_block)
@@ -404,6 +406,7 @@ def save_exchange(
     blocks: list[Any],
     *,
     suggestions: list[Any] | None = None,
+    trace_id: int | None = None,
 ) -> int | None:
     """一轮来回追加入当前 conversation，不覆盖旧记录。"""
     today = date.today()
@@ -422,20 +425,30 @@ def save_exchange(
     card_title = None
     card_items: list[str] = []
     card_payload: dict[str, Any] | None = None
+    companion_cards: list[dict[str, Any]] = []
     for block in blocks:
         kind = block.get("kind") if isinstance(block, dict) else getattr(block, "kind", None)
         if kind == "text" and not text:
             text = block.get("text") if isinstance(block, dict) else getattr(block, "text", "")
-        if kind == "card" and card_title is None:
-            if isinstance(block, dict):
-                card_payload = dict(block)
-                card_title = block.get("title")
-                items = block.get("items") or []
-            else:
-                card_payload = block.model_dump(mode="json") if hasattr(block, "model_dump") else None
-                card_title = getattr(block, "title", None)
-                items = getattr(block, "items", []) or []
+        if kind != "card":
+            continue
+        if isinstance(block, dict):
+            payload = dict(block)
+        else:
+            payload = block.model_dump(mode="json") if hasattr(block, "model_dump") else None
+        if not isinstance(payload, dict):
+            continue
+        if card_payload is None:
+            card_payload = payload
+            card_title = payload.get("title")
+            items = payload.get("items") or []
             card_items = [_item_name(item) for item in items if _item_name(item)]
+        else:
+            companion_cards.append(payload)
+    if card_payload is not None and companion_cards:
+        meta = dict(card_payload.get("meta") or {})
+        meta["companion_cards"] = companion_cards
+        card_payload["meta"] = meta
     tip_rows: list[dict[str, Any]] = []
     for tip in suggestions or []:
         if isinstance(tip, dict):
@@ -457,6 +470,7 @@ def save_exchange(
         card_items=card_items,
         card=card_payload,
         suggestions=tip_rows,
+        trace_id=trace_id,
     )
     session.add(assistant)
     session.commit()

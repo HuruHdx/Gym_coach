@@ -152,10 +152,36 @@ def _as_name_list(value: Any) -> list[str]:
     return out
 
 
+def _following_soft_line(session: Session | None, profile: Profile | None) -> str | None:
+    """跟练软背景：仅作上下文，不加硬门禁。"""
+    if session is None or profile is None:
+        return None
+    active_id = getattr(profile, "active_plan_id", None)
+    if not active_id:
+        return None
+    try:
+        from app.services.plan_service import get_following_progress
+
+        following = get_following_progress(session)
+    except Exception:
+        return None
+    if not following.get("active_plan_id"):
+        return None
+    plan = following.get("plan") or {}
+    title = str(plan.get("title") or "").strip() or str(active_id)
+    week = following.get("week") or {}
+    next_block = week.get("next_block") or {}
+    next_title = str(next_block.get("title") or "").strip()
+    if next_title:
+        return f"当前跟练：《{title}》（下一板块：{next_title}）"
+    return f"当前跟练：《{title}》"
+
+
 def format_profile_for_llm(
     profile: Profile | None,
     *,
     modalities: list[str] | None = None,
+    session: Session | None = None,
 ) -> str:
     """档案数据本身。字段怎么用写在系统提示词里，不放进用户消息。"""
     del modalities  # 课型不再决定档案里藏哪些字段
@@ -183,6 +209,9 @@ def format_profile_for_llm(
     )
     if avoid:
         line += f"；以后避开：{'、'.join(avoid)}"
+    follow = _following_soft_line(session, profile)
+    if follow:
+        line += f"；{follow}"
     return f"档案：{line}"
 
 
@@ -190,9 +219,10 @@ def build_profile_summary(
     profile: Profile | None,
     *,
     modalities: list[str] | None = None,
+    session: Session | None = None,
 ) -> str:
     """兼容旧调用；实际拼进提示词时优先用 format_profile_for_llm。"""
-    return format_profile_for_llm(profile, modalities=modalities)
+    return format_profile_for_llm(profile, modalities=modalities, session=session)
 
 
 def _utterance_session_minutes(raw: str) -> int | None:
@@ -775,6 +805,7 @@ def format_intent_for_prompt(intent: Intent, profile: Profile | None = None) -> 
 def _format_stat_line(s: ExerciseStats) -> str:
     feel_str = f" 体感={s.last_feeling}" if s.last_feeling else ""
     outcome_str = f" 表现={s.last_outcome}" if s.last_outcome else ""
+    e1rm = f" 估1RM={s.estimate_1rm:g}" if getattr(s, "estimate_1rm", None) is not None else ""
     if s.last_weight is not None:
         load = f"{s.last_weight}kg×{s.last_reps or '-'}"
         best = f"最好={s.best_weight}" if s.best_weight is not None else ""
@@ -782,7 +813,7 @@ def _format_stat_line(s: ExerciseStats) -> str:
         load = f"{s.last_reps or '-'}次/段"
         best = ""
     tail = f" {best} 趋势={s.trend}".strip() if best else f" 趋势={s.trend}"
-    return f"{s.exercise_name}: 上次={load}{feel_str}{outcome_str}{tail}"
+    return f"{s.exercise_name}: 上次={load}{feel_str}{outcome_str}{e1rm}{tail}"
 
 
 def _stats_match_modalities(name: str, want: list[str]) -> bool:

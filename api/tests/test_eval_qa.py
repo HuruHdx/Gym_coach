@@ -2,6 +2,7 @@
 
 import asyncio
 
+from app.brain import knowledge
 from app.brain.memory import Intent
 from app.routers.brain import eval_qa
 from app.schemas import EvalQaRequest
@@ -24,6 +25,10 @@ def _intent(text: str, **_kwargs):
 
 
 def _run(monkeypatch, payload: dict) -> dict:
+    # 隔离后台 DB 别名：评测走纯内存库，不读业务 ExerciseAlias 表
+    monkeypatch.setattr(knowledge, "_load_db_aliases", False)
+    knowledge.reload_index()
+
     async def fake(text: str, **kwargs):
         return _intent(text, **kwargs)
 

@@ -66,6 +66,21 @@ class MockLLM(LLMClient):
         temperature: float = TEMPERATURE_COPY,
     ) -> dict[str, Any]:
         # 意图改写槽：与规则解析对齐，便于本地 hybrid 稳定可测；接真模型后走真实语义
+        if "【AI_OPS_MISS_DIAGNOSE】" in system:
+            return {
+                "verdict": "has_match",
+                "reason": "mock：候选里有相近动作，优先绑别名。",
+                "suggested_candidates": [],
+                "suggested_alias": None,
+            }
+
+        if "【AI_OPS_FEEDBACK_DIAGNOSE】" in system:
+            return {
+                "root_cause": "bad_answer",
+                "fix_hint": "mock：导出 inbox 后补断言。",
+                "assert_draft": "type: javascript\nvalue: file://assertions/shape.js",
+            }
+
         if "【ADMIN_EXERCISE_DRAFT】" in system:
             fields: dict[str, str] = {}
             for line in user.splitlines():
@@ -428,7 +443,7 @@ class MockLLM(LLMClient):
             note += f" 器械限制：{'/'.join(equipment_allow)}。"
         plan_title = _mock_plan_title(label)
         return {
-            "text": f"按你的画像和「{text[:40]}」排好了「{plan_title}」。{note}不需要的动作取消勾选后再采纳。",
+            "text": f"按你的情况和「{text[:40]}」排好了「{plan_title}」。{note}不需要的动作取消勾选后再采纳。",
             "card": {
                 "card_type": "training_draft",
                 "title": plan_title,

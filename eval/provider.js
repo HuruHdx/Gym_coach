@@ -52,7 +52,7 @@ class GymCoachEvalProvider {
     // 意图评测不生成回答，表格里的 output 空着就只剩 PASS。把分类写出来。
     const output =
       mode === 'intent'
-        ? `topic=${intent.topic || '-'}  domain=${intent.domain || '-'}  route=${data.route || '-'}`
+        ? `topic=${intent.topic || '-'}  domain=${intent.domain || '-'}  plan_kind=${intent.plan_kind || '-'}  route=${data.route || '-'}`
         : data.answer;
 
     return {

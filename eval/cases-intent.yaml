@@ -340,3 +340,31 @@
     - type: javascript
       value: file://assertions/topic.js
       config: {topic: chitchat}
+
+# ── 计划子类边界（成品模板 vs 今日草稿）────────────────────────────────
+- description: "I40 边界：适合我的计划 → 荐模板（未点部位）"
+  tags: [intent, plan, plan_kind, boundary, p0]
+  vars:
+    question: "能否给我安排个适合我的计划呢"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan, plan_kind: recommend_plan, route: recommend}
+
+- description: "I41 边界：今天练胸 → 今日草稿（点部位；模板可由附卡补充）"
+  tags: [intent, plan, plan_kind, boundary, p0]
+  vars:
+    question: "今天练胸"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan, plan_kind: today_session, route: ["plan", "clarify"]}
+
+- description: "I42 边界：女生向计划 → 仍是荐模板（场景归库内标签由模型闭集填，本条只锁 plan_kind）"
+  tags: [intent, plan, plan_kind, boundary]
+  vars:
+    question: "想要女生那种训练计划"
+  assert:
+    - type: javascript
+      value: file://assertions/topic.js
+      config: {topic: plan, plan_kind: recommend_plan, route: recommend}

@@ -293,6 +293,9 @@ FEEDBACK_TAGS = (
     "wrong_route",
     "bad_answer",
     "bad_plan",
+    "bad_recommend",
+    "multi_turn_lost",
+    "multi_intent_miss",
     "tone",
     "other",
 )

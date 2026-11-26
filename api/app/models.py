@@ -206,6 +206,8 @@ class TrainingSetLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: int = Field(index=True)
     exercise_name: str = Field(index=True)
+    # 渐进双写：有 SKU 时写入；旧记录可空，统计仍可按 exercise_name 聚合
+    exercise_id: Optional[str] = Field(default=None, index=True, max_length=32)
     muscle: Optional[str] = None
     exercise_order: int = 0
     set_index: int
@@ -262,6 +264,8 @@ class ChatTurn(SQLModel, table=True):
     # 完整卡片 JSON，供前端从库还原草稿勾选/重量
     card: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     suggestions: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    # 助手轮对应的 DebugTrace.id；刷新后仍可点赞踩
+    trace_id: Optional[int] = Field(default=None, index=True)
     created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
@@ -297,6 +301,20 @@ class FeedbackEvent(SQLModel, table=True):
     answer: str = ""
     snapshot: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     export_status: str = Field(default="pending", index=True)  # pending | exported | discarded
+    ai_diagnosis: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+
+
+class AiOpsMissState(SQLModel, table=True):
+    """未命中动作词处理状态（绑别名 / 新建 SKU / 忽略）。"""
+
+    __tablename__ = "ai_ops_miss_states"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    norm_query: str = Field(index=True, unique=True, max_length=120)
+    status: str = Field(default="pending", index=True, max_length=24)  # pending|bound|created_sku|ignored
+    bound_exercise_id: Optional[str] = Field(default=None, max_length=32)
+    note: Optional[str] = Field(default=None, max_length=500)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 # ---------- Plan templates（后台配置 → H5 展开成今日草稿） ----------

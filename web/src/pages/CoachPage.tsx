@@ -14,10 +14,15 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { COACH_NAME } from "../lib/brand";
+import {
+  isTestFeedbackEnabled,
+  TEST_FEEDBACK_EVENT,
+} from "../lib/testFeedback";
 import { CoachMark } from "../components/CoachMark";
 import { DraftCard } from "../components/DraftCard";
 import { ExerciseRefCards } from "../components/ExerciseRefCards";
 import { MessageFeedback } from "../components/MessageFeedback";
+import { PlanRecommendCard } from "../components/PlanRecommendCard";
 import { feedbackError, toast } from "../feedback";
 import type {
   AgentReply,
@@ -49,6 +54,8 @@ type ChatMessage =
       text: string;
       elapsedSec?: number;
       card?: CardBlock;
+      /** 同条回复附加卡（如草稿后的相关模板） */
+      companionCards?: CardBlock[];
       suggestions?: Suggestion[];
       awaitingConfirm?: boolean;
       traceId?: number | null;
@@ -106,9 +113,10 @@ function asSuggestions(raw: ConversationMessage["suggestions"]): Suggestion[] | 
   return items.length ? items : undefined;
 }
 
-function asCard(raw: ConversationMessage["card"]): CardBlock | undefined {
+function asCard(raw: ConversationMessage["card"] | unknown): CardBlock | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  return { ...raw, status: raw.status || "draft" };
+  const card = raw as CardBlock;
+  return { ...card, status: card.status || "draft" };
 }
 
 function fromApiMessages(rows: ConversationMessage[]): ChatMessage[] {
@@ -122,15 +130,24 @@ function fromApiMessages(rows: ConversationMessage[]): ChatMessage[] {
       };
     }
     const card = asCard(row.card);
+    const rawCompanions = Array.isArray(card?.meta?.companion_cards)
+      ? (card?.meta?.companion_cards as unknown[])
+      : [];
+    const companionCards = rawCompanions
+      .map((item) => asCard(item))
+      .filter((item): item is CardBlock => Boolean(item));
     const suggestions = asSuggestions(row.suggestions);
     return {
       id: row.id,
       role: "assistant" as const,
       text: row.text,
       card,
+      companionCards: companionCards.length ? companionCards : undefined,
       suggestions,
       awaitingConfirm: Boolean(suggestions?.length) && !card,
       createdAt: createdAtMs(row.created_at),
+      turnId: row.turn_id ?? null,
+      traceId: row.trace_id ?? null,
     };
   });
 }
@@ -252,6 +269,17 @@ export function CoachPage({ profile }: Props) {
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [testFeedbackOn, setTestFeedbackOn] = useState(() => isTestFeedbackEnabled());
+
+  useEffect(() => {
+    const sync = () => setTestFeedbackOn(isTestFeedbackEnabled());
+    window.addEventListener("storage", sync);
+    window.addEventListener(TEST_FEEDBACK_EVENT, sync);
+    return () => {
+      window.removeEventListener("storage", sync);
+      window.removeEventListener(TEST_FEEDBACK_EVENT, sync);
+    };
+  }, []);
 
   // 换账号后必须重新灌库，不能沿用上一用户的 hydrated 气泡
   useEffect(() => {
@@ -325,6 +353,7 @@ export function CoachPage({ profile }: Props) {
         .find(
           (m): m is Extract<ChatMessage, { role: "assistant" }> =>
             m.role === "assistant" &&
+            m.card?.card_type === "training_draft" &&
             Boolean(m.card?.items?.length) &&
             !isDraftLocked(m.card?.status),
         );
@@ -349,11 +378,17 @@ export function CoachPage({ profile }: Props) {
       const draftCard = reply.blocks.find(
         (b): b is CardBlock => b.kind === "card" && b.card_type === "training_draft",
       );
+      const planRecommendCards = reply.blocks.filter(
+        (b): b is CardBlock => b.kind === "card" && b.card_type === "plan_recommend",
+      );
       const exerciseCard = reply.blocks.find(
         (b): b is CardBlock => b.kind === "card" && b.card_type === "exercise_ref",
       );
-      // 排课草稿优先；否则挂知识问答动作卡
-      const cardBlock = draftCard || exerciseCard;
+      // 草稿为主；可同条附模板卡。无草稿时模板/动作卡作主卡。
+      const cardBlock = draftCard || planRecommendCards[0] || exerciseCard;
+      const companionCards = draftCard
+        ? planRecommendCards
+        : planRecommendCards.slice(1);
 
       clearInterval(timer);
 
@@ -366,6 +401,9 @@ export function CoachPage({ profile }: Props) {
                 text: textBlock?.text || "训练计划已为你定制生成。",
                 card: cardBlock
                   ? { ...cardBlock, status: cardBlock.status || "draft" }
+                  : undefined,
+                companionCards: companionCards.length
+                  ? companionCards.map((c) => ({ ...c, status: c.status || "draft" }))
                   : undefined,
                 suggestions: reply.suggestions,
                 awaitingConfirm:
@@ -580,6 +618,8 @@ export function CoachPage({ profile }: Props) {
                           <div className="mb-1 text-micro font-medium text-muted">
                             {m.card?.card_type === "training_draft"
                               ? `已按画像排好 · ${m.elapsedSec}s`
+                              : m.card?.card_type === "plan_recommend"
+                                ? `挑了可跟计划 · ${m.elapsedSec}s`
                               : m.awaitingConfirm
                                 ? `先跟你确认 · ${m.elapsedSec}s`
                                 : `${m.elapsedSec}s`}
@@ -588,7 +628,9 @@ export function CoachPage({ profile }: Props) {
                         <p className="text-meta leading-relaxed text-ink">{m.text}</p>
                       </div>
 
-                      {m.traceId != null && <MessageFeedback traceId={m.traceId} />}
+                      {testFeedbackOn && (m.traceId != null || m.turnId != null) && (
+                        <MessageFeedback traceId={m.traceId} turnId={m.turnId} />
+                      )}
 
                       {m.suggestions && m.suggestions.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -623,11 +665,25 @@ export function CoachPage({ profile }: Props) {
                         </div>
                       )}
 
+                      {m.card && m.card.card_type === "plan_recommend" && (
+                        <div className="mt-2.5">
+                          <PlanRecommendCard card={m.card} />
+                        </div>
+                      )}
+
+                      {(m.companionCards || []).map((extra, idx) =>
+                        extra.card_type === "plan_recommend" ? (
+                          <div key={`${m.id}-extra-${idx}`} className="mt-2.5">
+                            <PlanRecommendCard card={extra} />
+                          </div>
+                        ) : null,
+                      )}
+
                       {m.card && m.card.card_type === "exercise_ref" && (
                         <ExerciseRefCards card={m.card} />
                       )}
 
-                      {m.traceId != null && (
+                      {testFeedbackOn && m.traceId != null && (
                         <div className="mt-1.5 text-right">
                           <span className="text-micro text-muted">调试轨迹 #{m.traceId}</span>
                         </div>

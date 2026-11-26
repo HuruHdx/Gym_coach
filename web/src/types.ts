@@ -60,6 +60,8 @@ export type ConversationMessage = {
   card?: CardBlock | null;
   suggestions?: Suggestion[];
   created_at?: string | null;
+  turn_id?: number | null;
+  trace_id?: number | null;
 };
 
 export type ConversationState = {

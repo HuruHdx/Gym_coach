@@ -252,6 +252,9 @@ def tool_get_related_stats(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
                 "last_weight": s.last_weight,
                 "last_reps": s.last_reps,
                 "trend": s.trend,
+                "last_feeling": s.last_feeling,
+                "last_outcome": s.last_outcome,
+                "estimate_1rm": s.estimate_1rm,
             }
         )
         if len(lines) >= limit:

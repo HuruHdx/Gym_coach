@@ -144,6 +144,7 @@ def _eval_body(state: dict) -> dict:
             "muscles": intent.get("muscles") or [],
             "focus_exercises": focus or [],
             "qa_kind": params.get("qa_kind"),
+            "plan_kind": params.get("plan_kind"),
             "rewrite": params.get("rewrite") or "",
         },
         "stats": state.get("stats") or {

@@ -364,6 +364,7 @@ async def run_chat_pipeline(
         user_text,
         [block.model_dump(mode="json") for block in blocks],
         suggestions=[item.model_dump() for item in suggestions],
+        trace_id=trace.id,
     )
     return AgentReply(blocks=blocks, suggestions=suggestions, trace_id=trace.id, turn_id=turn_id)
 

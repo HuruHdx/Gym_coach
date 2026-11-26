@@ -309,6 +309,7 @@ def add_exercise_to_today(
         row = TrainingSetLog(
             session_id=sess.id or 0,
             exercise_name=exercise_name,
+            exercise_id=ex.id if ex else None,
             muscle=muscle,
             exercise_order=next_order,
             set_index=i,
@@ -370,7 +371,10 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
     session.commit()
     session.refresh(sess)
 
+    from app.services.public_catalog import resolve_by_names
+
     set_rows: list[TrainingSetLog] = []
+    name_ids = resolve_by_names(session, [canonicalize_exercise(it.title) for it in selected])
     for order, item in enumerate(selected, start=1):
         name = canonicalize_exercise(item.title)
         muscle = _muscle_for_item(item)
@@ -378,6 +382,13 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
         warmup_n = _warmup_sets_for_item(item)
         weight = _weight_for_item(item)
         reps = _reps_for_item(item)
+        meta = item.meta if isinstance(getattr(item, "meta", None), dict) else {}
+        eid = meta.get("exercise_id") if isinstance(meta, dict) else None
+        if not isinstance(eid, str) or not eid.strip():
+            hit = name_ids.get(name) or name_ids.get(item.title)
+            eid = hit.get("id") if isinstance(hit, dict) else None
+        else:
+            eid = eid.strip()
         # seed MyExercise
         existing = session.exec(select(MyExercise).where(MyExercise.name == name)).first()
         if not existing:
@@ -387,6 +398,7 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
             row = TrainingSetLog(
                 session_id=sess.id or 0,
                 exercise_name=name,
+                exercise_id=eid,
                 muscle=muscle,
                 exercise_order=order,
                 set_index=set_index,
@@ -402,6 +414,7 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
             row = TrainingSetLog(
                 session_id=sess.id or 0,
                 exercise_name=name,
+                exercise_id=eid,
                 muscle=muscle,
                 exercise_order=order,
                 set_index=set_index,

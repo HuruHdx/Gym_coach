@@ -6,15 +6,19 @@ const DOWN_TAGS: { id: string; label: string }[] = [
   { id: "wrong_route", label: "路由错" },
   { id: "bad_answer", label: "回答差" },
   { id: "bad_plan", label: "课表差" },
+  { id: "bad_recommend", label: "荐计划差" },
+  { id: "multi_turn_lost", label: "多轮忘上下文" },
+  { id: "multi_intent_miss", label: "多意图漏了" },
   { id: "tone", label: "语气怪" },
   { id: "other", label: "其他" },
 ];
 
 type Props = {
-  traceId: number;
+  traceId?: number | null;
+  turnId?: number | null;
 };
 
-export function MessageFeedback({ traceId }: Props) {
+export function MessageFeedback({ traceId, turnId }: Props) {
   const [rating, setRating] = useState<"up" | "down" | null>(null);
   const [openDown, setOpenDown] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
@@ -22,6 +26,8 @@ export function MessageFeedback({ traceId }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+
+  if (traceId == null && turnId == null) return null;
 
   async function send(next: "up" | "down", nextTags: string[], nextNote: string) {
     setBusy(true);
@@ -33,7 +39,8 @@ export function MessageFeedback({ traceId }: Props) {
           rating: next,
           tags: next === "down" ? nextTags : [],
           note: next === "down" ? nextNote : "",
-          trace_id: traceId,
+          ...(traceId != null ? { trace_id: traceId } : {}),
+          ...(turnId != null ? { assistant_turn_id: turnId } : {}),
         }),
       });
       setRating(next);

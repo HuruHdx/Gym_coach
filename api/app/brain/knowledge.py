@@ -135,6 +135,10 @@ _ready = False
 _docs: list["Doc"] = []
 _by_norm: dict[str, list["Doc"]] = {}
 _by_alias: dict[str, list["Doc"]] = {}
+# 后台 ExerciseAlias / register_alias 写入；优先于家族名解释，保证绑别名热生效
+_priority_alias: dict[str, list["Doc"]] = {}
+# 评测/单测可置 False，隔离后台 DB 别名来源，保证内存知识库纯净（不读业务库）
+_load_db_aliases: bool = True
 _by_en: dict[str, list["Doc"]] = {}
 _substrings: set[str] = set()
 
@@ -324,20 +328,76 @@ def ensure_index() -> None:
                 _index_alias("杠铃卧推", doc)
             if name == "徒手深蹲":
                 _index_alias("深蹲", doc)
+
+        # 后台绑的 ExerciseAlias → 普通索引 + 优先索引（热生效 / 重启后仍可用）
+        docs_by_id = {d.id: d for d in docs if d.id}
+        priority: dict[str, list[Doc]] = {}
+        if _load_db_aliases:
+            try:
+                from sqlmodel import Session, select
+
+                from app.db import engine
+                from app.models import ExerciseAlias
+
+                with Session(engine) as session:
+                    alias_rows = session.exec(
+                        select(ExerciseAlias).where(ExerciseAlias.status == "published")
+                    ).all()
+                for row in alias_rows:
+                    doc = docs_by_id.get(row.exercise_id or "")
+                    if doc is None:
+                        continue
+                    alias_text = str(row.alias or "").strip()
+                    if not alias_text:
+                        continue
+                    _index_alias(alias_text, doc)
+                    pnorm = normalize_exercise_name(alias_text)
+                    if pnorm and pnorm != doc.norm:
+                        bucket = priority.setdefault(pnorm, [])
+                        if doc not in bucket:
+                            bucket.append(doc)
+            except Exception:
+                pass
+
         for bucket in by_norm.values():
             bucket.sort(key=lambda d: d.id)
         for bucket in by_alias.values():
+            bucket.sort(key=lambda d: d.id)
+        for bucket in priority.values():
             bucket.sort(key=lambda d: d.id)
         _docs[:] = docs
         _by_norm.clear()
         _by_norm.update(by_norm)
         _by_alias.clear()
         _by_alias.update(by_alias)
+        _priority_alias.clear()
+        _priority_alias.update(priority)
         _by_en.clear()
         _by_en.update(by_en)
         _substrings.clear()
         _substrings.update(subs)
         _ready = True
+
+
+def register_alias(exercise_id: str, alias: str) -> bool:
+    """立刻把一条别名挂进内存索引（绑别名后热生效，不必等整表重建）。"""
+    ensure_index()
+    surface = (alias or "").strip()
+    eid = (exercise_id or "").strip()
+    if not surface or not eid:
+        return False
+    with _lock:
+        doc = next((d for d in _docs if d.id == eid), None)
+        if doc is None:
+            return False
+        norm = normalize_exercise_name(surface)
+        if not norm or norm == doc.norm:
+            return False
+        for store in (_by_alias, _priority_alias):
+            bucket = store.setdefault(norm, [])
+            if doc not in bucket:
+                bucket.append(doc)
+        return True
 
 
 def reload_index() -> None:
@@ -348,6 +408,7 @@ def reload_index() -> None:
         _docs.clear()
         _by_norm.clear()
         _by_alias.clear()
+        _priority_alias.clear()
         _by_en.clear()
         _substrings.clear()
     ensure_index()
@@ -820,13 +881,22 @@ def ground_question(question: str, history: list[Any] | None = None) -> Groundin
     if core and not looks_like_exercise_name(core) and core in _by_norm:
         return _search("anatomy", question)
 
+    # 后台绑的别名优先于家族名（JSON 内置别名仍走后面的普通别名路径）
+    if core:
+        pri_norm = normalize_exercise_name(core)
+        pri_hits = [
+            d for d in (_priority_alias.get(pri_norm) or []) if looks_like_exercise_name(d.name_zh)
+        ]
+        if len(pri_hits) == 1 or (pri_hits and len({d.norm for d in pri_hits}) == 1):
+            return _kb(pri_hits, "alias", spoken=core)
+
     needle = _needle(core) if core else ""
     if needle and needle == core:
         return _family(needle)
     similar = _similar_docs(core) if core else []
     if similar:
         return _ask(core or question, similar, missing_name=True)
-    # 别名精确命中放在家族名/相似反问之后，避免「坐姿划船」这类泛称被单个别名锁死
+    # JSON 别名精确命中放在家族名/相似反问之后，避免「坐姿划船」这类泛称被单个别名锁死
     alias_hits = _alias_docs(core) if core else []
     if len(alias_hits) == 1 or (alias_hits and len({d.norm for d in alias_hits}) == 1):
         return _kb(alias_hits, "alias", spoken=core)

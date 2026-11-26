@@ -119,7 +119,9 @@ def _step(node: str, started: float, **output: Any) -> dict[str, Any]:
     }
 
 
-def _pick_route(intent: Intent, has_draft: bool) -> Literal["clarify", "plan", "chat", "nutrition"]:
+def _pick_route(
+    intent: Intent, has_draft: bool
+) -> Literal["clarify", "plan", "chat", "nutrition", "recommend"]:
     params = intent.params or {}
     topic = params.get("topic")
     domain = params.get("domain")
@@ -129,6 +131,8 @@ def _pick_route(intent: Intent, has_draft: bool) -> Literal["clarify", "plan", "
     if topic == "plan":
         if domain == "nutrition":
             return "nutrition"
+        if params.get("plan_kind") == "recommend_plan":
+            return "recommend"
         if has_draft and is_draft_revision_safe(intent):
             return "plan"
         return "clarify" if needs_clarification(intent, has_draft=has_draft) else "plan"
@@ -167,6 +171,8 @@ async def rewrite_intent_node(state: ChatState) -> dict[str, Any]:
         profile,
         include_profile=False,
     )
+    from app.brain.plan_recommend import published_scene_tags
+
     intent = bind_rejected_draft_item(
         apply_profile_defaults(
             await rewrite_intent(
@@ -175,6 +181,7 @@ async def rewrite_intent_node(state: ChatState) -> dict[str, Any]:
                 history=state.get("history") or [],
                 context=context,
                 draft_title=state.get("draft_title"),
+                plan_scenes=published_scene_tags(_session()),
             ),
             profile,
         ),
@@ -225,6 +232,68 @@ async def rewrite_intent_node(state: ChatState) -> dict[str, Any]:
             intent=formatted,
         ),
     }
+
+
+async def recommend_plans_node(state: ChatState) -> dict[str, Any]:
+    """荐模板：不进动作库 plan_loop / validate。
+
+    空库或无匹配时不反问用户，改走今日草稿兜底（有画像就直接排）。
+    """
+    started = time.perf_counter()
+    from app.brain.plan_recommend import recommend_plans_reply
+
+    intent = _intent(state["intent"])
+    payload = recommend_plans_reply(_session(), intent)
+    blocks = list(payload.get("blocks") or [])
+    suggestions = list(payload.get("suggestions") or [])
+    grounding = dict(payload.get("grounding") or {})
+    grounding.setdefault("branch", "recommend")
+    text = ""
+    for block in blocks:
+        if isinstance(block, dict) and block.get("kind") == "text" and block.get("text"):
+            text = str(block["text"])
+            break
+
+    if grounding.get("fallback_to_today"):
+        intent_payload = dict(state.get("intent") or {})
+        params = dict(intent_payload.get("params") or {})
+        params["plan_kind"] = "today_session"
+        params["recommend_fallback"] = grounding.get("branch")
+        # 有画像时抬 ready，避免再被 clarify 拦一层问部位
+        params["ready"] = True
+        intent_payload["params"] = params
+        return {
+            "intent": intent_payload,
+            "route": "plan",
+            "blocks": [],
+            "suggestions": [],
+            "grounding": grounding,
+            **_step(
+                "recommend_plans",
+                started,
+                text="fallback_to_today",
+                fallback=grounding.get("branch"),
+            ),
+        }
+
+    return {
+        "blocks": blocks,
+        "suggestions": suggestions,
+        "grounding": grounding,
+        **_step(
+            "recommend_plans",
+            started,
+            text=text,
+            suggestions=[s.get("label") for s in suggestions if isinstance(s, dict)],
+            recommended_plan_ids=grounding.get("recommended_plan_ids") or [],
+        ),
+    }
+
+
+def _after_recommend(state: ChatState) -> Literal["assemble_memory", "done"]:
+    if (state.get("grounding") or {}).get("fallback_to_today"):
+        return "assemble_memory"
+    return "done"
 
 
 async def clarify_node(state: ChatState) -> dict[str, Any]:
@@ -355,11 +424,31 @@ async def draft_plan_node(state: ChatState) -> dict[str, Any]:
 
 
 _MEMORY_CUES = ("上次", "上一次", "我的记录", "体重", "涨了", "最近重量")
+# 进度/部位类走知识问答 + muscle_pulse，不要被「最近」等词误打进死模板 memory 分支
+_PROGRESS_CUES = (
+    "练得少",
+    "哪里少",
+    "哪块少",
+    "最近进度",
+    "练没练",
+    "明天练",
+    "这周练",
+    "本周练",
+    "部位",
+    "恢复",
+    "该练",
+    "多久没练",
+    "热力",
+)
 _NUTRITION_TEXT = "营养师还没上线。饮食相关以后会单独接；现在先问训练计划或动作问题。"
 
 
 def _is_memory_question(text: str) -> bool:
     return any(cue in (text or "") for cue in _MEMORY_CUES)
+
+
+def _is_progress_question(text: str) -> bool:
+    return any(cue in (text or "") for cue in _PROGRESS_CUES)
 
 
 def _answer_from_records(hits: list[dict[str, Any]]) -> str:
@@ -395,7 +484,9 @@ async def ground_knowledge_node(state: ChatState) -> dict[str, Any]:
     elif intent.params.get("topic") == "chitchat":
         # 闲聊不查动作库、不调搜索，直接走 LLM 接话
         decided = Grounding(branch="llm", reason="chitchat", queried=False, hit=False)
-    elif _is_memory_question(state.get("user_text") or ""):
+    elif _is_memory_question(state.get("user_text") or "") and not _is_progress_question(
+        state.get("user_text") or ""
+    ):
         decided = Grounding(branch="memory", reason="not_queried", queried=False, hit=False)
     else:
         decided = ground_question(state.get("user_text") or "", state.get("history"))
@@ -509,7 +600,12 @@ async def chat_reply_node(state: ChatState) -> dict[str, Any]:
                 text = "档案里还没填体重，记一笔后再问我。"
             else:
                 text = f"你的体重是{profile.weight_kg:g}公斤。"
-            return _finish_reply(started, grounding, text, profile_text=build_profile_summary(profile))
+            return _finish_reply(
+                started,
+                grounding,
+                text,
+                profile_text=build_profile_summary(profile, session=_session()),
+            )
         from app.brain.knowledge_reply import collect_training_stats
 
         _stats_text, stats = collect_training_stats(
@@ -519,7 +615,12 @@ async def chat_reply_node(state: ChatState) -> dict[str, Any]:
             stats_fixture=state.get("stats_fixture") or None,
         )
         text = _answer_from_records(stats.get("hits") or [])
-        reply = _finish_reply(started, grounding, text, profile_text=build_profile_summary(profile))
+        reply = _finish_reply(
+            started,
+            grounding,
+            text,
+            profile_text=build_profile_summary(profile, session=_session()),
+        )
         reply["stats"] = stats
         return reply
 
@@ -605,6 +706,37 @@ async def validate_node(state: ChatState) -> dict[str, Any]:
     ):
         blocks = _trim_to_request(blocks, intent)
     dumped = [block.model_dump(mode="json") for block in blocks]
+    # 荐模板空库/无匹配兜底：说明一句，直接给草稿，不让用户再选部位
+    if intent.params.get("recommend_fallback"):
+        note = "暂时没有合适的现成计划，我先按你的目标和习惯排一场，确认后就能练。"
+        prefixed = False
+        for block in dumped:
+            if block.get("kind") == "text" and block.get("text"):
+                text = str(block["text"])
+                if note not in text:
+                    block["text"] = f"{note} {text.rstrip()}"
+                prefixed = True
+                break
+        if not prefixed:
+            dumped.insert(0, {"kind": "text", "text": note})
+    # 有草稿卡时，按结构化部位附 1～2 套相关成品模板（库中无则不加）
+    has_draft = any(b.get("kind") == "card" and b.get("card_type") == "training_draft" for b in dumped)
+    if has_draft and intent.params.get("plan_kind") != "recommend_plan" and not intent.params.get(
+        "recommend_fallback"
+    ):
+        from app.brain.plan_recommend import related_plan_card_blocks
+
+        attached = related_plan_card_blocks(_session(), muscles=list(intent.muscles), limit=2)
+        if attached:
+            dumped.extend(attached)
+            # 主文案后补一句，避免抢过草稿确认
+            for block in dumped:
+                if block.get("kind") == "text" and block.get("text"):
+                    tip = "下面还有相关完整计划可跟，不跟也行，先确认这场动作即可。"
+                    text = str(block["text"])
+                    if tip not in text:
+                        block["text"] = f"{text.rstrip()} {tip}"
+                    break
     titles = [b.get("title") for b in dumped if b.get("kind") == "card"]
     return {
         "blocks": dumped,
@@ -620,11 +752,13 @@ def _after_ground(state: ChatState) -> Literal["chat_reply", "knowledge_reply"]:
     return "knowledge_reply"
 
 
-def _route(state: ChatState) -> Literal["clarify", "plan", "chat", "nutrition", "eval_shortcut", "intent_only"]:
+def _route(
+    state: ChatState,
+) -> Literal["clarify", "plan", "chat", "nutrition", "recommend", "eval_shortcut", "intent_only"]:
     if state.get("intent_only"):
         return "intent_only"
     route = state.get("route") or "plan"
-    if state.get("eval_mode") and route in ("plan", "clarify", "nutrition"):
+    if state.get("eval_mode") and route in ("plan", "clarify", "nutrition", "recommend"):
         return "eval_shortcut"
     return route
 
@@ -668,6 +802,7 @@ def build_chat_graph():
     graph.add_node("eval_shortcut", eval_shortcut_node)
     graph.add_node("intent_only", intent_only_node)
     graph.add_node("nutrition_reply", nutrition_reply_node)
+    graph.add_node("recommend_plans", recommend_plans_node)
     graph.set_entry_point("rewrite_intent")
     graph.add_conditional_edges(
         "rewrite_intent",
@@ -677,6 +812,7 @@ def build_chat_graph():
             "plan": "assemble_memory",
             "chat": "ground_knowledge",
             "nutrition": "nutrition_reply",
+            "recommend": "recommend_plans",
             "eval_shortcut": "eval_shortcut",
             "intent_only": "intent_only",
         },
@@ -692,6 +828,11 @@ def build_chat_graph():
     graph.add_edge("chat_reply", END)
     graph.add_edge("knowledge_reply", END)
     graph.add_edge("nutrition_reply", END)
+    graph.add_conditional_edges(
+        "recommend_plans",
+        _after_recommend,
+        {"assemble_memory": "assemble_memory", "done": END},
+    )
     graph.add_edge("assemble_memory", "draft_plan")
     graph.add_edge("draft_plan", "validate")
     graph.add_edge("validate", END)

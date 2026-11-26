@@ -6,6 +6,7 @@ import { api, fetchPlans } from "../lib/api";
 import { planCadenceLabel, planCornerBadge, planMuscleLine } from "../lib/planCardMeta";
 import { Sparkline } from "../components/dashboard/TrainingDashboard";
 import type { DashboardPeriod } from "../components/dashboard/TrainingDashboard";
+import { MuscleHeatmapCard } from "../components/dashboard/MuscleHeatmapCard";
 import type { PlanTemplateCard, TrainingDashboard as DashboardData, TrainingSession } from "../types";
 
 export function TrainingPage() {
@@ -127,6 +128,9 @@ export function TrainingPage() {
           {period === "month" ? "本月还没练，去今日页开一场吧。" : "本周还没练，去今日页开一场吧。"}
         </p>
       )}
+
+      <SectionHead title="近期部位分布" />
+      <MuscleHeatmapCard pulse={dashboard?.muscle_pulse} />
 
       {/* 计划库预览 */}
       <SectionHead title="计划库" more="全部 ›" onMore={() => navigate("/plans")} />

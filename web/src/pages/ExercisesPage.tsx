@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronLeft, Search, X } from "lucide-react";
 import { api } from "../lib/api";
@@ -30,9 +30,15 @@ const MODALITY_OPTIONS = ["抗阻", "有氧", "HIIT", "灵活性"] as const;
 
 export function ExercisesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const muscleFromUrl = searchParams.get("muscle");
+  const initialMuscle =
+    muscleFromUrl && (MUSCLE_OPTIONS as readonly string[]).includes(muscleFromUrl)
+      ? muscleFromUrl
+      : "全部";
   const [draftQ, setDraftQ] = useState("");
   const [q, setQ] = useState("");
-  const [muscle, setMuscle] = useState("全部");
+  const [muscle, setMuscle] = useState(initialMuscle);
   const [gear, setGear] = useState<string | null>(null);
   const [modality, setModality] = useState<string | null>(null);
   const [coreOnly, setCoreOnly] = useState(false);

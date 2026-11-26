@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { LoopClip } from "../components/LoopClip";
+import { MuscleFocusDiagram } from "../components/MuscleFocusDiagram";
 import { api } from "../lib/api";
 import type { TrainingSession } from "../types";
 
@@ -22,6 +23,7 @@ type CatalogDetail = {
   instructions_zh: string[];
   cues_zh: string[];
   common_mistakes_zh: string[];
+  secondary_muscles_zh?: string[];
   aliases: string[];
   slots: Slot[];
 };
@@ -227,6 +229,14 @@ export function ExerciseDetailPage() {
             {risks.length > 0 ? (
               <p className="mt-2 text-[12px] text-muted">关节注意：{risks.join(" · ")}</p>
             ) : null}
+          </div>
+
+          <div className="mt-4 px-4">
+            <MuscleFocusDiagram
+              primary={data.muscle}
+              secondary={data.secondary_muscles_zh || []}
+              subRegion={data.sub_region}
+            />
           </div>
 
           <section className="mt-5 px-4">

@@ -22,6 +22,7 @@ ALLOWED_TOPICS = {"plan", "qa", "chitchat"}
 ALLOWED_DOMAINS = {"training", "nutrition", "general"}
 # qa 上的回答合同。不是新的 topic，也不看学员档案。
 ALLOWED_QA_KINDS = {"explain", "recall", "decide"}
+ALLOWED_PLAN_KINDS = {"today_session", "recommend_plan"}
 # topic 决定分流。nutrition 不再是一级分类，只作为 domain。
 TOPIC_TO_AGENT = {"plan": "coach_plan", "qa": "coach_chat", "chitchat": "coach_chat"}
 ALLOWED_GOALS = {"增肌", "减脂", "力量", "塑形", "恢复"}
@@ -65,6 +66,13 @@ INTENT_REWRITE_SYSTEM = """【INTENT_REWRITE】
 - recall：查自己的次数、重量、记录、体重、目标。
 - decide：做选择或给个人建议（先练哪个、一周几次、加不加、吃多少、能不能做）。要的是决定，不是当堂课表。
 
+【二-附、计划子类 plan_kind（仅 topic="plan" 且 domain=training 时填写）】
+- today_session：点了部位，或要排这一场/今天怎么练、改草稿（如「练胸」「今天练背」「只有30分钟排一场」）。
+- recommend_plan：要成品可跟课表/长期安排，且未点具体部位开练（如「安排个适合我的计划」「推荐一套计划」「想跟某类课表」）。
+- 对已有草稿的 draft_relation 为 confirm/revise/fresh 时，plan_kind 填 today_session。
+- domain=nutrition 或 topic≠plan 时 plan_kind 填 null。
+- plan_scene：仅 recommend_plan 时可填。必须是下方「计划库场景标签闭集」之一，或 null。把用户口头人群/场景诉求归到库内已有标签（如库有「女性专项」且用户要女生向计划则填该标签）；库中没有对应标签就填 null，禁止发明标签名。
+
 【二、草稿关系：draft_relation 与 session_target】
 短期记忆是今天到上一轮为止的对话，教练给出的计划草稿嵌在其中（「更早会话」仅用于理解昨天/上次的指代，不算今日草稿）。
 - 当短期记忆里没有草稿，或本句是在问知识/查数据/闲聊/排饮食时：draft_relation 和 session_target 均填 null。
@@ -99,14 +107,17 @@ INTENT_REWRITE_SYSTEM = """【INTENT_REWRITE】
 
 【四、输出格式】
 严格只输出以下单行 JSON，不要代码块或多余文字：
-{"topic":"plan|qa|chitchat","domain":"training|nutrition|general","qa_kind":"explain"|"recall"|"decide"|null,"goal":"增肌"|"减脂"|"力量"|"塑形"|"恢复"|null,"modality":["抗阻"|"有氧"|"HIIT"|"灵活性"]|null,"muscles":["胸"|"背"|"肩"|"腿"|"臂"|"核心"|"全身"],"split":"上半身"|"下半身"|"推日"|"拉日"|null,"equipment":["自重"|"自由重量"|"器械"|"绳索"]|null,"fatigue":false,"minutes":null,"intensity":"low"|"high"|null,"focus_exercises":["深蹲"]|null,"exclude_exercises":["划船机"]|null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"confirm"|"revise"|"fresh"|null,"session_target":"keep"|"switch"|"ask"|null,"rewrite":"一句话客观描述本轮诉求"}
+{"topic":"plan|qa|chitchat","domain":"training|nutrition|general","qa_kind":"explain"|"recall"|"decide"|null,"plan_kind":"today_session"|"recommend_plan"|null,"plan_scene":null,"goal":"增肌"|"减脂"|"力量"|"塑形"|"恢复"|null,"modality":["抗阻"|"有氧"|"HIIT"|"灵活性"]|null,"muscles":["胸"|"背"|"肩"|"腿"|"臂"|"核心"|"全身"],"split":"上半身"|"下半身"|"推日"|"拉日"|null,"equipment":["自重"|"自由重量"|"器械"|"绳索"]|null,"fatigue":false,"minutes":null,"intensity":"low"|"high"|null,"focus_exercises":["深蹲"]|null,"exclude_exercises":["划船机"]|null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"confirm"|"revise"|"fresh"|null,"session_target":"keep"|"switch"|"ask"|null,"rewrite":"一句话客观描述本轮诉求"}
 
 【五、示例】
-- 「今天随便出出汗」→ {"topic":"plan","domain":"training","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"想运动出汗，课型与部位未说明"}
-- 「今天练腿，主攻股四头肌」→ {"topic":"plan","domain":"training","goal":null,"modality":["抗阻"],"muscles":["腿"],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":true,"rewrite":"腿部抗阻，主攻股四头肌"}
-- 「这次就做深蹲和硬拉两个动作，别的不用排」→ {"topic":"plan","domain":"training","goal":null,"modality":["抗阻"],"muscles":["腿"],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":["深蹲","硬拉"],"exclude_exercises":null,"exclusive_focus":true,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"只安排深蹲与硬拉"}
-- 「帮我定一份一日三餐减脂食谱」→ {"topic":"plan","domain":"nutrition","goal":"减脂","modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"安排减脂饮食计划"}
-- 短期记忆已有草稿，用户：「健身房没划船机，把这个换掉」→ {"topic":"plan","domain":"training","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":["划船机"],"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"revise","session_target":null,"rewrite":"在当前计划里替换不可用的划船机"}
+- 「今天随便出出汗」→ {"topic":"plan","domain":"training","plan_kind":"today_session","plan_scene":null,"goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"想运动出汗，课型与部位未说明"}
+- 「今天练腿，主攻股四头肌」→ {"topic":"plan","domain":"training","plan_kind":"today_session","plan_scene":null,"goal":null,"modality":["抗阻"],"muscles":["腿"],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":true,"rewrite":"腿部抗阻，主攻股四头肌"}
+- 「这次就做深蹲和硬拉两个动作，别的不用排」→ {"topic":"plan","domain":"training","plan_kind":"today_session","plan_scene":null,"goal":null,"modality":["抗阻"],"muscles":["腿"],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":["深蹲","硬拉"],"exclude_exercises":null,"exclusive_focus":true,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"只安排深蹲与硬拉"}
+- 「能否给我安排个适合我的计划」→ {"topic":"plan","domain":"training","plan_kind":"recommend_plan","plan_scene":null,"goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"想要一套适合自己的可跟计划"}
+- 「推荐个增肌计划」→ {"topic":"plan","domain":"training","plan_kind":"recommend_plan","plan_scene":null,"goal":"增肌","modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"想要一套增肌向可跟计划"}
+- 「想要女生那种训练计划」（且闭集含「女性专项」）→ {"topic":"plan","domain":"training","plan_kind":"recommend_plan","plan_scene":"女性专项","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"想要女性向可跟计划"}
+- 「帮我定一份一日三餐减脂食谱」→ {"topic":"plan","domain":"nutrition","plan_kind":null,"goal":"减脂","modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":null,"session_target":null,"rewrite":"安排减脂饮食计划"}
+- 短期记忆已有草稿，用户：「健身房没划船机，把这个换掉」→ {"topic":"plan","domain":"training","plan_kind":"today_session","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":["划船机"],"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"revise","session_target":null,"rewrite":"在当前计划里替换不可用的划船机"}
 - 短期记忆已有草稿，用户：「行，就按这套来」→ {"topic":"plan","domain":"training","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"confirm","session_target":null,"rewrite":"确认使用当前计划"}
 - 短期记忆已有腿部草稿，用户：「这套不行，换个计划」→ {"topic":"plan","domain":"training","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"fresh","session_target":"ask","rewrite":"对当前计划不满意，部位去留未说明"}
 - 短期记忆已有腿部草稿，用户：「还是练腿，但把动作全换一套」→ {"topic":"plan","domain":"training","goal":null,"modality":null,"muscles":[],"split":null,"equipment":null,"fatigue":false,"minutes":null,"intensity":null,"focus_exercises":null,"exclude_exercises":null,"exclusive_focus":false,"has_focus_detail":false,"draft_relation":"fresh","session_target":"keep","rewrite":"部位不变，只换一套动作"}
@@ -221,6 +232,17 @@ def intent_from_model_json(raw: dict[str, Any], user_text: str) -> Intent:
     qa_kind = raw.get("qa_kind")
     if params.get("topic") == "qa" and isinstance(qa_kind, str) and qa_kind in ALLOWED_QA_KINDS:
         params["qa_kind"] = qa_kind
+    plan_kind = raw.get("plan_kind")
+    if (
+        params.get("topic") == "plan"
+        and params.get("domain") != "nutrition"
+        and isinstance(plan_kind, str)
+        and plan_kind in ALLOWED_PLAN_KINDS
+    ):
+        params["plan_kind"] = plan_kind
+    plan_scene = raw.get("plan_scene")
+    if isinstance(plan_scene, str) and plan_scene.strip():
+        params["plan_scene"] = plan_scene.strip()
 
     goal = _sanitize_goal(raw.get("goal"))
     if goal:
@@ -455,6 +477,16 @@ def merge_intents(rules: Intent, model: Intent) -> Intent:
     qa_kind = model.params.get("qa_kind")
     if params.get("topic") == "qa" and qa_kind in ALLOWED_QA_KINDS:
         params["qa_kind"] = qa_kind
+    plan_kind = model.params.get("plan_kind")
+    if (
+        params.get("topic") == "plan"
+        and params.get("domain") != "nutrition"
+        and plan_kind in ALLOWED_PLAN_KINDS
+    ):
+        params["plan_kind"] = plan_kind
+    plan_scene = model.params.get("plan_scene")
+    if isinstance(plan_scene, str) and plan_scene.strip():
+        params["plan_scene"] = plan_scene.strip()
 
     if agent == "coach_plan":
         ready = bool(model.params.get("ready")) if "ready" in model.params else False
@@ -471,6 +503,30 @@ def merge_intents(rules: Intent, model: Intent) -> Intent:
     )
 
 
+def _intent_system_with_plan_scenes(plan_scenes: list[str] | None) -> str:
+    """把当前库内场景标签拼进系统提示，作为 plan_scene 闭集。"""
+    tags = [str(s).strip() for s in (plan_scenes or []) if str(s).strip()]
+    if tags:
+        closed = "、".join(tags)
+        footer = (
+            f"\n【计划库场景标签闭集】plan_scene 只能是下列之一或 null，禁止发明：{closed}。\n"
+        )
+    else:
+        footer = "\n【计划库场景标签闭集】当前无已发布场景标签；plan_scene 一律填 null。\n"
+    return INTENT_REWRITE_SYSTEM + footer
+
+
+def _sanitize_plan_scene(value: Any, allowed: list[str] | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    tag = value.strip()
+    if not tag:
+        return None
+    if allowed is not None and tag not in allowed:
+        return None
+    return tag
+
+
 async def rewrite_intent(
     user_text: str,
     llm: LLMClient | None = None,
@@ -479,6 +535,7 @@ async def rewrite_intent(
     history: list[Any] | None = None,
     context: str | None = None,
     draft_title: str | None = None,
+    plan_scenes: list[str] | None = None,
 ) -> Intent:
     """入口：按配置用规则 / 模型 / 混合改写意图。context 是对话，不含档案。"""
     from app.brain.memory import format_dialogue_for_prompt
@@ -486,6 +543,7 @@ async def rewrite_intent(
     mode = mode or settings.intent_rewrite_mode  # type: ignore[assignment]
     rules = parse_intent(user_text)
     rules = _stamp_agent_fields(rules)
+    allowed_scenes = [str(s).strip() for s in (plan_scenes or []) if str(s).strip()]
 
     if mode == "rules":
         rules.params["source"] = "rules"
@@ -504,11 +562,16 @@ async def rewrite_intent(
     )
     try:
         raw = await client.complete_json(
-            INTENT_REWRITE_SYSTEM,
+            _intent_system_with_plan_scenes(allowed_scenes),
             user_payload,
             temperature=TEMPERATURE_STRUCTURED,
         )
         model_intent = intent_from_model_json(raw, user_text)
+        scene = _sanitize_plan_scene(model_intent.params.get("plan_scene"), allowed_scenes)
+        if scene:
+            model_intent.params["plan_scene"] = scene
+        else:
+            model_intent.params.pop("plan_scene", None)
     except Exception:  # noqa: BLE001
         rules.params["source"] = "rules_fallback"
         return _routed(rules, profile, history, draft_title, context)
@@ -539,6 +602,56 @@ async def rewrite_intent(
     )
 
 
+def apply_plan_kind(intent: Intent) -> Intent:
+    """规范化 plan_kind：草稿改写一律今日课；无模型结果时按结构兜底（有部位→今日，否则荐模板）。
+
+    不靠「命中某某计划」口语词表决定出模板。
+    """
+    params = dict(intent.params or {})
+    topic = params.get("topic")
+    domain = params.get("domain")
+    if topic != "plan" or domain == "nutrition":
+        params.pop("plan_kind", None)
+        params.pop("plan_scene", None)
+        return Intent(
+            expert=intent.expert,
+            muscles=list(intent.muscles),
+            raw=intent.raw,
+            params=params,
+        )
+
+    relation = params.get("draft_relation")
+    if relation in DRAFT_RELATIONS:
+        params["plan_kind"] = "today_session"
+        params.pop("plan_scene", None)
+        return Intent(
+            expert=intent.expert,
+            muscles=list(intent.muscles),
+            raw=intent.raw,
+            params=params,
+        )
+
+    kind = params.get("plan_kind")
+    if kind not in ALLOWED_PLAN_KINDS:
+        kind = None
+    # 结构兜底（仅模型未给 kind 时）：已抽出部位或本句时长 → 今日课；否则荐模板。
+    # 不覆盖模型显式 plan_kind；不靠「命中某某计划」词表。
+    if kind is None:
+        from app.brain.memory import _utterance_session_minutes
+
+        has_session = bool(intent.muscles) or _utterance_session_minutes(intent.raw) is not None
+        kind = "today_session" if has_session else "recommend_plan"
+    if kind != "recommend_plan":
+        params.pop("plan_scene", None)
+    params["plan_kind"] = kind
+    return Intent(
+        expert=intent.expert,
+        muscles=list(intent.muscles),
+        raw=intent.raw,
+        params=params,
+    )
+
+
 def _routed(
     intent: Intent,
     profile: Any | None,
@@ -547,7 +660,9 @@ def _routed(
     memory_text: str | None = None,
 ) -> Intent:
     """教练路由之后，再用草案关系盖住最终分流。confirm 不能被「练」字拉回去排课。"""
-    routed = apply_draft_relation(apply_coach_routing(intent, profile, history))
+    routed = apply_draft_relation(
+        apply_coach_routing(apply_plan_kind(intent), profile, history)
+    )
     return apply_session_target(routed, draft_title, history, memory_text)
 
 
@@ -1095,6 +1210,16 @@ def apply_coach_routing(
         return intent
 
     params = dict(intent.params or {})
+    # 荐模板走独立分支，跳过今日课空白/老炮追问
+    if params.get("plan_kind") == "recommend_plan":
+        params["ready"] = True
+        params.pop("tension", None)
+        return Intent(
+            expert=intent.expert,
+            muscles=list(intent.muscles),
+            raw=intent.raw,
+            params=params,
+        )
     raw = intent.raw or ""
 
     from app.exercises_catalog import looks_like_exercise_name
@@ -1210,6 +1335,8 @@ def needs_clarification(intent: Intent, has_draft: bool = False) -> bool:
     """出计划且存在张力/未就绪时反问。闲聊/营养不反问。"""
     agent = intent.params.get("agent") or EXPERT_TO_AGENT.get(intent.expert, "coach_chat")
     if agent != "coach_plan":
+        return False
+    if (intent.params or {}).get("plan_kind") == "recommend_plan":
         return False
     if has_draft and is_draft_revision(intent.raw, intent.params):
         return False

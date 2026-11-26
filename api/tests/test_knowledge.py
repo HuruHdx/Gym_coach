@@ -82,6 +82,13 @@ def test_spaced_version_matches_catalog_version():
 
 
 def test_family_name_is_explained_without_a_menu():
+    # 本地 DB 若已把「坐姿划船」绑成优先别名，会压过家族名解释；本测只验证 JSON 路径语义
+    from app.brain import knowledge as knowledge_mod
+    from app.taxonomy import normalize_exercise_name
+
+    knowledge_mod.ensure_index()
+    knowledge_mod._priority_alias.pop(normalize_exercise_name("坐姿划船"), None)
+
     g = ground_question("坐姿划船练哪里")
     assert g.branch == "knowledge"
     assert g.reason == "family"

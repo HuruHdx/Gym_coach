@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.models import ActiveChat, ChatTurn, DebugTrace, FeedbackEvent, utcnow
+from app.models import ActiveChat, ChatTurn, DebugTrace, FeedbackEvent, Profile, utcnow
 from app.schemas import FEEDBACK_TAGS, FeedbackRequest
 from app.tenancy import current_user_id, get_current_profile
 
@@ -30,6 +30,8 @@ def _intent_summary(intent: dict[str, Any] | None) -> dict[str, Any]:
         "domain": params.get("domain"),
         "muscles": list(data.get("muscles") or []),
         "focus_exercises": list(params.get("focus_exercises") or []),
+        "qa_kind": params.get("qa_kind"),
+        "plan_kind": params.get("plan_kind"),
         "rewrite": params.get("rewrite") or "",
     }
 
@@ -135,6 +137,27 @@ def build_snapshot(
     if not answer:
         answer = _text_from_blocks(blocks)
 
+    card_type: str | None = None
+    recommended_plan_ids: list[str] = []
+    card_for_meta = _card_from_turn(assistant_turn) if assistant_turn is not None else None
+    if not card_for_meta:
+        for block in blocks:
+            if isinstance(block, dict) and block.get("kind") == "card":
+                card_for_meta = block
+                break
+    if isinstance(card_for_meta, dict):
+        raw_type = card_for_meta.get("card_type")
+        if isinstance(raw_type, str) and raw_type.strip():
+            card_type = raw_type.strip()
+        if card_type == "plan_recommend":
+            for item in card_for_meta.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+                pid = meta.get("plan_id") or item.get("id")
+                if isinstance(pid, str) and pid.strip():
+                    recommended_plan_ids.append(pid.strip())
+
     return {
         "intent": _intent_summary(intent_raw if isinstance(intent_raw, dict) else {}),
         "route": graph.get("route"),
@@ -147,6 +170,8 @@ def build_snapshot(
         "profile": _profile_brief(profile),
         "suggestions": list(suggestions or []),
         "has_card": has_card or any(isinstance(b, dict) and b.get("kind") == "card" for b in blocks),
+        "card_type": card_type,
+        "recommended_plan_ids": recommended_plan_ids,
         "question": question,
         "answer": answer,
     }

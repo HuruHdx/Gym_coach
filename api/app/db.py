@@ -95,6 +95,7 @@ def _ensure_columns() -> None:
         ("chatturn", "conversation_id", "VARCHAR"),
         ("chatturn", "card", "TEXT"),
         ("chatturn", "suggestions", "TEXT"),
+        ("chatturn", "trace_id", "INTEGER"),
         # A0 enriched exercise columns
         ("exercises", "sub_region", "VARCHAR"),
         ("exercises", "movement_pattern", "VARCHAR"),
@@ -120,6 +121,8 @@ def _ensure_columns() -> None:
         ("plan_exercises", "cues_zh", "TEXT"),
         ("plan_exercises", "common_mistakes_zh", "TEXT"),
         ("trainingsetlog", "completed_at", "TIMESTAMP"),
+        ("trainingsetlog", "exercise_id", "VARCHAR"),
+        ("feedbackevent", "ai_diagnosis", "TEXT"),
     ]
     url = settings.database_url
 
@@ -141,6 +144,7 @@ def _ensure_columns() -> None:
             ("studio_tasks", "draft_json"),
             ("studio_tasks", "score"),
             ("studio_tasks", "result_ref"),
+            ("feedbackevent", "ai_diagnosis"),
         }:
             return "JSONB"
         return coltype
