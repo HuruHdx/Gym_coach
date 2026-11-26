@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-width="390" data-canvas-height="1020"
+      style="width:390px;height:1020px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #e9e7f0; color: #17161c; -webkit-font-smoothing: antialiased;
+  }
+  .screen { width: 390px; height: 1020px; background: #f4f3f8; position: relative; overflow: hidden; margin: 0 auto; }
+
+  /* 顶栏 */
+  .nav { display: flex; align-items: center; gap: 8px; padding: 18px 20px 10px; }
+  .nav-back { font-size: 12px; font-weight: 700; color: #6f6a8c; }
+  .nav-title { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+
+  .chat { padding: 6px 16px 24px; display: flex; flex-direction: column; gap: 18px; }
+
+  /* 气泡 */
+  .row { display: flex; gap: 10px; }
+  .avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; background: #eee9fb; color: #6c4be8;
+    font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+
+  .bubble { border: 1px solid #eceaf2; background: #fff; border-radius: 14px; padding: 12px 14px;
+    box-shadow: 0 1px 2px rgba(23,22,28,.05); }
+  .bubble p { margin: 0; font-size: 12.5px; line-height: 1.7; color: #383448; }
+  .bubble .q { align-self: flex-end; background: #17161c; color: #fff; border: none; border-radius: 14px 14px 4px 14px; padding: 9px 13px; max-width: 78%; }
+  .bubble .q p { color: #fff; }
+
+  .steps { margin: 2px 0 0; padding: 0; list-style: none; }
+  .steps li { display: flex; gap: 9px; font-size: 12.5px; line-height: 1.65; color: #383448; }
+  .steps li + li { margin-top: 7px; }
+  .steps .no { flex: none; width: 17px; height: 17px; border-radius: 6px; background: #efebfe; color: #6c4be8;
+    font-size: 10.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+
+  .hint { font-size: 10px; color: #9b97ad; margin-top: 8px; }
+
+  /* 动作卡 */
+  .card { border: 1px solid #eceaf2; background: #fff; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(23,22,28,.05); }
+  .video { position: relative; height: 150px; background: #ece8f5; display: flex; align-items: center; justify-content: center; }
+  .video svg { width: 46px; height: 46px; stroke: #b3abc9; }
+  .play { position: absolute; width: 46px; height: 46px; border-radius: 50%; background: rgba(124,92,246,.92);
+    display: flex; align-items: center; justify-content: center; }
+  .play svg { width: 18px; height: 18px; stroke: #fff; }
+  .duration { position: absolute; right: 10px; bottom: 10px; background: rgba(23,22,28,.78); color: #fff;
+    font-size: 10px; font-weight: 700; border-radius: 6px; padding: 3px 8px; }
+  .loop { position: absolute; left: 10px; bottom: 10px; background: rgba(23,22,28,.55); color: #fff;
+    font-size: 9px; font-weight: 700; border-radius: 6px; padding: 3px 7px; }
+
+  .card-body { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .thumb { flex: none; width: 44px; height: 44px; border-radius: 10px; background: #efebfe;
+    display: flex; align-items: center; justify-content: center; }
+  .thumb svg { width: 20px; height: 20px; stroke: #b3abc9; }
+  .card-main { flex: 1; min-width: 0; }
+  .card-title { font-size: 13.5px; font-weight: 800; letter-spacing: -.01em; }
+  .card-sub { font-size: 11px; color: #6b6875; margin-top: 3px; }
+  .card-go { flex: none; font-size: 11px; font-weight: 800; color: #6c4be8; }
+
+  .label { font-size: 10px; font-weight: 800; color: #9b97ad; letter-spacing: .04em; margin: 2px 2px -2px; }
+
+  .note { margin: 0 20px; font-size: 10.5px; color: #9b97ad; line-height: 1.6; }
+</style>
+</head>
+<body style="width:390px;height:1020px;">
+<main data-canvas-root style="width:390px;height:1020px;">
+  <div class="screen">
+    <div class="nav">
+      <div class="nav-back">‹</div>
+      <div class="nav-title">教练</div>
+    </div>
+
+    <div class="chat">
+
+      <!-- 状态一：命中动作 + 库里有视频 -->
+      <div class="row">
+        <div class="avatar">燃</div>
+        <div class="col">
+          <div class="bubble q"><p>平板卧推怎么做？</p></div>
+          <div class="bubble">
+            <ol class="steps">
+              <li><span class="no">1</span><span>躺平挺胸沉肩，双脚踩实，握距略宽于肩。</span></li>
+              <li><span class="no">2</span><span>哑铃/杠铃推到胸口正上方，手肘约 75° 不要完全锁死。</span></li>
+              <li><span class="no">3</span><span>下放碰到胸口中段，推起时呼气，别耸肩借力。</span></li>
+            </ol>
+            <div class="hint">下面这条是库里该动作的示范片段，点开可看动作轨迹。</div>
+          </div>
+          <div class="card">
+            <div class="video">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4"><path d="M12 3v18M3 12h18" stroke-linecap="round"/></svg>
+              <div class="play">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+              </div>
+              <div class="loop">静音循环</div>
+              <div class="duration">0:08</div>
+            </div>
+            <div class="card-body">
+              <div class="card-main">
+                <div class="card-title">平板杠铃卧推</div>
+                <div class="card-sub">查看示范与要领 · 胸大肌</div>
+              </div>
+              <div class="card-go">详情 ›</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态二：命中动作，但库里没有视频 -->
+      <div class="row">
+        <div class="avatar">燃</div>
+        <div class="col">
+          <div class="bubble q"><p>坐姿划船主要练哪？</p></div>
+          <div class="bubble">
+            <p>主要练背阔肌和上背，顺带练到肱二头肌。拉的时候肩胛骨先往后收，手肘贴身体两侧往后带，不要只靠手拽。</p>
+          </div>
+          <div class="label">相关动作（暂无示范视频）</div>
+          <div class="card">
+            <div class="card-body">
+              <div class="thumb">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M4 7h16M4 12h16M4 17h10" stroke-linecap="round"/></svg>
+              </div>
+              <div class="card-main">
+                <div class="card-title">坐姿划船</div>
+                <div class="card-sub">查看要领 · 背阔肌 / 上背</div>
+              </div>
+              <div class="card-go">详情 ›</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态三：库里没命中，兜底纯文字 -->
+      <div class="row">
+        <div class="avatar">燃</div>
+        <div class="col">
+          <div class="bubble q"><p>腘绳肌平时怎么放松？</p></div>
+          <div class="bubble">
+            <p>可以练完用泡沫轴沿着大腿后侧从膝盖到臀部慢慢滚，每个点停 20–30 秒；拉伸就坐姿前屈或站姿勾脚，感到后侧牵拉即可，别弹震。如果有刺痛或麻感就先停下。</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="note">示意：有示范视频才在卡片内联小窗播放；无视频只挂文字动作卡，不强塞图；未命中动作时纯文字兜底，不挂卡片。</p>
+  </div>
+</main>
+</body>
+</html>
