@@ -230,7 +230,26 @@ def _has_demo(session: Session, exercise_id: str) -> bool:
     )
 
 
-def _pack(ex: Exercise, score: int, reason: str, *, has_demo: bool) -> dict[str, Any]:
+def _has_highlight(session: Session, exercise_id: str) -> bool:
+    return bool(
+        session.exec(
+            select(ExerciseMedia).where(
+                ExerciseMedia.exercise_id == exercise_id,
+                ExerciseMedia.role == "highlight_video",
+                ExerciseMedia.status == "published",
+            )
+        ).first()
+    )
+
+
+def _pack(
+    ex: Exercise,
+    score: int,
+    reason: str,
+    *,
+    has_demo: bool,
+    has_highlight: bool = False,
+) -> dict[str, Any]:
     is_female = bool((ex.variant_of or "").strip())
     has_female = bool((ex.female_variant or "").strip()) and not is_female
     return {
@@ -239,6 +258,7 @@ def _pack(ex: Exercise, score: int, reason: str, *, has_demo: bool) -> dict[str,
         "muscle": ex.muscle,
         "gear": ex.gear,
         "has_demo": has_demo,
+        "has_highlight": has_highlight,
         "score": int(score),
         "reason": reason,
         "is_female_variant": is_female,
@@ -374,7 +394,15 @@ def match_spoken_candidates(
     out: list[dict[str, Any]] = []
     for item in ranked[:limit]:
         ex = item["ex"]
-        out.append(_pack(ex, item["score"], item["reason"], has_demo=_has_demo(session, ex.id)))
+        out.append(
+            _pack(
+                ex,
+                item["score"],
+                item["reason"],
+                has_demo=_has_demo(session, ex.id),
+                has_highlight=_has_highlight(session, ex.id),
+            )
+        )
     return out
 
 
@@ -482,6 +510,7 @@ def resolve_spoken_match(
                 "muscle": top["muscle"],
                 "gear": top["gear"],
                 "has_demo": top["has_demo"],
+                "has_highlight": bool(top.get("has_highlight")),
                 "confidence": top["score"] / 100.0,
                 "score": top["score"],
                 "reason": top["reason"],

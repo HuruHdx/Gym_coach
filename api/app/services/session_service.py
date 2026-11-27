@@ -148,13 +148,21 @@ def _sessions_q():
 
 
 def get_today_active(session: Session, day: date | None = None) -> Optional[SessionOut]:
+    """今日指针：优先最新 active（第 2 练进行中），否则最新 done。"""
     day = day or date.today()
     sess = session.exec(
         _sessions_q()
         .where(TrainingSession.session_date == day)
-        .where(or_(TrainingSession.status == "active", TrainingSession.status == "done"))
+        .where(TrainingSession.status == "active")
         .order_by(col(TrainingSession.id).desc())
     ).first()
+    if not sess:
+        sess = session.exec(
+            _sessions_q()
+            .where(TrainingSession.session_date == day)
+            .where(TrainingSession.status == "done")
+            .order_by(col(TrainingSession.id).desc())
+        ).first()
     if not sess:
         return None
     sets = list(session.exec(select(TrainingSetLog).where(TrainingSetLog.session_id == sess.id)).all())
@@ -238,24 +246,11 @@ def add_exercise_to_today(
     reps: str = "8-12",
     weight: float | None = None,
 ) -> SessionOut:
-    """把单个动作追加到今日 active 场次；没有则新建。今日已完成则 409。"""
+    """把单个动作追加到今日 active 场次；没有则新建加练（今日已完成也可再开一场）。"""
     from app.models import Exercise
     from app.services.public_catalog import resolve_by_names
 
     day = date.today()
-    if today_has_done(session, day):
-        # 若最新一场是 active，仍允许追加；仅当今日只有 done、无 active 时拒绝
-        active = session.exec(
-            _sessions_q()
-            .where(TrainingSession.session_date == day)
-            .where(TrainingSession.status == "active")
-            .order_by(col(TrainingSession.id).desc())
-        ).first()
-        if not active:
-            raise HTTPException(
-                status_code=409,
-                detail="今日训练已完成。如需再练，请到教练页重新采纳计划。",
-            )
 
     ex: Exercise | None = None
     if exercise_id:
@@ -335,16 +330,22 @@ def adopt_draft(session: Session, body: AdoptRequest) -> SessionOut:
     if not selected:
         selected = list(body.items)
 
-    if body.replace_today and today_has_done(session, day) and not body.force_replace_done:
-        raise HTTPException(
-            status_code=409,
-            detail="今日训练已完成。若要覆盖重来，请确认后使用 force_replace_done。",
-        )
-
-    if body.replace_today:
+    append_today = bool(body.append_today)
+    # 追加第 2 练：保留已完成；覆盖未完成仍走 replace 分支
+    if append_today:
+        # 若仍有 active，先强行清掉再开新场（不并行两条 active）
         abandon_today_active(session, day)
-        if body.force_replace_done:
-            abandon_today_done(session, day)
+    else:
+        if body.replace_today and today_has_done(session, day) and not body.force_replace_done:
+            raise HTTPException(
+                status_code=409,
+                detail="今日训练已完成。若要再开一场请用 append_today；若要覆盖重来请确认 force_replace_done。",
+            )
+
+        if body.replace_today:
+            abandon_today_active(session, day)
+            if body.force_replace_done:
+                abandon_today_done(session, day)
 
     split = body.split_label
     if not split and "·" in body.title:

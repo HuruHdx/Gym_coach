@@ -17,6 +17,10 @@ function planIdOf(item: CardBlock["items"][number]): string | null {
   return raw || null;
 }
 
+/**
+ * 荐计划卡：未跟练时可加入；一旦已有跟练，本卡只留查看（标明哪套是当前），
+ * 不再在聊天气泡里切换——换计划去计划库/详情。
+ */
 export function PlanRecommendCard({ card }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -26,7 +30,7 @@ export function PlanRecommendCard({ card }: Props) {
     queryFn: fetchFollowing,
   });
   const activePlanId = followingQuery.data?.active_plan_id ?? null;
-  /** 已经采纳过跟练：整张荐卡作废，不再当加入/切换入口 */
+  /** 已选过跟练：本张推荐卡结束加入流程，仅可查看 */
   const cardSpent = Boolean(activePlanId);
 
   async function onFollow(planId: string, title: string) {
@@ -46,18 +50,14 @@ export function PlanRecommendCard({ card }: Props) {
   }
 
   return (
-    <div
-      className={`rounded-lg border border-line bg-elevated p-3.5 shadow-card ${
-        cardSpent ? "opacity-80" : ""
-      }`}
-    >
+    <div className="rounded-lg border border-line bg-elevated p-3.5 shadow-card">
       <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">可跟计划</p>
       <h3 className="mt-1 font-display text-[17px] font-extrabold tracking-tight text-ink">
         {card.title || "为你挑了几套计划"}
       </h3>
       {cardSpent ? (
         <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
-          已有跟练中的计划，这张推荐不再使用。要换计划去计划库或详情页。
+          已选定跟练计划，这张推荐只可查看。要换计划去计划库或详情页。
         </p>
       ) : null}
       <ul className="mt-3 space-y-2.5">
@@ -67,10 +67,13 @@ export function PlanRecommendCard({ card }: Props) {
             typeof item.meta?.cover_url === "string" ? item.meta.cover_url : null;
           const scene =
             typeof item.meta?.scene_tag === "string" ? item.meta.scene_tag : null;
+          const isCurrent = Boolean(planId && activePlanId && planId === activePlanId);
           return (
             <li
               key={item.id}
-              className="overflow-hidden rounded-[14px] border border-line bg-bg"
+              className={`overflow-hidden rounded-[14px] border bg-bg ${
+                isCurrent ? "border-accent" : "border-line"
+              } ${cardSpent && !isCurrent ? "opacity-70" : ""}`}
             >
               <div className="flex gap-3 p-2.5">
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[var(--hero-a)] to-elevated">
@@ -79,7 +82,14 @@ export function PlanRecommendCard({ card }: Props) {
                   ) : null}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] font-extrabold text-ink">{item.title}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="truncate text-[14px] font-extrabold text-ink">{item.title}</p>
+                    {isCurrent ? (
+                      <span className="shrink-0 rounded-md bg-tint px-1.5 py-0.5 text-[10px] font-extrabold text-accent-text">
+                        ✓ 跟练中
+                      </span>
+                    ) : null}
+                  </div>
                   {item.subtitle ? (
                     <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-muted">
                       {item.subtitle}
@@ -94,7 +104,9 @@ export function PlanRecommendCard({ card }: Props) {
                 <button
                   type="button"
                   disabled={!planId || Boolean(busyId)}
-                  className="pressable flex-1 rounded-[10px] border border-line bg-elevated py-2 text-[12px] font-bold text-ink disabled:opacity-50"
+                  className={`pressable rounded-[10px] border border-line bg-elevated py-2 text-[12px] font-bold text-ink disabled:opacity-50 ${
+                    cardSpent ? "w-full" : "flex-1"
+                  }`}
                   onClick={() => {
                     if (planId) {
                       navigate(`/plans/${encodeURIComponent(planId)}`, {

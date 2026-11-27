@@ -127,24 +127,32 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
     setAdding(false);
   }
 
-  async function adopt(forceReplaceDone = false) {
+  async function adopt(opts?: { forceReplaceDone?: boolean; appendToday?: boolean }) {
+    const forceReplaceDone = Boolean(opts?.forceReplaceDone);
+    const appendToday = Boolean(opts?.appendToday);
     const selected = card.items.filter((i) => i.selected);
     if (!selected.length) {
       alert("至少勾选一个动作再采纳");
       return;
     }
-    if (todayDone && !forceReplaceDone) {
+    if (todayDone && !forceReplaceDone && !appendToday) {
       return;
     }
-    if (todayDone && forceReplaceDone) {
+    if (todayDone && appendToday) {
       const ok = confirm(
-        "今日训练已经完成并生成总结。再次采纳会覆盖今天的场次（原记录作废）。确定吗？",
+        "今天已完成过训练。将保留刚才的记录，再开一场新的训练，确定吗？",
       );
       if (!ok) return;
     }
-    if (todayStatus === "active" && !forceReplaceDone) {
+    if (todayDone && forceReplaceDone) {
       const ok = confirm(
-        "今日已有进行中的训练场次，采纳将替换今日安排（历史已完成记录保留，跟练进度不受影响），确定替换吗？",
+        "确定要取消今天已完成的训练记录并重新开练吗？原场次会作废，统计里不再计入。",
+      );
+      if (!ok) return;
+    }
+    if (todayStatus === "active" && !appendToday) {
+      const ok = confirm(
+        "当前还有未完成的训练。确定取消这场并重新开练吗？未完成的进度会作废。",
       );
       if (!ok) return;
     }
@@ -168,7 +176,8 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
               ? card.title.split("·").pop()?.trim()
               : card.title.replace(/训$/, "") || null),
           items: selected,
-          replace_today: true,
+          replace_today: !appendToday,
+          append_today: appendToday,
           force_replace_done: forceReplaceDone,
           plan_template_id: planTemplateId,
           plan_block_id: planBlockId,
@@ -498,28 +507,40 @@ export function DraftCard({ card, onChange, onAdopted, todayStatus = null }: Pro
         {todayDone ? (
           <div className="mt-4 space-y-2">
             <div className="rounded-lg border border-line bg-bg px-3 py-3 text-center">
-              <p className="font-display text-sm font-extrabold">今日已完成</p>
+              <p className="font-display text-sm font-extrabold">今日已完成过一场</p>
               <p className="mt-1 text-[11px] text-muted">
-                不能直接再采纳进今日。若真要重开一场，需明确覆盖。
+                可再开一场；刚才的记录会保留进历史。
               </p>
             </div>
             <button
               type="button"
               disabled={busy || !card.items.some((i) => i.selected)}
-              onClick={() => void adopt(true)}
-              className="pressable w-full rounded-lg border border-line py-3 text-xs font-bold text-muted disabled:opacity-50"
+              onClick={() => void adopt({ appendToday: true })}
+              className="pressable w-full rounded-lg bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink shadow-md disabled:opacity-50"
             >
-              {busy ? "处理中…" : "覆盖今日已完成场次并重新采纳"}
+              {busy ? "处理中…" : "作为今日第 2 练开练"}
+            </button>
+            <button
+              type="button"
+              disabled={busy || !card.items.some((i) => i.selected)}
+              onClick={() => void adopt({ forceReplaceDone: true })}
+              className="pressable w-full rounded-lg border border-line py-2.5 text-[11px] font-bold text-muted disabled:opacity-50"
+            >
+              取消今日已完成记录并重开
             </button>
           </div>
         ) : (
           <button
             type="button"
             disabled={busy || !card.items.some((i) => i.selected)}
-            onClick={() => void adopt(false)}
+            onClick={() => void adopt()}
             className="pressable mt-4 w-full rounded-lg bg-accent py-3.5 font-display text-sm font-extrabold text-accent-ink shadow-md disabled:opacity-50"
           >
-            {busy ? "正在采纳生成今日日程…" : "采纳 · 进入今日执行"}
+            {busy
+              ? "正在采纳生成今日日程…"
+              : todayStatus === "active"
+                ? "取消当前训练并重新开练"
+                : "采纳 · 进入今日执行"}
           </button>
         )}
       </div>

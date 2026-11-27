@@ -94,6 +94,15 @@ export function TodayPage() {
     queryKey: ["training-sessions"],
     queryFn: () => api<TrainingSession[]>("/api/training/sessions?limit=40"),
   });
+  const todayDoneCount = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return historySessions.filter(
+      (s) =>
+        s.status === "done" &&
+        s.source !== "rest" &&
+        String(s.session_date || "").slice(0, 10) === today,
+    ).length;
+  }, [historySessions]);
   const { data: following } = useQuery({
     queryKey: ["plans-following"],
     queryFn: fetchFollowing,
@@ -365,7 +374,10 @@ export function TodayPage() {
         {isDone ? (
           <>
             <p className="mt-3 text-[12px] font-semibold text-muted">
-              {sourceLine} · 本场已结束
+              {sourceLine}
+              {todayDoneCount > 1
+                ? ` · 今日已完成 ${todayDoneCount} 场 · 本场已结束`
+                : " · 本场已结束"}
             </p>
             <div className="mt-1.5 flex items-start justify-between gap-2">
               <h2 className="font-display text-[26px] font-extrabold tracking-tight">
@@ -419,9 +431,27 @@ export function TodayPage() {
                 unit={estimatedKcal != null ? "kcal" : ""}
               />
             </div>
-            <Link to="/recap" className="mt-3.5 inline-block text-[12px] font-bold text-accent-text">
-              查看完整总结和海报 ›
-            </Link>
+            <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <Link to="/recap" className="text-[12px] font-bold text-accent-text">
+                查看完整总结和海报 ›
+              </Link>
+              {following?.active_plan_id ? (
+                <button
+                  type="button"
+                  onClick={() => setBlockPickerOpen(true)}
+                  className="text-[12px] font-bold text-ink underline-offset-2 hover:underline"
+                >
+                  再练一场 ›
+                </button>
+              ) : (
+                <Link
+                  to="/coach"
+                  className="text-[12px] font-bold text-ink underline-offset-2 hover:underline"
+                >
+                  再练一场 · 去教练 ›
+                </Link>
+              )}
+            </div>
           </>
         ) : running && currentGroup && currentSet ? (
           <>

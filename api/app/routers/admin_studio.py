@@ -81,6 +81,16 @@ class AttachDemoIn(BaseModel):
     write_to_library: bool = False
 
 
+class AttachHighlightIn(BaseModel):
+    task_id: int
+    exercise_id: str = Field(min_length=1, max_length=64)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    row_id: str | None = Field(default=None, max_length=64)
+    # 教学视频默认写库（教练卡/详情页读 SKU）；False=只挂草稿行
+    write_to_library: bool = True
+
+
 class DraftIn(BaseModel):
     draft: dict[str, Any]
 
@@ -321,6 +331,23 @@ def attach_demo(
     _: object = Depends(require_admin),
 ):
     return studio_service.attach_demo_now(
+        session,
+        task_id=body.task_id,
+        exercise_id=body.exercise_id,
+        start=body.start,
+        end=body.end,
+        row_id=body.row_id,
+        write_to_library=body.write_to_library,
+    )
+
+
+@router.post("/attach-highlight")
+def attach_highlight(
+    body: AttachHighlightIn,
+    session: Session = Depends(get_session),
+    _: object = Depends(require_admin),
+):
+    return studio_service.attach_highlight_now(
         session,
         task_id=body.task_id,
         exercise_id=body.exercise_id,

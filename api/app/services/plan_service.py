@@ -446,10 +446,12 @@ def get_following_progress(session: Session, day: date | None = None) -> dict[st
                 session.add(profile)
                 session.commit()
             return empty
-        if today_active and not today_done:
+        # 同天先完成再开第 2 练时：有 active 就显示进行中（旧 done 进历史，不挡进度文案）
+        if today_active:
             completed_ids = []
             next_block = only
             progress_label = "今日进行中"
+            week_cycle_done = False
         elif today_done:
             week_cycle_done = True
             completed_ids = [int(only.id)] if only and only.id is not None else []

@@ -342,6 +342,8 @@ class AdoptRequest(BaseModel):
     replace_today: bool = True
     # 今日已完成后再次采纳需显式确认，避免悄悄覆盖已结算场次
     force_replace_done: bool = False
+    # 今日已完成后追加第 2 练：保留 done，新建 active（与 force_replace_done 互斥优先）
+    append_today: bool = False
     # 计划模板溯源（H5 从模板展开采纳时写入）
     plan_template_id: Optional[str] = Field(default=None, max_length=32)
     plan_block_id: Optional[int] = None

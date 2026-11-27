@@ -1,4 +1,4 @@
-"""动作示范切片：静音循环小 MP4 + 抽帧封面 JPG。"""
+"""动作示范 / 教学视频切片：静音循环 demo + 带声 highlight + 抽帧封面 JPG。"""
 
 from __future__ import annotations
 
@@ -70,6 +70,46 @@ def ffmpeg_loop_clip_cmd(
     ]
 
 
+def ffmpeg_highlight_clip_cmd(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    start: float,
+    duration: float,
+) -> list[str]:
+    """带声教学精讲：保留人声，控体积；``-ss`` 仍放在 ``-i`` 后精确裁切。"""
+    bin_path = resolve_ffmpeg() or "ffmpeg"
+    return [
+        bin_path,
+        "-y",
+        "-i",
+        str(input_path),
+        "-ss",
+        f"{float(start):.3f}",
+        "-t",
+        f"{float(duration):.3f}",
+        "-vf",
+        "scale='min(540,iw)':-2",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "28",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "64k",
+        "-ac",
+        "1",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+
+
 def ffmpeg_poster_cmd(
     input_path: str | Path,
     output_path: str | Path,
@@ -117,6 +157,19 @@ def make_loop_clip(
     return out
 
 
+def make_highlight_clip(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    start: float,
+    duration: float,
+) -> Path:
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run(ffmpeg_highlight_clip_cmd(input_path, out, start=start, duration=duration))
+    return out
+
+
 def make_poster_frame(
     input_path: str | Path,
     output_path: str | Path,
@@ -146,5 +199,24 @@ def make_demo_pair(
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
     mp4 = make_loop_clip(input_path, root / f"{stem}_loop.mp4", start=start, duration=duration)
+    jpg = make_poster_frame(mp4, root / f"{stem}_cover.jpg", at_time=0.0)
+    return mp4, jpg
+
+
+def make_highlight_pair(
+    input_path: str | Path,
+    *,
+    start: float,
+    end: float,
+    out_dir: str | Path,
+    stem: str = "highlight",
+) -> tuple[Path, Path]:
+    """一次产出带声教学 MP4 + 封面 JPG（封面取切片第 0 帧）。"""
+    duration = max(0.5, float(end) - float(start))
+    root = Path(out_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    mp4 = make_highlight_clip(
+        input_path, root / f"{stem}_highlight.mp4", start=start, duration=duration
+    )
     jpg = make_poster_frame(mp4, root / f"{stem}_cover.jpg", at_time=0.0)
     return mp4, jpg

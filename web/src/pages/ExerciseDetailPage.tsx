@@ -56,6 +56,7 @@ export function ExerciseDetailPage() {
   const [adding, setAdding] = useState(false);
   const [addMsg, setAddMsg] = useState("");
   const [addErr, setAddErr] = useState("");
+  const [highlightOpen, setHighlightOpen] = useState(false);
   const showAddCta =
     Boolean((location.state as { fromCatalog?: boolean } | null)?.fromCatalog) ||
     new URLSearchParams(location.search).get("from") === "catalog";
@@ -75,7 +76,13 @@ export function ExerciseDetailPage() {
   const demoUrl = slotMap.demo;
   const startUrl = slotMap.start;
   const endUrl = slotMap.end;
-  const canFlip = Boolean(startUrl && endUrl && !demoUrl);
+  const highlightUrl = slotMap.highlight_video;
+  // 顶框：demo 优先 > 起止帧 > 无图时再用教学视频兜底（不与 demo 叠放）
+  const topIsDemo = Boolean(demoUrl && isVideo(demoUrl));
+  const topIsHighlightFallback = Boolean(
+    !demoUrl && !startUrl && !endUrl && highlightUrl && isVideo(highlightUrl),
+  );
+  const canFlip = Boolean(startUrl && endUrl && !demoUrl && !topIsHighlightFallback);
 
   useEffect(() => {
     if (!canFlip) return;
@@ -89,9 +96,15 @@ export function ExerciseDetailPage() {
     setFrame("start");
     setAddMsg("");
     setAddErr("");
+    setHighlightOpen(false);
   }, [id]);
 
-  const mediaUrl = demoUrl || (frame === "end" ? endUrl : startUrl) || startUrl || endUrl;
+  const mediaUrl =
+    demoUrl ||
+    (frame === "end" ? endUrl : startUrl) ||
+    startUrl ||
+    endUrl ||
+    (topIsHighlightFallback ? highlightUrl : null);
   const tags = [
     data?.muscle,
     data?.sub_region,
@@ -119,16 +132,12 @@ export function ExerciseDetailPage() {
         method: "POST",
         body: JSON.stringify({ exercise_id: data.id, sets: 3, reps: "8-12" }),
       });
-      setAddMsg("已加入今日 · 3 组");
+      setAddMsg("已加入今日加练 · 3 组");
       void qc.invalidateQueries({ queryKey: ["training-today"] });
       void qc.invalidateQueries({ queryKey: ["training-sessions"] });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "加入失败";
-      if (msg.includes("409") || msg.includes("已完成")) {
-        setAddErr("今日训练已完成。如需再练，请到教练页重新采纳计划。");
-      } else {
-        setAddErr(msg.replace(/^\d+:\s*/, "") || "加入失败");
-      }
+      setAddErr(msg.replace(/^\d+:\s*/, "") || "加入失败");
     } finally {
       setAdding(false);
     }
@@ -160,7 +169,7 @@ export function ExerciseDetailPage() {
           <div className="mx-4 overflow-hidden rounded-2xl border border-line bg-elevated">
             <div className="relative aspect-square bg-bg">
               {mediaUrl ? (
-                isVideo(mediaUrl) && demoUrl ? (
+                topIsDemo ? (
                   <LoopClip
                     src={mediaUrl}
                     poster={startUrl || endUrl || undefined}
@@ -173,6 +182,7 @@ export function ExerciseDetailPage() {
                     className="h-full w-full object-contain"
                     controls
                     playsInline
+                    preload="metadata"
                   />
                 ) : (
                   <img
@@ -193,9 +203,14 @@ export function ExerciseDetailPage() {
                   {frame === "start" ? "起始" : "结束"}
                 </span>
               ) : null}
-              {demoUrl ? (
+              {topIsDemo ? (
                 <span className="absolute bottom-2 right-2 rounded bg-ink/80 px-1.5 py-0.5 text-[10px] font-bold text-accent">
                   动图
+                </span>
+              ) : null}
+              {topIsHighlightFallback ? (
+                <span className="absolute bottom-2 right-2 rounded bg-ink/80 px-1.5 py-0.5 text-[10px] font-bold text-accent">
+                  教学
                 </span>
               ) : null}
             </div>
@@ -239,6 +254,36 @@ export function ExerciseDetailPage() {
               subRegion={data.sub_region}
             />
           </div>
+
+          {highlightUrl && isVideo(highlightUrl) && !topIsHighlightFallback ? (
+            <section className="mt-5 px-4">
+              <button
+                type="button"
+                className="pressable flex w-full items-center justify-between gap-3 rounded-xl border border-line bg-elevated px-3.5 py-3 text-left"
+                onClick={() => setHighlightOpen((v) => !v)}
+                aria-expanded={highlightOpen}
+              >
+                <span className="text-[13px] font-extrabold text-ink">
+                  ▶ 完整教学讲解视频（有声）
+                </span>
+                <span className="shrink-0 text-[11px] font-bold text-muted">
+                  {highlightOpen ? "收起" : "展开"}
+                </span>
+              </button>
+              {highlightOpen ? (
+                <div className="mt-2 overflow-hidden rounded-xl border border-line bg-bg">
+                  <video
+                    src={highlightUrl}
+                    poster={startUrl || endUrl || undefined}
+                    className="aspect-video w-full object-contain"
+                    controls
+                    playsInline
+                    preload="metadata"
+                  />
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="mt-5 px-4">
             <h2 className="text-[13px] font-extrabold">动作要领</h2>

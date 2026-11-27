@@ -1,26 +1,19 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { MusclePulse } from "../../types";
-
-const MUSCLES = ["胸", "背", "肩", "腿", "臂", "核心"] as const;
-
-type Face = "front" | "back";
+import {
+  BODY_MUSCLES,
+  BodyAnatomySvg,
+  type BodyFace,
+  type BodyMuscle,
+} from "../BodyAnatomySvg";
 
 type Props = {
   pulse: MusclePulse[] | undefined | null;
 };
 
-function intensityClass(count: number, max: number): string {
-  if (count <= 0 || max <= 0) return "fill-[var(--line)] opacity-40";
-  const ratio = count / max;
-  if (ratio >= 0.75) return "fill-[var(--accent)] opacity-95";
-  if (ratio >= 0.45) return "fill-[var(--accent)] opacity-70";
-  if (ratio >= 0.2) return "fill-[var(--accent)] opacity-45";
-  return "fill-[var(--accent)] opacity-25";
-}
-
 export function MuscleHeatmapCard({ pulse }: Props) {
-  const [face, setFace] = useState<Face>("front");
+  const [face, setFace] = useState<BodyFace>("front");
   const [active, setActive] = useState<string | null>(null);
 
   const byMuscle = useMemo(() => {
@@ -32,11 +25,20 @@ export function MuscleHeatmapCard({ pulse }: Props) {
   }, [pulse]);
 
   const maxCount = useMemo(
-    () => Math.max(0, ...MUSCLES.map((m) => byMuscle.get(m)?.count_30d ?? 0)),
+    () => Math.max(0, ...BODY_MUSCLES.map((m) => byMuscle.get(m)?.count_30d ?? 0)),
     [byMuscle],
   );
 
-  const hasHistory = MUSCLES.some((m) => (byMuscle.get(m)?.count_30d ?? 0) > 0);
+  const levels = useMemo(() => {
+    const out: Partial<Record<BodyMuscle, number>> = {};
+    for (const m of BODY_MUSCLES) {
+      const c = byMuscle.get(m)?.count_30d ?? 0;
+      out[m] = maxCount > 0 ? c / maxCount : 0;
+    }
+    return out;
+  }, [byMuscle, maxCount]);
+
+  const hasHistory = BODY_MUSCLES.some((m) => (byMuscle.get(m)?.count_30d ?? 0) > 0);
   const selected = active ? byMuscle.get(active) : null;
 
   if (!hasHistory) {
@@ -78,71 +80,17 @@ export function MuscleHeatmapCard({ pulse }: Props) {
       </div>
 
       <div className="mt-3 flex items-start gap-3">
-        <svg viewBox="0 0 120 200" className="h-[180px] w-[108px] shrink-0" aria-hidden>
-          {/* torso outline */}
-          <ellipse cx="60" cy="22" rx="16" ry="18" className="fill-[var(--elevated)] stroke-[var(--line)]" strokeWidth="1.5" />
-          {/* shoulders */}
-          <path
-            d={face === "front" ? "M28 48 Q60 36 92 48 L86 68 Q60 58 34 68 Z" : "M28 48 Q60 36 92 48 L86 68 Q60 58 34 68 Z"}
-            className={`${intensityClass(byMuscle.get("肩")?.count_30d ?? 0, maxCount)} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive("肩")}
-            role="button"
-          />
-          {/* chest / back */}
-          <path
-            d="M36 66 Q60 58 84 66 L80 108 Q60 118 40 108 Z"
-            className={`${intensityClass(
-              (face === "front" ? byMuscle.get("胸") : byMuscle.get("背"))?.count_30d ?? 0,
-              maxCount,
-            )} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive(face === "front" ? "胸" : "背")}
-            role="button"
-          />
-          {/* core */}
-          <path
-            d="M44 108 Q60 112 76 108 L74 138 Q60 146 46 138 Z"
-            className={`${intensityClass(byMuscle.get("核心")?.count_30d ?? 0, maxCount)} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive("核心")}
-            role="button"
-          />
-          {/* arms */}
-          <path
-            d="M28 52 L18 110 L28 112 L36 68 Z"
-            className={`${intensityClass(byMuscle.get("臂")?.count_30d ?? 0, maxCount)} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive("臂")}
-            role="button"
-          />
-          <path
-            d="M92 52 L102 110 L92 112 L84 68 Z"
-            className={`${intensityClass(byMuscle.get("臂")?.count_30d ?? 0, maxCount)} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive("臂")}
-            role="button"
-          />
-          {/* legs */}
-          <path
-            d="M46 140 L40 190 L54 190 L58 142 Z"
-            className={`${intensityClass(byMuscle.get("腿")?.count_30d ?? 0, maxCount)} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive("腿")}
-            role="button"
-          />
-          <path
-            d="M62 142 L66 190 L80 190 L74 140 Z"
-            className={`${intensityClass(byMuscle.get("腿")?.count_30d ?? 0, maxCount)} stroke-[var(--line)]`}
-            strokeWidth="1"
-            onClick={() => setActive("腿")}
-            role="button"
-          />
-        </svg>
+        <BodyAnatomySvg
+          mode="heatmap"
+          face={face}
+          levels={levels}
+          active={active}
+          onSelect={(m) => setActive(m)}
+        />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap gap-1.5">
-            {MUSCLES.map((m) => {
+            {BODY_MUSCLES.map((m) => {
               const row = byMuscle.get(m);
               const count = row?.count_30d ?? 0;
               const on = active === m;
@@ -171,7 +119,8 @@ export function MuscleHeatmapCard({ pulse }: Props) {
                 近 30 天练了 <span className="num font-bold text-ink">{selected.count_30d}</span> 次
                 {selected.days_since != null ? (
                   <>
-                    {" · "}距上次 <span className="num font-bold text-ink">{selected.days_since}</span> 天
+                    {" · "}距上次 <span className="num font-bold text-ink">{selected.days_since}</span>{" "}
+                    天
                   </>
                 ) : null}
                 {selected.trend ? ` · 趋势 ${selected.trend}` : ""}

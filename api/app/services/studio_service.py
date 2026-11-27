@@ -33,7 +33,7 @@ from app.models import (
     StudioTask,
     utcnow,
 )
-from app.services.media_clip import ffmpeg_available, make_demo_pair
+from app.services.media_clip import ffmpeg_available, make_demo_pair, make_highlight_pair
 from app.services.storage import save_public_asset
 from app.exercise_match import repair_spoken_name, resolve_spoken_match
 from app.taxonomy import canonicalize_exercise
@@ -771,6 +771,121 @@ def attach_demo_now(
         "demo": meta,
         "write_to_library": do_library,
         "synced_text": {"ok": False, "reason": "drawer_only"},
+    }
+
+
+def attach_highlight_now(
+    session: Session,
+    *,
+    task_id: int,
+    exercise_id: str,
+    start: float,
+    end: float,
+    row_id: str | None = None,
+    write_to_library: bool = True,
+) -> dict[str, Any]:
+    """立刻把选区压成带声教学视频 + 封面。
+
+    写入 ``ExerciseMedia(role=highlight_video)``，与 demo 槽互不覆盖。
+    默认写库（教学视频主要服务 AI 教练卡 / 详情页）；计划模式也可只挂草稿行。
+    """
+    task = session.get(StudioTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not session.get(Exercise, exercise_id):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"动作库里没有 ID「{exercise_id}」（可能已删或换号）。"
+                "请在清单重新绑到现有动作后再写入教学视频。"
+            ),
+        )
+    if end <= start:
+        raise HTTPException(status_code=400, detail="选区无效：结束须大于开始")
+    dur = float(end) - float(start)
+    if dur < 5:
+        raise HTTPException(status_code=400, detail="教学视频选区请至少 5 秒")
+    if dur > 180:
+        raise HTTPException(status_code=400, detail="教学视频选区请控制在 180 秒内")
+    if not ffmpeg_available():
+        raise HTTPException(status_code=400, detail="本机没有 ffmpeg，无法切片")
+
+    mode = ""
+    if isinstance(task.draft_json, dict):
+        mode = str(task.draft_json.get("mode") or task.mode or "")
+    else:
+        mode = str(task.mode or "")
+    do_library = bool(write_to_library) or mode == "exercise_only"
+
+    target_row = str(row_id or "").strip()
+    stem = target_row or str(exercise_id)
+    if do_library:
+        meta = _attach_highlight_media(session, task, exercise_id, float(start), float(end))
+        try:
+            from app.exercises_catalog import reload_all
+
+            reload_all()
+        except Exception:
+            pass
+    else:
+        meta = _render_plan_highlight_clip(task, float(start), float(end), stem=stem)
+    if not meta:
+        raise HTTPException(status_code=400, detail="切片失败：本地视频不存在或 ffmpeg 出错")
+
+    draft = dict(task.draft_json or {}) if isinstance(task.draft_json, dict) else {}
+    blocks = list(draft.get("blocks") or [])
+    changed = False
+
+    def _write_row(ex: dict[str, Any]) -> None:
+        nonlocal changed
+        snip = dict(ex.get("snippet") or {})
+        # 教学选区单独记，不冲掉示范 snippet（若已有）
+        ex["highlight_snippet"] = {"start": float(start), "end": float(end)}
+        # 若该行还没示范选区，同步一份便于波形定位
+        if snip.get("start") is None or snip.get("end") is None:
+            snip["start"] = float(start)
+            snip["end"] = float(end)
+            ex["snippet"] = snip
+        ex["exercise_id"] = str(exercise_id)
+        ex["attach_highlight"] = True
+        ex["write_highlight_library"] = bool(do_library)
+        ex["highlight_url"] = meta.get("highlight_url")
+        ex["highlight_cover_url"] = meta.get("cover_url")
+        changed = True
+
+    if target_row:
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            for ex in block.get("exercises") or []:
+                if not isinstance(ex, dict):
+                    continue
+                if str(ex.get("id") or "") != target_row:
+                    continue
+                _write_row(ex)
+                break
+    if not changed:
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            for ex in block.get("exercises") or []:
+                if not isinstance(ex, dict):
+                    continue
+                if str(ex.get("exercise_id") or "") != str(exercise_id):
+                    continue
+                _write_row(ex)
+    if changed:
+        draft["blocks"] = blocks
+        task.draft_json = draft
+        task.updated_at = utcnow()
+        session.add(task)
+    session.commit()
+    return {
+        "ok": True,
+        "exercise_id": exercise_id,
+        "row_id": target_row or None,
+        "highlight": meta,
+        "write_to_library": do_library,
     }
 
 
@@ -2852,6 +2967,77 @@ def _render_plan_demo_clip(
         jpg.read_bytes(), f"studio/{task_id}/plan_demos/{safe}_{token}.jpg", "image/jpeg"
     )
     return {"demo_url": demo_url, "cover_url": cover_url}
+
+
+def _render_plan_highlight_clip(
+    task: StudioTask, start: float, end: float, *, stem: str
+) -> dict[str, Any] | None:
+    """只切片存带声教学视频，不写动作库。"""
+    video = _abs_video(task)
+    if not video or not video.exists() or not ffmpeg_available():
+        return None
+    task_id = int(task.id or 0)
+    safe = re.sub(r"[^\w\-]+", "_", stem)[:40] or "row"
+    tmp = _task_dir(task_id) / f"plan_highlight_{safe}"
+    mp4, jpg = make_highlight_pair(video, start=start, end=end, out_dir=tmp, stem=safe)
+    token = uuid.uuid4().hex[:10]
+    highlight_url = save_public_asset(
+        mp4.read_bytes(), f"studio/{task_id}/plan_highlights/{safe}_{token}.mp4", "video/mp4"
+    )
+    cover_url = save_public_asset(
+        jpg.read_bytes(),
+        f"studio/{task_id}/plan_highlights/{safe}_{token}.jpg",
+        "image/jpeg",
+    )
+    return {"highlight_url": highlight_url, "cover_url": cover_url}
+
+
+def _attach_highlight_media(
+    session: Session, task: StudioTask, exercise_id: str, start: float, end: float
+) -> dict[str, Any] | None:
+    """切片并写入动作库 highlight_video（归档旧 published；不动 demo）。"""
+    video = _abs_video(task)
+    if not video or not video.exists() or not ffmpeg_available():
+        return None
+    tmp = _task_dir(task.id or 0) / f"highlight_{exercise_id}"
+    mp4, jpg = make_highlight_pair(
+        video, start=start, end=end, out_dir=tmp, stem=exercise_id
+    )
+    token = uuid.uuid4().hex[:10]
+    highlight_url = save_public_asset(
+        mp4.read_bytes(),
+        f"exercises/custom/{exercise_id}/highlight_{token}.mp4",
+        "video/mp4",
+    )
+    cover_url = save_public_asset(
+        jpg.read_bytes(),
+        f"exercises/custom/{exercise_id}/highlight_cover_{token}.jpg",
+        "image/jpeg",
+    )
+
+    old = session.exec(
+        select(ExerciseMedia).where(
+            ExerciseMedia.exercise_id == exercise_id,
+            ExerciseMedia.role == "highlight_video",
+            ExerciseMedia.status == "published",
+        )
+    ).all()
+    for row in old:
+        row.status = "archived"
+        session.add(row)
+
+    session.add(
+        ExerciseMedia(
+            exercise_id=exercise_id,
+            role="highlight_video",
+            url=highlight_url,
+            status="published",
+            source="video_studio",
+            meta={"mime": "video/mp4", "start": start, "end": end, "has_audio": True},
+        )
+    )
+    session.commit()
+    return {"highlight_url": highlight_url, "cover_url": cover_url}
 
 
 def _attach_demo_media(
