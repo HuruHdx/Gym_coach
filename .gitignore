@@ -13,6 +13,7 @@ _tri/
 api/scripts/_probe_*.py
 web/node_modules/
 web/dist/
+web/.tmp-build/
 web/tsconfig.tsbuildinfo
 **/__pycache__/
 **/.pytest_cache/
